@@ -105,7 +105,7 @@ describe("Bridge Lifecycle", () => {
 				throw new Error("bridge did not start");
 			}
 
-			const ws = new WebSocket(`ws://${state.host}:${state.port}/ws`);
+			const ws = new WebSocket(`ws://${state.host}:${state.port}/ws?token=${controller.getToken()}`);
 			await new Promise<void>((resolve, reject) => {
 				ws.once("open", () => resolve());
 				ws.once("error", reject);

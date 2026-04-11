@@ -36,6 +36,7 @@ export class BridgeServer {
 	private context: WsRpcAdapterContext;
 	private eventBus: BridgeEventBus;
 	private emitEvent: (event: BridgeEvent) => void;
+	private readonly token: string;
 
 	private httpServer: http.Server | undefined;
 	private wsServer: WebSocketServer | undefined;
@@ -49,12 +50,14 @@ export class BridgeServer {
 		config: BridgeConfig,
 		context: WsRpcAdapterContext,
 		eventBus: BridgeEventBus,
-		emitEvent: (event: BridgeEvent) => void
+		emitEvent: (event: BridgeEvent) => void,
+		token: string
 	) {
 		this.config = config;
 		this.context = context;
 		this.eventBus = eventBus;
 		this.emitEvent = emitEvent;
+		this.token = token;
 	}
 
 	/**
@@ -139,6 +142,15 @@ export class BridgeServer {
 				this.wsServer = new WebSocketServer({
 					server,
 					path: "/ws",
+					verifyClient: (info, callback) => {
+						const url = new URL(info.req.url || "/", `http://${info.req.headers.host}`);
+						const clientToken = url.searchParams.get("token");
+						if (clientToken === this.token) {
+							callback(true);
+						} else {
+							callback(false, 401, "Unauthorized: invalid or missing token");
+						}
+					},
 				});
 				this.wsServer.on("connection", (ws, req) => {
 					this.handleWsConnection(ws, req);
@@ -236,6 +248,22 @@ export class BridgeServer {
 
 		// Parse URL
 		const url = new URL(req.url || "/", `http://${req.headers.host}`);
+
+		// Token authentication: check query param first, then cookie
+		const queryToken = url.searchParams.get("token");
+		if (queryToken === this.token) {
+			// Valid token via query param — set cookie and strip token from URL for downstream
+			res.setHeader("Set-Cookie", `pi_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`);
+		} else {
+			// Check cookie
+			const cookies = parseCookies(req.headers.cookie);
+			if (cookies.pi_token !== this.token) {
+				res.writeHead(401, { "Content-Type": "text/plain" });
+				res.end("Unauthorized");
+				return;
+			}
+		}
+
 		let pathname = url.pathname;
 
 		// Default to index.html
@@ -391,6 +419,22 @@ const MIME_TYPES: Record<string, string> = {
 	".otf": "font/otf",
 	".eot": "application/vnd.ms-fontobject",
 };
+
+/**
+ * Parse a Cookie header string into a key-value map.
+ */
+function parseCookies(header: string | undefined): Record<string, string> {
+	const cookies: Record<string, string> = {};
+	if (!header) return cookies;
+	for (const part of header.split(";")) {
+		const trimmed = part.trim();
+		const eqIdx = trimmed.indexOf("=");
+		if (eqIdx > 0) {
+			cookies[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+		}
+	}
+	return cookies;
+}
 
 /**
  * Get placeholder HTML when no static bundle exists

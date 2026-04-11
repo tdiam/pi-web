@@ -7,6 +7,7 @@
  * - stop() that closes everything and invokes done() callback
  */
 
+import * as crypto from "node:crypto";
 import type { BridgeConfig, BridgeEvent, BridgeState, WsClient } from "./types.js";
 import { BridgeEventBus } from "./bridge-event-bus.js";
 import { BridgeServer } from "./server.js";
@@ -25,6 +26,8 @@ export interface BridgeController {
 	getState(): BridgeState;
 	/** Get the bridge URL for display */
 	getBridgeUrl(): string | undefined;
+	/** Get the ephemeral authentication token */
+	getToken(): string;
 	/** Get list of connected clients */
 	getClients(): WsClient[];
 	/** Stop the bridge gracefully */
@@ -66,8 +69,11 @@ export async function startBridge(
 		eventBus.emit(event);
 	};
 
+	// Generate ephemeral authentication token
+	const token = crypto.randomBytes(16).toString("hex");
+
 	// Create server
-	const server = new BridgeServer(config, context, eventBus, emitEvent);
+	const server = new BridgeServer(config, context, eventBus, emitEvent, token);
 
 	// State tracking
 	let state: BridgeState = { status: "starting", port: config.port };
@@ -144,6 +150,10 @@ export async function startBridge(
 				return `http://${state.host}:${state.port}`;
 			}
 			return undefined;
+		},
+
+		getToken() {
+			return token;
 		},
 
 		getClients() {
