@@ -665,6 +665,80 @@ export class WsRpcAdapter {
 				};
 			}
 
+		// =================================================================
+			// Discovery (session list + tree entries for sidebar rails)
+			// =================================================================
+
+			case "list_sessions": {
+				try {
+					const sessions = [
+						{
+							id: ctx.sessionManager.sessionId,
+							name: pi.getSessionName() ?? ctx.sessionManager.sessionName ?? "Untitled",
+							path: ctx.sessionManager.sessionFile ?? "",
+						},
+					];
+					return {
+						id: correlationId,
+						type: "response" as const,
+						command: "list_sessions" as const,
+						success: true as const,
+						data: { sessions },
+					};
+				} catch {
+					return {
+						id: correlationId,
+						type: "response" as const,
+						command: "list_sessions" as const,
+						success: true as const,
+						data: { sessions: [] as Array<{ id: string; name: string; path: string }> },
+					};
+				}
+			}
+
+			case "list_tree_entries": {
+				try {
+					const branch = ctx.sessionManager.getBranch();
+					const entries = Array.isArray(branch)
+						? branch
+								.filter((e: unknown) => {
+									const entry = e as { id?: string; role?: string; type?: string };
+									return entry.id !== undefined;
+								})
+								.map((e: unknown) => {
+									const entry = e as {
+										id: string;
+										label?: string;
+										role?: string;
+										type?: string;
+										timestamp?: string;
+									};
+									return {
+										id: entry.id,
+										label: entry.label ?? entry.role ?? entry.type ?? "entry",
+										type: entry.type ?? entry.role ?? "unknown",
+										timestamp: entry.timestamp,
+									};
+								})
+						: [];
+					return {
+						id: correlationId,
+						type: "response" as const,
+						command: "list_tree_entries" as const,
+						success: true as const,
+						data: { entries },
+					};
+				} catch {
+					return {
+						id: correlationId,
+						type: "response" as const,
+						command: "list_tree_entries" as const,
+						success: true as const,
+						data: { entries: [] as Array<{ id: string; label?: string; type: string; timestamp?: string }> },
+					};
+				}
+			}
+
 			default: {
 				const unknownCommand = command as { type: string };
 				return {

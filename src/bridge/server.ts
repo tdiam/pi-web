@@ -337,8 +337,16 @@ export class BridgeServer {
 
 		this.adapters.set(client.id, adapter);
 
+		// Register client with EventBus for event fan-out
+		const unregister = this.eventBus.registerClient(client, (data) => {
+			if (ws.readyState === 1) { // WebSocket.OPEN
+				ws.send(data);
+			}
+		});
+
 		// Clean up on close
 		ws.on("close", () => {
+			unregister();
 			this.adapters.delete(client.id);
 			this.emitEvent({
 				type: "client_disconnect",

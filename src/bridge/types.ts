@@ -56,7 +56,10 @@ export type RpcCommand =
 	| { id?: string; type: "set_session_name"; name: string }
 	// Messages / Commands
 	| { id?: string; type: "get_messages" }
-	| { id?: string; type: "get_commands" };
+	| { id?: string; type: "get_commands" }
+	// Discovery
+	| { id?: string; type: "list_sessions" }
+	| { id?: string; type: "list_tree_entries" };
 
 /** Helper type to extract the `type` discriminant. */
 export type RpcCommandType = RpcCommand["type"];
@@ -124,6 +127,9 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "navigate_tree"; success: true; data: { cancelled: boolean } }
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: unknown[] } }
 	| { id?: string; type: "response"; command: "get_commands"; success: true; data: { commands: RpcSlashCommand[] } }
+	// Discovery responses
+	| { id?: string; type: "response"; command: "list_sessions"; success: true; data: { sessions: Array<{ id: string; name: string; path: string }> } }
+	| { id?: string; type: "response"; command: "list_tree_entries"; success: true; data: { entries: Array<{ id: string; label?: string; type: string; timestamp?: string }> } }
 	// Error — any command can fail
 	| { id?: string; type: "response"; command: string; success: false; error: string };
 

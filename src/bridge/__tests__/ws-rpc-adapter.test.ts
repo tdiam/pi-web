@@ -481,6 +481,168 @@ describe("WsRpcAdapter", () => {
 		});
 	});
 
+	describe("discovery commands", () => {
+		it("should handle list_sessions command", async () => {
+			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.type).toBe("response");
+			expect(response.payload.command).toBe("list_sessions");
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.sessions).toHaveLength(1);
+			expect(response.payload.data.sessions[0]).toEqual({
+				id: "session-123",
+				name: "test-session",
+				path: "/path/to/session.json",
+			});
+		});
+
+		it("should handle list_sessions when sessionName is undefined", async () => {
+			(context.pi.getSessionName as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+			(context.ctx.sessionManager as { sessionName: string | undefined }).sessionName = undefined;
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.sessions[0].name).toBe("Untitled");
+		});
+
+		it("should handle list_tree_entries command", async () => {
+			(context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>).mockReturnValue([
+				{ id: "entry-1", role: "user", type: "message", timestamp: "2025-01-01T00:00:00Z" },
+				{ id: "entry-2", role: "assistant", type: "message", timestamp: "2025-01-01T00:01:00Z" },
+			]);
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.type).toBe("response");
+			expect(response.payload.command).toBe("list_tree_entries");
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries).toHaveLength(2);
+			expect(response.payload.data.entries[0]).toEqual({
+				id: "entry-1",
+				label: "user",
+				type: "message",
+				timestamp: "2025-01-01T00:00:00Z",
+			});
+		});
+
+		it("should handle list_tree_entries with empty branch", async () => {
+			(context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries).toHaveLength(0);
+		});
+
+		it("should filter entries without id in list_tree_entries", async () => {
+			(context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>).mockReturnValue([
+				{ id: "entry-1", role: "user" },
+				{ role: "orphan", type: "message" }, // no id
+			]);
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries).toHaveLength(1);
+			expect(response.payload.data.entries[0].id).toBe("entry-1");
+		});
+
+		it("should return empty sessions when sessionManager throws", async () => {
+			(context.ctx.sessionManager as unknown as { sessionId: string }).sessionId = undefined as unknown as string;
+			Object.defineProperty(context.ctx.sessionManager, 'sessionId', {
+				get() { throw new Error("Session not available"); },
+				configurable: true,
+			});
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.sessions).toEqual([]);
+		});
+
+		it("should return empty entries when getBranch throws", async () => {
+			(context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>).mockImplementation(() => {
+				throw new Error("Branch error");
+			});
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries).toEqual([]);
+		});
+	});
+
 	describe("disposal", () => {
 		it("should resolve pending UI requests on dispose", async () => {
 			const uiContext = adapter.createExtensionUIContext();
