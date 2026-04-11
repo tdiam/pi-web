@@ -11,6 +11,7 @@ import * as http from "node:http";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
+import { getLanIps } from "./network.js";
 import type { BridgeConfig, BridgeEvent, WsClient } from "./types.js";
 import { BridgeEventBus } from "./bridge-event-bus.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "./ws-rpc-adapter.js";
@@ -65,21 +66,6 @@ export class BridgeServer {
 			throw new Error("Server is already running");
 		}
 
-		// Create HTTP server
-		this.httpServer = http.createServer((req, res) => {
-			this.handleHttpRequest(req, res);
-		});
-
-		// Create WebSocket server attached to HTTP server
-		this.wsServer = new WebSocketServer({
-			server: this.httpServer,
-			path: "/ws",
-		});
-
-		this.wsServer.on("connection", (ws, req) => {
-			this.handleWsConnection(ws, req);
-		});
-
 		// Try to bind to port with fallback
 		const startPort = this.config.port || 0;
 		const maxPort = this.config.portMax || startPort;
@@ -122,30 +108,47 @@ export class BridgeServer {
 	}
 
 	/**
-	 * Bind HTTP server to a specific port
+	 * Bind HTTP server to a specific port.
+	 * Creates a fresh HTTP server each time (Node.js doesn't reliably
+	 * support re-listening after a bind failure). The WebSocketServer
+	 * is only attached after the bind succeeds to avoid interference
+	 * with error handling.
 	 */
 	private bindToPort(port: number): Promise<void> {
+		// Discard any previous server (let GC handle it)
+		this.httpServer = undefined;
+		this.wsServer = undefined;
+
+		this.httpServer = http.createServer((req, res) => {
+			this.handleHttpRequest(req, res);
+		});
+
 		return new Promise((resolve, reject) => {
-			if (!this.httpServer) {
-				reject(new Error("HTTP server not created"));
-				return;
-			}
+			const server = this.httpServer!;
 
 			const onError = (err: Error) => {
-				this.httpServer?.off("error", onError);
-				this.httpServer?.off("listening", onListening);
+				server.off("error", onError);
+				server.off("listening", onListening);
 				reject(err);
 			};
 
 			const onListening = () => {
-				this.httpServer?.off("error", onError);
-				this.httpServer?.off("listening", onListening);
+				server.off("error", onError);
+				server.off("listening", onListening);
+				// Create WebSocket server only after HTTP server is listening
+				this.wsServer = new WebSocketServer({
+					server,
+					path: "/ws",
+				});
+				this.wsServer.on("connection", (ws, req) => {
+					this.handleWsConnection(ws, req);
+				});
 				resolve();
 			};
 
-			this.httpServer.once("error", onError);
-			this.httpServer.once("listening", onListening);
-			this.httpServer.listen(port, this.config.host);
+			server.once("error", onError);
+			server.once("listening", onListening);
+			server.listen(port, this.config.host);
 		});
 	}
 
@@ -393,6 +396,11 @@ const MIME_TYPES: Record<string, string> = {
  * Get placeholder HTML when no static bundle exists
  */
 function getPlaceholderHtml(host: string, port: number): string {
+	const lanIps = getLanIps();
+	const lanUrlLines = lanIps.length > 0
+		? lanIps.map(ip => `<span class="code">ws://${ip}:${port}/ws</span>`).join("<br>\n\t\t\t")
+		: "";
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -415,6 +423,7 @@ function getPlaceholderHtml(host: string, port: number): string {
 		}
 		h1 { margin-top: 0; color: #2563eb; }
 		.info { background: #e0f2fe; padding: 15px; border-radius: 6px; margin: 20px 0; }
+		.lan-info { background: #ecfdf5; padding: 15px; border-radius: 6px; margin: 20px 0; }
 		.code { font-family: 'Monaco', 'Menlo', monospace; background: #1e293b; color: #e2e8f0; padding: 2px 6px; border-radius: 3px; }
 		.status { display: flex; align-items: center; gap: 10px; margin: 15px 0; }
 		.status-dot { width: 10px; height: 10px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite; }
@@ -428,8 +437,12 @@ function getPlaceholderHtml(host: string, port: number): string {
 		
 		<div class="info">
 			<strong>Bridge Address:</strong><br>
-			<span class="code">ws://${host}:${port}/ws</span>
+			<span class="code">ws://localhost:${port}/ws</span>
 		</div>
+		${lanIps.length > 0 ? `<div class="lan-info">
+			<strong>📡 LAN Addresses (use on other devices):</strong><br>
+			${lanUrlLines}
+		</div>` : ""}
 		
 		<div class="status">
 			<div class="status-dot"></div>

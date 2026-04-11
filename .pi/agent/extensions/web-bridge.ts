@@ -129,6 +129,8 @@ export default async function webBridgeCommand(ctx: ExtensionContext): Promise<v
 	const staticDir = webDistDir && existsSync(webDistDir) ? webDistDir : undefined;
 
 	// Bridge configuration (could be extended to read from config file)
+	// Note: DEFAULT_BRIDGE_CONFIG.host is "0.0.0.0" so the bridge is reachable from LAN.
+	// Set PI_BRIDGE_HOST=localhost to restrict to local-only access.
 	const config: BridgeConfig = {
 		...DEFAULT_BRIDGE_CONFIG,
 		// Allow environment variable override for port

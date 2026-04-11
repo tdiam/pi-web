@@ -177,7 +177,7 @@ export interface BridgeConfig {
 
 /** Sensible defaults for bridge configuration. */
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
-	host: "localhost",
+	host: "0.0.0.0",
 	port: 0,
 	portMax: 0,
 	uiRequestTimeout: 60_000,

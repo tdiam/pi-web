@@ -7,6 +7,7 @@
  */
 
 import type { BridgeConfig, BridgeEvent, BridgeState, WsClient } from "./types.js";
+import { getLanIps } from "./network.js";
 
 /**
  * Log entry with timestamp
@@ -309,9 +310,12 @@ export function createBridgeTerminalView(
 	// Subscribe to bridge events
 	const unsubscribe = subscribe((event) => {
 		switch (event.type) {
-			case "server_start":
-				addLog(`Server started on ${event.host}:${event.port}`, "info");
+			case "server_start": {
+				const lanIps = getLanIps();
+				const lanInfo = lanIps.length > 0 ? ` (LAN: ${lanIps.map(ip => `http://${ip}:${event.port}`).join(", ")})` : "";
+				addLog(`Server started on ${event.host}:${event.port}${lanInfo}`, "info");
 				break;
+			}
 			case "server_stop":
 				addLog("Server stopped", "info");
 				break;
@@ -387,8 +391,13 @@ export function createBridgeTerminalView(
 			// Status line
 			const statusIndicator = getStatusIndicator(state.status);
 			if (state.status === "running") {
-				lines.push(`${statusIndicator} Bridge: http://${state.host}:${state.port}`);
-				lines.push(`  WebSocket: ws://${state.host}:${state.port}/ws`);
+				lines.push(`${statusIndicator} Bridge: http://localhost:${state.port}`);
+				// Show LAN IPs for mobile/remote access
+				const lanIps = getLanIps();
+				for (const ip of lanIps) {
+					lines.push(`  📡 LAN: http://${ip}:${state.port}`);
+				}
+				lines.push(`  WebSocket: ws://localhost:${state.port}/ws`);
 			} else if (state.status === "starting") {
 				lines.push(`${statusIndicator} Starting on port ${state.port}...`);
 			} else if (state.status === "stopping") {

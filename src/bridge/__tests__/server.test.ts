@@ -97,7 +97,7 @@ describe("BridgeServer", () => {
 
 			expect(server.getIsRunning()).toBe(true);
 			expect(address.port).toBeGreaterThan(0);
-			expect(events).toContainEqual({ type: "server_start", host: "localhost", port: address.port });
+			expect(events).toContainEqual({ type: "server_start", host: "0.0.0.0", port: address.port });
 
 			await server.stop();
 		});
@@ -158,7 +158,7 @@ describe("BridgeServer", () => {
 				res.writeHead(200);
 				res.end("occupied");
 			});
-			await new Promise<void>((resolve) => occupiedServer.listen(0, "localhost", () => resolve()));
+			await new Promise<void>((resolve) => occupiedServer.listen(0, "127.0.0.1", () => resolve()));
 
 			const address = occupiedServer.address();
 			if (!address || typeof address === "string") {
@@ -167,7 +167,7 @@ describe("BridgeServer", () => {
 
 			const preferredPort = address.port;
 			const server = new BridgeServer(
-				{ ...DEFAULT_BRIDGE_CONFIG, port: preferredPort, portMax: preferredPort + 3 },
+				{ ...DEFAULT_BRIDGE_CONFIG, host: "127.0.0.1", port: preferredPort, portMax: preferredPort + 3 },
 				mockContext,
 				eventBus,
 				(event) => events.push(event)
@@ -199,7 +199,7 @@ describe("BridgeServer", () => {
 
 			const address = await server.start();
 			expect(address.port).toBeGreaterThan(0);
-			expect(server.getAddress()).toEqual({ host: "localhost", port: address.port });
+			expect(server.getAddress()).toEqual({ host: "0.0.0.0", port: address.port });
 
 			await server.stop();
 		});
@@ -218,7 +218,7 @@ describe("BridgeServer", () => {
 			const response = await requestText(`http://localhost:${address.port}/`);
 			expect(response.status).toBe(200);
 			expect(response.body).toContain("Pi Web Bridge");
-			expect(response.body).toContain(`ws://${address.host}:${address.port}/ws`);
+			expect(response.body).toContain(`ws://localhost:${address.port}/ws`);
 
 			await server.stop();
 		});

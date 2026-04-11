@@ -26,6 +26,13 @@ const {
 } = useBridgeClient();
 
 const activeSessionId = computed(() => sessionState.value?.sessionId ?? null);
+const networkUrl = computed(() => {
+	if (typeof window === "undefined") return "";
+	const h = window.location.host;
+	// Hide if it's just localhost — only show for LAN IPs
+	if (h.startsWith("localhost") || h.startsWith("127.")) return "";
+	return h;
+});
 const sidebarOpen = ref(false);
 
 // CompatWarning flag — set to true when a custom-ui command is invoked.
@@ -77,6 +84,7 @@ watch(notifications, (current) => {
 				<span></span><span></span><span></span>
 			</button>
 			<h1 class="app-title">Pi</h1>
+			<span class="network-url">{{ networkUrl }}</span>
 			<span
 				class="connection-badge"
 				:class="connectionStatus"
@@ -204,6 +212,17 @@ watch(notifications, (current) => {
 	color: #60a5fa;
 	font-weight: 700;
 	letter-spacing: -0.02em;
+}
+
+.network-url {
+	font-size: 0.65rem;
+	color: #6b7280;
+	background: #1a1a2e;
+	padding: 2px 8px;
+	border-radius: 4px;
+	border: 1px solid #2d2d44;
+	font-family: 'Monaco', 'Menlo', monospace;
+	white-space: nowrap;
 }
 
 .connection-badge {
