@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import ChatTranscript from "./components/ChatTranscript.vue";
 import SessionRail from "./components/SessionRail.vue";
@@ -7,6 +7,7 @@ import TreeRail from "./components/TreeRail.vue";
 import ComposerBar from "./components/ComposerBar.vue";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
 import CompatWarning from "./components/CompatWarning.vue";
+import ReconnectBanner from "./components/ReconnectBanner.vue";
 
 const {
 	connectionStatus,
@@ -16,6 +17,9 @@ const {
 	treeEntries,
 	commands,
 	isStreaming,
+	isReconnecting,
+	reconnectCount,
+	lastDisconnectReason,
 	sendPrompt,
 	sendCommand,
 	pendingExtensionRequest,
@@ -34,6 +38,14 @@ const networkUrl = computed(() => {
 	return h;
 });
 const sidebarOpen = ref(false);
+const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
+
+// Preserve scroll position when disconnecting
+watch(connectionStatus, (status) => {
+	if (status === "disconnected" && chatTranscriptRef.value) {
+		chatTranscriptRef.value.preserveScroll();
+	}
+});
 
 // CompatWarning flag — set to true when a custom-ui command is invoked.
 // Initially empty list; the infrastructure exists but doesn't trigger until
@@ -61,7 +73,6 @@ function handleDismissNotification(id: string) {
 }
 
 // Auto-dismiss notifications after 5 seconds
-import { watch } from "vue";
 watch(notifications, (current) => {
 	for (const n of current) {
 		if (!(n as Record<string, unknown>)._timerSet) {
@@ -95,6 +106,13 @@ watch(notifications, (current) => {
 			</span>
 		</header>
 
+		<!-- Reconnect banner -->
+		<ReconnectBanner
+			:visible="isReconnecting"
+			:reason="lastDisconnectReason"
+			:reconnect-count="reconnectCount"
+		/>
+
 		<!-- Body: CSS Grid layout -->
 		<div class="app-body">
 			<!-- Left rail column -->
@@ -127,7 +145,7 @@ watch(notifications, (current) => {
 					</span>
 				</div>
 
-				<ChatTranscript :messages="transcript" :is-streaming="isStreaming" />
+				<ChatTranscript ref="chatTranscriptRef" :messages="transcript" :is-streaming="isStreaming" />
 				<ComposerBar
 					:connection-status="connectionStatus"
 					:commands="commands"
@@ -169,6 +187,7 @@ watch(notifications, (current) => {
 	display: flex;
 	flex-direction: column;
 	height: 100vh;
+	height: 100dvh;
 	width: 100vw;
 	overflow: hidden;
 	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -192,7 +211,7 @@ watch(notifications, (current) => {
 	display: none;
 	flex-direction: column;
 	gap: 3px;
-	padding: 6px;
+	padding: 12px;
 	background: none;
 	border: none;
 	cursor: pointer;
@@ -389,6 +408,10 @@ watch(notifications, (current) => {
 		display: flex;
 	}
 
+	.app-header {
+		padding-bottom: max(10px, env(safe-area-inset-top));
+	}
+
 	.app-body {
 		grid-template-columns: 1fr;
 		position: relative;
@@ -429,6 +452,7 @@ watch(notifications, (current) => {
 
 	.center-column {
 		grid-column: 1;
+		padding-bottom: env(safe-area-inset-bottom);
 	}
 }
 </style>

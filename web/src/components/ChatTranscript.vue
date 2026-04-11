@@ -9,6 +9,26 @@ const props = defineProps<{
 
 const container = ref<HTMLDivElement | null>(null);
 
+// Scroll preservation for reconnect scenarios
+let wasDisconnected = false;
+let savedScrollTop = 0;
+let savedScrollHeight = 0;
+
+function preserveScroll() {
+	if (!container.value) return;
+	savedScrollTop = container.value.scrollTop;
+	savedScrollHeight = container.value.scrollHeight;
+	wasDisconnected = true;
+}
+
+function restoreScroll() {
+	if (!container.value || !wasDisconnected) return;
+	// Restore position relative to old height
+	const delta = container.value.scrollHeight - savedScrollHeight;
+	container.value.scrollTop = savedScrollTop + delta;
+	wasDisconnected = false;
+}
+
 function roleClass(role: string): "user" | "assistant" | "system" {
 	if (role === "user") return "user";
 	if (role === "assistant") return "assistant";
@@ -33,14 +53,22 @@ function messageContent(msg: TranscriptEntry): string {
 	return "";
 }
 
-// Auto-scroll to bottom on new messages
+// Watch for reconnection-driven transcript repopulation.
+// When messages arrive after a disconnect, restore scroll after nextTick.
 watch(
 	() => props.messages.length,
 	async () => {
-		await nextTick();
-		if (container.value) {
-			container.value.scrollTop = container.value.scrollHeight;
+		if (!wasDisconnected) {
+			// Normal scroll-to-bottom on new messages
+			await nextTick();
+			if (container.value) {
+				container.value.scrollTop = container.value.scrollHeight;
+			}
+			return;
 		}
+		// Reconnect repopulation — restore position
+		await nextTick();
+		restoreScroll();
 	}
 );
 
@@ -56,6 +84,9 @@ watch(
 		}
 	}
 );
+
+// Expose preserveScroll so parent (App.vue) can call it before reconnect
+defineExpose({ preserveScroll });
 </script>
 
 <template>

@@ -123,6 +123,7 @@ function handleInputKeydown(e: KeyboardEvent) {
 .composer-bar {
 	flex-shrink: 0;
 	padding: 12px 16px;
+	padding-bottom: max(12px, env(safe-area-inset-bottom));
 	border-top: 1px solid #2d2d44;
 	background: #12122a;
 }
@@ -200,5 +201,24 @@ function handleInputKeydown(e: KeyboardEvent) {
 	font-size: 0.7rem;
 	color: #ef4444;
 	text-align: center;
+}
+
+@media (max-width: 900px) {
+	.composer-bar {
+		position: sticky;
+		bottom: 0;
+		z-index: 10;
+	}
+
+	.send-btn {
+		padding: 12px 20px;
+		min-height: 44px;
+	}
+
+	.prompt-input {
+		padding: 12px 14px;
+		min-height: 44px;
+		font-size: 16px; /* Prevents iOS zoom on focus */
+	}
 }
 </style>

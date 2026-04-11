@@ -1,4 +1,4 @@
-import { ref, readonly, onUnmounted } from "vue";
+import { ref, readonly, computed, onUnmounted } from "vue";
 import type {
 	RpcCommand,
 	RpcResponse,
@@ -50,6 +50,10 @@ const sessions = ref<SessionEntry[]>([]);
 const treeEntries = ref<TreeEntry[]>([]);
 const commands = ref<RpcSlashCommand[]>([]);
 const isStreaming = ref(false);
+
+// Reconnect diagnostics
+const reconnectCount = ref(0);
+const lastDisconnectReason = ref("");
 
 // ---------------------------------------------------------------------------
 // Extension UI state
@@ -348,12 +352,17 @@ function connect() {
 
 	ws.addEventListener("open", () => {
 		connectionStatus.value = "connected";
+		lastDisconnectReason.value = "";
 		resetReconnectDelay();
 		fetchInitialState();
 	});
 
-	ws.addEventListener("close", () => {
+	ws.addEventListener("close", (event?: CloseEvent) => {
 		connectionStatus.value = "disconnected";
+		reconnectCount.value++;
+		lastDisconnectReason.value = event?.reason
+			? `Connection lost: ${event.reason}`
+			: "Connection lost";
 		// Clear extension UI state
 		pendingExtensionRequest.value = null;
 		notifications.value = [];
@@ -400,6 +409,10 @@ export function useBridgeClient() {
 		connect();
 	}
 
+	const isReconnecting = computed(
+		() => connectionStatus.value === "disconnected" && !disposed,
+	);
+
 	return {
 		connectionStatus: readonly(connectionStatus),
 		transcript: readonly(transcript),
@@ -408,6 +421,10 @@ export function useBridgeClient() {
 		treeEntries: readonly(treeEntries),
 		commands: readonly(commands),
 		isStreaming: readonly(isStreaming),
+		// Reconnect diagnostics
+		isReconnecting,
+		reconnectCount: readonly(reconnectCount),
+		lastDisconnectReason: readonly(lastDisconnectReason),
 		// Extension UI
 		pendingExtensionRequest: readonly(pendingExtensionRequest),
 		notifications: readonly(notifications),
