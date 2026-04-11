@@ -112,12 +112,29 @@ export default async function webBridgeCommand(ctx: ExtensionContext): Promise<v
 		},
 	};
 
+	// Resolve web-dist directory for static bundle serving
+	const webDistDir = (() => {
+		try {
+			const { fileURLToPath } = await import("node:url");
+			const { dirname, join } = await import("node:path");
+			const thisFile = fileURLToPath(import.meta.url);
+			const projectRoot = join(dirname(thisFile), "..", "..", "..");
+			return join(projectRoot, "web-dist");
+		} catch {
+			return undefined;
+		}
+	})();
+
+	const { existsSync } = await import("node:fs");
+	const staticDir = webDistDir && existsSync(webDistDir) ? webDistDir : undefined;
+
 	// Bridge configuration (could be extended to read from config file)
 	const config: BridgeConfig = {
 		...DEFAULT_BRIDGE_CONFIG,
 		// Allow environment variable override for port
 		port: process.env.PI_BRIDGE_PORT ? parseInt(process.env.PI_BRIDGE_PORT, 10) : 0,
 		host: process.env.PI_BRIDGE_HOST || DEFAULT_BRIDGE_CONFIG.host,
+		staticDir,
 	};
 
 	let bridgeController: BridgeController | undefined;

@@ -293,4 +293,88 @@ describe("BridgeServer", () => {
 			await server.stop();
 		});
 	});
+
+	describe("staticDir serving", () => {
+		it("serves files from staticDir instead of placeholder", async () => {
+			const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+			const { join } = await import("node:path");
+			const { tmpdir } = await import("node:os");
+
+			const tmpDir = mkdtempSync(join(tmpdir(), "bridge-static-test-"));
+			writeFileSync(join(tmpDir, "index.html"), "<h1>Real Bundle</h1>");
+			writeFileSync(join(tmpDir, "app.js"), 'console.log("app");');
+
+			const server = new BridgeServer(
+				{ ...DEFAULT_BRIDGE_CONFIG, port: 0, staticDir: tmpDir },
+				mockContext,
+				eventBus,
+				(event) => events.push(event)
+			);
+			const address = await server.start();
+
+			try {
+				// Root should serve the real index.html
+				const indexResponse = await requestText(`http://localhost:${address.port}/`);
+				expect(indexResponse.status).toBe(200);
+				expect(indexResponse.body).toContain("<h1>Real Bundle</h1>");
+				expect(indexResponse.body).not.toContain("Pi Web Bridge");
+
+				// JS asset should be served
+				const jsResponse = await requestText(`http://localhost:${address.port}/app.js`);
+				expect(jsResponse.status).toBe(200);
+				expect(jsResponse.body).toContain('console.log("app");');
+
+				// Unknown path should fall back to index.html (SPA routing)
+				const spaResponse = await requestText(`http://localhost:${address.port}/some-route`);
+				expect(spaResponse.status).toBe(200);
+				expect(spaResponse.body).toContain("<h1>Real Bundle</h1>");
+			} finally {
+				await server.stop();
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
+
+		it("rejects directory traversal attempts against staticDir", async () => {
+			const { mkdtempSync, writeFileSync, rmSync, mkdirSync } = await import("node:fs");
+			const { join } = await import("node:path");
+			const { tmpdir } = await import("node:os");
+
+			const tmpDir = mkdtempSync(join(tmpdir(), "bridge-traversal-test-"));
+			const secretDir = join(tmpDir, "secret");
+			mkdirSync(secretDir);
+			writeFileSync(join(secretDir, "key.txt"), "secret-key");
+			writeFileSync(join(tmpDir, "index.html"), "<h1>Safe</h1>");
+
+			const server = new BridgeServer(
+				{ ...DEFAULT_BRIDGE_CONFIG, port: 0, staticDir: tmpDir },
+				mockContext,
+				eventBus,
+				(event) => events.push(event)
+			);
+			const address = await server.start();
+
+			try {
+				// The server normalizes paths, so /../../../etc/passwd becomes /etc/passwd
+				// which doesn't start with staticDir — that should 404/fallback
+				const traversalResponse = await requestText(
+					`http://localhost:${address.port}/../../../etc/passwd`
+				);
+				// Path is normalized and doesn't match staticDir prefix → fallback to index.html (SPA)
+				expect(traversalResponse.status).toBe(200);
+				expect(traversalResponse.body).toContain("<h1>Safe</h1>");
+				expect(traversalResponse.body).not.toContain("secret-key");
+
+				// The secret file within staticDir should be accessible (it's a real file)
+				// but URLs that resolve outside staticDir should not expose anything
+				const insideResponse = await requestText(
+					`http://localhost:${address.port}/secret/key.txt`
+				);
+				expect(insideResponse.status).toBe(200);
+				expect(insideResponse.body).toContain("secret-key");
+			} finally {
+				await server.stop();
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
+	});
 });
