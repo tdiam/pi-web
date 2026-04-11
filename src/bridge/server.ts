@@ -1,0 +1,435 @@
+/**
+ * Bridge HTTP and WebSocket server.
+ *
+ * Handles:
+ * - HTTP static file serving from config.staticDir (404 placeholder when no bundle)
+ * - WebSocket upgrade creating a WsRpcAdapter per connection
+ * - Client tracking with monotonic sequence numbers
+ */
+
+import * as http from "node:http";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { WebSocketServer, WebSocket } from "ws";
+import type { BridgeConfig, BridgeEvent, WsClient } from "./types.js";
+import { BridgeEventBus } from "./bridge-event-bus.js";
+import { WsRpcAdapter, type WsRpcAdapterContext } from "./ws-rpc-adapter.js";
+
+/**
+ * Client counter for monotonic sequence numbers
+ */
+let clientSeqCounter = 0;
+
+/**
+ * Generate a unique client ID
+ */
+function generateClientId(): string {
+	return `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/**
+ * Bridge HTTP/WebSocket server
+ */
+export class BridgeServer {
+	private config: BridgeConfig;
+	private context: WsRpcAdapterContext;
+	private eventBus: BridgeEventBus;
+	private emitEvent: (event: BridgeEvent) => void;
+
+	private httpServer: http.Server | undefined;
+	private wsServer: WebSocketServer | undefined;
+	private adapters = new Map<string, WsRpcAdapter>();
+
+	private isRunning = false;
+	private host: string = "localhost";
+	private port: number = 0;
+
+	constructor(
+		config: BridgeConfig,
+		context: WsRpcAdapterContext,
+		eventBus: BridgeEventBus,
+		emitEvent: (event: BridgeEvent) => void
+	) {
+		this.config = config;
+		this.context = context;
+		this.eventBus = eventBus;
+		this.emitEvent = emitEvent;
+	}
+
+	/**
+	 * Start the HTTP and WebSocket server
+	 * @returns Promise resolving to the bound address
+	 */
+	async start(): Promise<{ host: string; port: number }> {
+		if (this.isRunning) {
+			throw new Error("Server is already running");
+		}
+
+		// Create HTTP server
+		this.httpServer = http.createServer((req, res) => {
+			this.handleHttpRequest(req, res);
+		});
+
+		// Create WebSocket server attached to HTTP server
+		this.wsServer = new WebSocketServer({
+			server: this.httpServer,
+			path: "/ws",
+		});
+
+		this.wsServer.on("connection", (ws, req) => {
+			this.handleWsConnection(ws, req);
+		});
+
+		// Try to bind to port with fallback
+		const startPort = this.config.port || 0;
+		const maxPort = this.config.portMax || startPort;
+
+		let boundPort = 0;
+		let lastError: Error | undefined;
+
+		for (let tryPort = startPort; tryPort <= maxPort || (startPort === 0 && tryPort === 0); ) {
+			try {
+				await this.bindToPort(tryPort);
+				boundPort = tryPort === 0 ? (this.httpServer?.address() as { port: number })?.port ?? 0 : tryPort;
+				break;
+			} catch (err) {
+				lastError = err instanceof Error ? err : new Error(String(err));
+				if (startPort === 0) {
+					// OS-assigned port failed, this shouldn't happen
+					throw lastError;
+				}
+				// Try next port in range
+				tryPort++;
+				if (tryPort > maxPort) {
+					throw new Error(
+						`Failed to bind to any port in range ${startPort}-${maxPort}: ${lastError.message}`
+					);
+				}
+			}
+		}
+
+		this.host = this.config.host;
+		this.port = boundPort;
+		this.isRunning = true;
+
+		this.emitEvent({
+			type: "server_start",
+			host: this.host,
+			port: this.port,
+		});
+
+		return { host: this.host, port: this.port };
+	}
+
+	/**
+	 * Bind HTTP server to a specific port
+	 */
+	private bindToPort(port: number): Promise<void> {
+		return new Promise((resolve, reject) => {
+			if (!this.httpServer) {
+				reject(new Error("HTTP server not created"));
+				return;
+			}
+
+			const onError = (err: Error) => {
+				this.httpServer?.off("error", onError);
+				this.httpServer?.off("listening", onListening);
+				reject(err);
+			};
+
+			const onListening = () => {
+				this.httpServer?.off("error", onError);
+				this.httpServer?.off("listening", onListening);
+				resolve();
+			};
+
+			this.httpServer.once("error", onError);
+			this.httpServer.once("listening", onListening);
+			this.httpServer.listen(port, this.config.host);
+		});
+	}
+
+	/**
+	 * Stop the server and close all connections
+	 */
+	async stop(): Promise<void> {
+		if (!this.isRunning) {
+			return;
+		}
+
+		// Close all WebSocket connections
+		for (const [clientId, adapter] of this.adapters) {
+			adapter.dispose();
+		}
+		this.adapters.clear();
+
+		// Close WebSocket server
+		if (this.wsServer) {
+			await new Promise<void>((resolve) => {
+				this.wsServer?.close(() => resolve());
+			});
+			this.wsServer = undefined;
+		}
+
+		// Close HTTP server
+		if (this.httpServer) {
+			await new Promise<void>((resolve, reject) => {
+				this.httpServer?.close((err) => {
+					if (err) reject(err);
+					else resolve();
+				});
+			});
+			this.httpServer = undefined;
+		}
+
+		this.isRunning = false;
+		this.port = 0;
+
+		this.emitEvent({ type: "server_stop" });
+	}
+
+	/**
+	 * Check if the server is running
+	 */
+	getIsRunning(): boolean {
+		return this.isRunning;
+	}
+
+	/**
+	 * Get the current server address
+	 */
+	getAddress(): { host: string; port: number } | undefined {
+		if (!this.isRunning) return undefined;
+		return { host: this.host, port: this.port };
+	}
+
+	/**
+	 * Get the number of connected clients
+	 */
+	getClientCount(): number {
+		return this.adapters.size;
+	}
+
+	/**
+	 * Get list of connected clients
+	 */
+	getClients(): WsClient[] {
+		return Array.from(this.adapters.values()).map((adapter) => {
+			// Access the private client field through type assertion
+			return (adapter as unknown as { client: WsClient }).client;
+		});
+	}
+
+	/**
+	 * Handle HTTP requests
+	 */
+	private handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+		// Only handle GET requests
+		if (req.method !== "GET") {
+			res.writeHead(405, { "Content-Type": "text/plain" });
+			res.end("Method Not Allowed");
+			return;
+		}
+
+		// Parse URL
+		const url = new URL(req.url || "/", `http://${req.headers.host}`);
+		let pathname = url.pathname;
+
+		// Default to index.html
+		if (pathname === "/") {
+			pathname = "/index.html";
+		}
+
+		// Security: prevent directory traversal
+		const safePath = path.normalize(pathname).replace(/^(\.\.(\/|$))+/, "");
+
+		// Check if static directory is configured
+		if (!this.config.staticDir) {
+			// No static directory - return 404 placeholder
+			if (safePath === "/index.html") {
+				res.writeHead(200, { "Content-Type": "text/html" });
+				res.end(getPlaceholderHtml(this.host, this.port));
+			} else {
+				res.writeHead(404, { "Content-Type": "text/plain" });
+				res.end("Not Found - No web bundle configured");
+			}
+			return;
+		}
+
+		// Serve from static directory
+		const filePath = path.join(this.config.staticDir, safePath);
+
+		// Security: ensure the resolved path is within staticDir
+		if (!filePath.startsWith(path.resolve(this.config.staticDir))) {
+			res.writeHead(403, { "Content-Type": "text/plain" });
+			res.end("Forbidden");
+			return;
+		}
+
+		// Check if file exists and is a file
+		fs.stat(filePath, (err, stats) => {
+			if (err || !stats.isFile()) {
+				// Return index.html for SPA routing (client-side routing)
+				const indexPath = path.join(this.config.staticDir!, "index.html");
+				fs.stat(indexPath, (indexErr, indexStats) => {
+					if (indexErr || !indexStats.isFile()) {
+						res.writeHead(404, { "Content-Type": "text/plain" });
+						res.end("Not Found");
+						return;
+					}
+					this.serveFile(indexPath, res);
+				});
+				return;
+			}
+
+			this.serveFile(filePath, res);
+		});
+	}
+
+	/**
+	 * Serve a file with appropriate content type
+	 */
+	private serveFile(filePath: string, res: http.ServerResponse): void {
+		const ext = path.extname(filePath).toLowerCase();
+		const contentType = MIME_TYPES[ext] || "application/octet-stream";
+
+		fs.readFile(filePath, (err, data) => {
+			if (err) {
+				res.writeHead(500, { "Content-Type": "text/plain" });
+				res.end("Internal Server Error");
+				return;
+			}
+
+			res.writeHead(200, {
+				"Content-Type": contentType,
+				"Cache-Control": "no-cache",
+			});
+			res.end(data);
+		});
+	}
+
+	/**
+	 * Handle WebSocket connection
+	 */
+	private handleWsConnection(ws: WebSocket, req: http.IncomingMessage): void {
+		clientSeqCounter++;
+
+		const client: WsClient = {
+			id: generateClientId(),
+			seq: clientSeqCounter,
+			connectedAt: new Date().toISOString(),
+		};
+
+		this.emitEvent({
+			type: "client_connect",
+			client,
+		});
+
+		// Create adapter for this connection
+		const adapter = new WsRpcAdapter(
+			client,
+			ws,
+			this.context,
+			this.config,
+			this.eventBus,
+			this.emitEvent
+		);
+
+		this.adapters.set(client.id, adapter);
+
+		// Clean up on close
+		ws.on("close", () => {
+			this.adapters.delete(client.id);
+			this.emitEvent({
+				type: "client_disconnect",
+				client,
+				reason: "websocket_closed",
+			});
+		});
+
+		ws.on("error", (err) => {
+			console.error(`WebSocket error for client ${client.id}:`, err);
+			this.emitEvent({
+				type: "command_error",
+				client,
+				commandType: "websocket",
+				error: err.message,
+			});
+		});
+	}
+}
+
+/**
+ * MIME type mapping
+ */
+const MIME_TYPES: Record<string, string> = {
+	".html": "text/html",
+	".js": "application/javascript",
+	".mjs": "application/javascript",
+	".css": "text/css",
+	".json": "application/json",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".svg": "image/svg+xml",
+	".ico": "image/x-icon",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ttf": "font/ttf",
+	".otf": "font/otf",
+	".eot": "application/vnd.ms-fontobject",
+};
+
+/**
+ * Get placeholder HTML when no static bundle exists
+ */
+function getPlaceholderHtml(host: string, port: number): string {
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Pi Web Bridge</title>
+	<style>
+		body {
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+			max-width: 800px;
+			margin: 50px auto;
+			padding: 20px;
+			line-height: 1.6;
+			color: #333;
+		}
+		.container {
+			background: #f5f5f5;
+			border-radius: 8px;
+			padding: 30px;
+		}
+		h1 { margin-top: 0; color: #2563eb; }
+		.info { background: #e0f2fe; padding: 15px; border-radius: 6px; margin: 20px 0; }
+		.code { font-family: 'Monaco', 'Menlo', monospace; background: #1e293b; color: #e2e8f0; padding: 2px 6px; border-radius: 3px; }
+		.status { display: flex; align-items: center; gap: 10px; margin: 15px 0; }
+		.status-dot { width: 10px; height: 10px; background: #22c55e; border-radius: 50%; animation: pulse 2s infinite; }
+		@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+	</style>
+</head>
+<body>
+	<div class="container">
+		<h1>🌉 Pi Web Bridge</h1>
+		<p>The bridge server is running, but no web UI bundle is configured.</p>
+		
+		<div class="info">
+			<strong>Bridge Address:</strong><br>
+			<span class="code">ws://${host}:${port}/ws</span>
+		</div>
+		
+		<div class="status">
+			<div class="status-dot"></div>
+			<span>WebSocket endpoint ready</span>
+		</div>
+		
+		<p>To use the web UI, build and configure the static bundle path in the bridge configuration.</p>
+	</div>
+</body>
+</html>`;
+}
