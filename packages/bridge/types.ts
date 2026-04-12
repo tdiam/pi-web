@@ -59,7 +59,7 @@ export type RpcCommand =
 	| { id?: string; type: "get_commands" }
 	// Discovery
 	| { id?: string; type: "list_sessions" }
-	| { id?: string; type: "list_tree_entries" }
+	| { id?: string; type: "list_tree_entries"; sessionPath?: string }
 	// Plugin state persistence
 	| { id?: string; type: "get_plugin_state"; key: string }
 	| { id?: string; type: "set_plugin_state"; key: string; value: unknown };
@@ -93,6 +93,20 @@ export interface RpcSlashCommand {
 	source: "extension" | "prompt" | "skill";
 }
 
+export type RpcTreeTrackColumn = "blank" | "line" | "branch" | "branch-last";
+
+export interface RpcTreeEntry {
+	id: string;
+	label?: string;
+	type: string;
+	timestamp?: string;
+	parentId?: string | null;
+	depth?: number;
+	trackColumns?: RpcTreeTrackColumn[];
+	isActive?: boolean;
+	isOnActivePath?: boolean;
+}
+
 // ============================================================================
 // RPC Responses (server → client)
 // ============================================================================
@@ -121,7 +135,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "abort_bash"; success: true }
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: unknown }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
-	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { messages: unknown[]; sessionId: string; sessionName: string; cancelled: boolean } }
+	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { messages: unknown[]; treeEntries: RpcTreeEntry[]; sessionId: string; sessionName: string; sessionPath: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "get_fork_messages"; success: true; data: { messages: Array<{ entryId: string; text: string }> }
 	}
@@ -132,7 +146,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "get_commands"; success: true; data: { commands: RpcSlashCommand[] } }
 	// Discovery responses
 	| { id?: string; type: "response"; command: "list_sessions"; success: true; data: { sessions: Array<{ id: string; name: string; path: string }> } }
-	| { id?: string; type: "response"; command: "list_tree_entries"; success: true; data: { entries: Array<{ id: string; label?: string; type: string; timestamp?: string }> } }
+	| { id?: string; type: "response"; command: "list_tree_entries"; success: true; data: { entries: RpcTreeEntry[]; sessionPath?: string } }
 	// Plugin state persistence
 	| { id?: string; type: "response"; command: "get_plugin_state"; success: true; data: { value: unknown } }
 	| { id?: string; type: "response"; command: "set_plugin_state"; success: true }

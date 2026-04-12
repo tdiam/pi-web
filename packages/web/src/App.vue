@@ -3,7 +3,7 @@ import { ref, computed, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import ChatTranscript from "./components/ChatTranscript.vue";
 import SessionRail from "./components/SessionRail.vue";
-import TreeRail from "./components/TreeRail.vue";
+import TreePanel from "./components/TreePanel.vue";
 import ComposerBar from "./components/ComposerBar.vue";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
 import CompatWarning from "./components/CompatWarning.vue";
@@ -17,6 +17,7 @@ const {
 	sessionState,
 	sessions,
 	treeEntries,
+	isHistoricalView,
 	commands,
 	isStreaming,
 	isReconnecting,
@@ -35,7 +36,7 @@ const {
 const activeSessionId = computed(() => sessionState.value?.sessionId ?? null);
 const activeSessionLabel = computed(() => {
 	const active = sessions.value.find((session) => session.id === activeSessionId.value);
-	return active?.name ?? sessionState.value?.sessionId ?? "No active session";
+	return active?.name ?? sessionState.value?.sessionName ?? sessionState.value?.sessionId ?? "No active session";
 });
 const networkUrl = computed(() => {
 	if (typeof window === "undefined") return "";
@@ -44,6 +45,7 @@ const networkUrl = computed(() => {
 	return h;
 });
 const sidebarOpen = ref(false);
+const treePanelOpen = ref(false);
 const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
 
 // localStorage as instant cache to avoid flash; server as authoritative source.
@@ -99,11 +101,17 @@ function handleSessionSelect(sessionPath: string) {
 }
 
 function handleTreeNavigate(entryId: string) {
+	if (isHistoricalView.value) return;
+	treePanelOpen.value = false;
 	sendCommand({ type: "navigate_tree", entryId }).catch(() => {});
 }
 
 function handlePrompt(message: string) {
 	sendPrompt(message);
+}
+
+function openTreePanel() {
+	treePanelOpen.value = true;
 }
 
 function handleUIRespond(payload: Parameters<typeof respondToUIRequest>[0]) {
@@ -147,6 +155,9 @@ watch(
 			</div>
 			<div class="header-status">
 				<span v-if="networkUrl" class="network-url">{{ networkUrl }}</span>
+				<button class="tree-toggle" type="button" @click="openTreePanel">
+					{{ isHistoricalView ? 'Browse Tree' : 'Open Tree' }}
+				</button>
 				<button
 					class="theme-toggle"
 					type="button"
@@ -178,11 +189,6 @@ watch(
 					:sessions="sessions"
 					:active-session-id="activeSessionId"
 					@select="handleSessionSelect"
-				/>
-				<div class="rail-divider"></div>
-				<TreeRail
-					:entries="treeEntries"
-					@navigate="handleTreeNavigate"
 				/>
 			</aside>
 			<div class="rail-backdrop" @click="sidebarOpen = false"></div>
@@ -235,6 +241,15 @@ watch(
 				</button>
 			</div>
 		</div>
+
+		<TreePanel
+			:open="treePanelOpen"
+			:entries="treeEntries"
+			:session-label="activeSessionLabel"
+			:is-historical-view="isHistoricalView"
+			@close="treePanelOpen = false"
+			@navigate="handleTreeNavigate"
+		/>
 
 		<ExtensionDialog
 			:request="pendingExtensionRequest"
@@ -402,7 +417,8 @@ watch(
 
 .network-url,
 .connection-indicator,
-.theme-toggle {
+.theme-toggle,
+.tree-toggle {
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
@@ -416,16 +432,19 @@ watch(
 }
 
 .network-url,
-.theme-toggle {
+.theme-toggle,
+.tree-toggle {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 }
 
-.theme-toggle {
+.theme-toggle,
+.tree-toggle {
 	cursor: pointer;
 	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.theme-toggle:hover {
+.theme-toggle:hover,
+.tree-toggle:hover {
 	background: var(--panel-2);
 	border-color: var(--border-strong);
 	color: var(--text-muted);
@@ -468,7 +487,7 @@ watch(
 
 .app-body {
 	display: grid;
-	grid-template-columns: 240px minmax(0, 1fr);
+	grid-template-columns: 272px minmax(0, 1fr);
 	flex: 1;
 	min-height: 0;
 	overflow: hidden;
@@ -481,13 +500,6 @@ watch(
 	background: var(--rail-bg);
 	border-right: 1px solid var(--border);
 	overflow: hidden;
-}
-
-.rail-divider {
-	height: 1px;
-	margin: 0 10px;
-	background: var(--border);
-	flex-shrink: 0;
 }
 
 .rail-backdrop {
@@ -622,6 +634,10 @@ watch(
 	.network-url,
 	.theme-toggle {
 		display: none;
+	}
+
+	.tree-toggle {
+		height: 30px;
 	}
 
 	.app-body {

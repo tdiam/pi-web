@@ -104,6 +104,99 @@ describe("extension_ui_request handling", () => {
 		expect(client.isReconnecting.value).toBe(false);
 	});
 
+	it("updates tree entries from switch_session responses", async () => {
+		const client = await importComposable();
+		const ws = getLastMockWs();
+		simulateOpen(ws);
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "switch_session",
+				success: true,
+				data: {
+					messages: [],
+					treeEntries: [
+						{ id: "node-1", label: "user: Hello", type: "message", depth: 0, isActive: true },
+					],
+					sessionId: "session-2",
+					sessionName: "Session 2",
+					sessionPath: "/tmp/session-2.jsonl",
+					cancelled: false,
+				},
+			},
+		});
+
+		expect(client.treeEntries.value).toEqual([
+			{ id: "node-1", label: "user: Hello", type: "message", depth: 0, isActive: true },
+		]);
+	});
+
+	it("ignores stale live tree responses after switch_session", async () => {
+		const client = await importComposable();
+		const ws = getLastMockWs();
+		simulateOpen(ws);
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "get_state",
+				success: true,
+				data: {
+					sessionId: "live-session",
+					sessionFile: "/tmp/live.jsonl",
+					sessionName: "Live",
+					thinkingLevel: "normal",
+					isStreaming: false,
+					isCompacting: false,
+					steeringMode: "all",
+					followUpMode: "all",
+					autoCompactionEnabled: false,
+					messageCount: 0,
+					pendingMessageCount: 0,
+				},
+			},
+		});
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "switch_session",
+				success: true,
+				data: {
+					messages: [],
+					treeEntries: [
+						{ id: "session-node", label: "user: Switched", type: "message", depth: 0, isActive: true },
+					],
+					sessionId: "session-2",
+					sessionName: "Session 2",
+					sessionPath: "/tmp/session-2.jsonl",
+					cancelled: false,
+				},
+			},
+		});
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "list_tree_entries",
+				success: true,
+				data: {
+					entries: [{ id: "live-node", label: "user: Live", type: "message", depth: 0 }],
+					sessionPath: "/tmp/live.jsonl",
+				},
+			},
+		});
+
+		expect(client.treeEntries.value).toEqual([
+			{ id: "session-node", label: "user: Switched", type: "message", depth: 0, isActive: true },
+		]);
+	});
+
 	it("handles select method by setting pendingExtensionRequest", async () => {
 		const client = await importComposable();
 		const ws = getLastMockWs();

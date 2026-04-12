@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { SessionManager, type SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { WebSocket } from "ws";
 import type { BridgeEventBus } from "./bridge-event-bus.js";
 import type {
@@ -13,6 +14,8 @@ import type {
 	RpcResponse,
 	RpcSessionState,
 	RpcSlashCommand,
+	RpcTreeEntry,
+	RpcTreeTrackColumn,
 	ServerMessage,
 	WsClient,
 } from "./types.js";
@@ -95,6 +98,340 @@ interface PendingUIRequest {
 	reject: (error: Error) => void;
 	timeoutId?: ReturnType<typeof setTimeout>;
 	method: string;
+}
+
+interface SessionTreeNodeLike {
+	entry: SessionEntry;
+	children: SessionTreeNodeLike[];
+	label?: string;
+}
+
+interface VisibleTreeNodeLike {
+	entry: SessionEntry;
+	children: VisibleTreeNodeLike[];
+	label?: string;
+	containsActiveLeaf: boolean;
+}
+
+interface TreeRowGutter {
+	position: number;
+	show: boolean;
+}
+
+const HIDDEN_TREE_ENTRY_TYPES = new Set([
+	"label",
+	"custom",
+	"model_change",
+	"thinking_level_change",
+	"session_info",
+]);
+
+function openSessionManager(sessionPath: string): SessionManager {
+	return SessionManager.open(sessionPath, path.dirname(sessionPath));
+}
+
+function buildVisibleTree(
+	nodes: readonly SessionTreeNodeLike[],
+	activeLeafId: string | null,
+): VisibleTreeNodeLike[] {
+	const visibleNodes: VisibleTreeNodeLike[] = [];
+
+	for (const node of nodes) {
+		const visibleChildren = buildVisibleTree(node.children, activeLeafId);
+		const containsActiveLeaf =
+			node.entry.id === activeLeafId || visibleChildren.some((child) => child.containsActiveLeaf);
+		const hidden = HIDDEN_TREE_ENTRY_TYPES.has(node.entry.type);
+
+		if (hidden) {
+			visibleNodes.push(...visibleChildren);
+			continue;
+		}
+
+		visibleNodes.push({
+			entry: node.entry,
+			children: visibleChildren,
+			label: node.label,
+			containsActiveLeaf,
+		});
+	}
+
+	return visibleNodes;
+}
+
+function flattenVisibleTree(nodes: readonly VisibleTreeNodeLike[]): RpcTreeEntry[] {
+	const entries: RpcTreeEntry[] = [];
+	const multipleRoots = nodes.length > 1;
+	const orderedRoots = orderTreeChildren(nodes);
+	const stack: Array<{
+		node: VisibleTreeNodeLike;
+		indent: number;
+		justBranched: boolean;
+		showConnector: boolean;
+		isLast: boolean;
+		gutters: TreeRowGutter[];
+		isVirtualRootChild: boolean;
+		parentId: string | null;
+	}> = [];
+
+	for (let index = orderedRoots.length - 1; index >= 0; index--) {
+		stack.push({
+			node: orderedRoots[index],
+			indent: multipleRoots ? 1 : 0,
+			justBranched: multipleRoots,
+			showConnector: multipleRoots,
+			isLast: index === orderedRoots.length - 1,
+			gutters: [],
+			isVirtualRootChild: multipleRoots,
+			parentId: null,
+		});
+	}
+
+	while (stack.length > 0) {
+		const current = stack.pop();
+		if (!current) continue;
+		const { node, indent, justBranched, showConnector, isLast, gutters, isVirtualRootChild, parentId } = current;
+		const displayIndent = multipleRoots ? Math.max(0, indent - 1) : indent;
+		const connectorDisplayed = showConnector && !isVirtualRootChild;
+		const connectorPosition = connectorDisplayed ? Math.max(0, displayIndent - 1) : -1;
+		const children = orderTreeChildren(node.children);
+		const hasActiveChild = children.some((child) => child.containsActiveLeaf);
+
+		entries.push({
+			id: node.entry.id,
+			parentId,
+			label: formatTreeEntryLabel(node),
+			type: node.entry.type,
+			timestamp: node.entry.timestamp,
+			depth: displayIndent,
+			trackColumns: buildTrackColumns(displayIndent, connectorPosition, isLast, gutters),
+			isActive: node.containsActiveLeaf && !hasActiveChild,
+			isOnActivePath: node.containsActiveLeaf,
+		});
+
+		const multipleChildren = children.length > 1;
+		const childIndent = multipleChildren
+			? indent + 1
+			: justBranched && indent > 0
+				? indent + 1
+				: indent;
+		const childGutters = connectorDisplayed
+			? [...gutters, { position: connectorPosition, show: !isLast }]
+			: gutters;
+
+		for (let index = children.length - 1; index >= 0; index--) {
+			stack.push({
+				node: children[index],
+				indent: childIndent,
+				justBranched: multipleChildren,
+				showConnector: multipleChildren,
+				isLast: index === children.length - 1,
+				gutters: childGutters,
+				isVirtualRootChild: false,
+				parentId: node.entry.id,
+			});
+		}
+	}
+
+	return entries;
+}
+
+function buildTrackColumns(
+	displayIndent: number,
+	connectorPosition: number,
+	isLast: boolean,
+	gutters: readonly TreeRowGutter[],
+): RpcTreeTrackColumn[] {
+	const columns: RpcTreeTrackColumn[] = [];
+
+	for (let level = 0; level < displayIndent; level++) {
+		const gutter = gutters.find((item) => item.position === level);
+		if (gutter) {
+			columns.push(gutter.show ? "line" : "blank");
+			continue;
+		}
+		if (connectorPosition === level) {
+			columns.push(isLast ? "branch-last" : "branch");
+			continue;
+		}
+		columns.push("blank");
+	}
+
+	return columns;
+}
+
+function orderTreeChildren(children: readonly VisibleTreeNodeLike[]): VisibleTreeNodeLike[] {
+	const activeChildren = children.filter((child) => child.containsActiveLeaf);
+	const inactiveChildren = children.filter((child) => !child.containsActiveLeaf);
+	return [...activeChildren, ...inactiveChildren];
+}
+
+function buildTreeEntriesFromSession(sessionManager: SessionManager): RpcTreeEntry[] {
+	const activeLeafId = sessionManager.getLeafId();
+	const visibleTree = buildVisibleTree(sessionManager.getTree() as SessionTreeNodeLike[], activeLeafId);
+	return flattenVisibleTree(orderTreeChildren(visibleTree));
+}
+
+function buildTreeEntriesFromBranch(branch: readonly unknown[]): RpcTreeEntry[] {
+	return branch
+		.filter((entry) => {
+			const typedEntry = entry as { type?: string; id?: string };
+			if (!typedEntry.id) return false;
+			if (typedEntry.type && HIDDEN_TREE_ENTRY_TYPES.has(typedEntry.type)) return false;
+			return true;
+		})
+		.map((entry, index) => {
+			const typedEntry = entry as SessionEntry | ({ role?: string; content?: unknown; text?: string } & Record<string, unknown>);
+			const type = typeof typedEntry.type === "string" ? typedEntry.type : (typedEntry as { role?: string }).role ?? "unknown";
+			return {
+				id: String((typedEntry as { id: string }).id),
+				parentId: index === 0 ? null : String((branch[index - 1] as { id?: string }).id ?? ""),
+				label: formatFallbackTreeEntryLabel(typedEntry),
+				type,
+				timestamp: typeof (typedEntry as { timestamp?: string }).timestamp === "string"
+					? (typedEntry as { timestamp: string }).timestamp
+					: undefined,
+				depth: 0,
+				trackColumns: [],
+				isActive: index === branch.length - 1,
+				isOnActivePath: true,
+			};
+		});
+}
+
+function buildTreeEntriesForSessionPath(sessionPath: string): RpcTreeEntry[] {
+	const sessionManager = openSessionManager(sessionPath);
+	return buildTreeEntriesFromSession(sessionManager);
+}
+
+function flattenMessagesForTranscript(branch: readonly SessionEntry[]): unknown[] {
+	return branch
+		.filter((entry) => entry.type === "message")
+		.map((entry) => {
+			const messageEntry = entry as Extract<SessionEntry, { type: "message" }>;
+			return {
+				id: messageEntry.id,
+				...messageEntry.message,
+				timestamp: messageEntry.timestamp,
+			};
+		});
+}
+
+function formatTreeEntryLabel(node: SessionTreeNodeLike): string {
+	const labelPrefix = node.label ? `[${node.label}] ` : "";
+	return `${labelPrefix}${describeSessionEntry(node.entry)}`.trim();
+}
+
+function sessionDisplayName(sessionManager: SessionManager, sessionPath?: string): string {
+	const explicitName = sessionManager.getSessionName()?.trim();
+	if (explicitName) return explicitName;
+
+	const firstUserEntry = sessionManager
+		.getEntries()
+		.find((entry) => entry.type === "message" && entry.message.role === "user");
+	if (firstUserEntry && firstUserEntry.type === "message") {
+		const text = collapseWhitespace(
+			extractMessageText(firstUserEntry.message as { content?: unknown; text?: string }),
+		);
+		if (text) return text;
+	}
+
+	return sessionPath ? path.basename(sessionPath, ".jsonl") : sessionManager.getSessionId();
+}
+
+function formatFallbackTreeEntryLabel(entry: SessionEntry | ({ role?: string; content?: unknown; text?: string } & Record<string, unknown>)): string {
+	if ((entry as { type?: string }).type === "message" && "message" in entry) {
+		return describeSessionEntry(entry as SessionEntry);
+	}
+
+	const role = typeof (entry as { role?: string }).role === "string" ? (entry as { role: string }).role : undefined;
+	if (role) {
+		const content = collapseWhitespace(extractMessageText(entry as { content?: unknown; text?: string }));
+		return content ? `${role}: ${content}` : role;
+	}
+
+	return describeSessionEntry(entry as SessionEntry);
+}
+
+function describeSessionEntry(entry: SessionEntry): string {
+	switch (entry.type) {
+		case "message":
+			return describeMessage(entry.message as { role?: string; content?: unknown; text?: string; stopReason?: string; errorMessage?: string; toolName?: string; command?: string });
+		case "custom_message": {
+			const customText = Array.isArray(entry.content)
+				? entry.content
+					.filter((item) => typeof item === "object" && item !== null && (item as { type?: string }).type === "text")
+					.map((item) => (item as { text?: string }).text ?? "")
+					.join(" ")
+				: typeof entry.content === "string"
+					? entry.content
+					: "";
+			const content = collapseWhitespace(customText);
+			return content ? `[${entry.customType}]: ${content}` : `[${entry.customType}]`;
+		}
+		case "compaction":
+			return `[compaction: ${Math.round(entry.tokensBefore / 1000)}k tokens]`;
+		case "branch_summary":
+			return `[branch summary]: ${collapseWhitespace(entry.summary)}`;
+		case "model_change":
+			return `[model: ${entry.modelId}]`;
+		case "thinking_level_change":
+			return `[thinking: ${entry.thinkingLevel}]`;
+		case "session_info":
+			return entry.name ? `[title: ${entry.name}]` : "[title]";
+		case "custom":
+			return `[custom: ${entry.customType}]`;
+		case "label":
+			return entry.label ? `[label: ${entry.label}]` : "[label]";
+		default:
+			return (entry as { type: string }).type;
+	}
+}
+
+function describeMessage(message: { role?: string; content?: unknown; text?: string; stopReason?: string; errorMessage?: string; toolName?: string; command?: string }): string {
+	const role = message.role ?? "message";
+	const content = collapseWhitespace(extractMessageText(message));
+
+	switch (role) {
+		case "user":
+			return content ? `user: ${content}` : "user";
+		case "assistant":
+			if (content) return `assistant: ${content}`;
+			if (message.stopReason === "aborted") return "assistant: (aborted)";
+			if (message.errorMessage) return `assistant: ${collapseWhitespace(message.errorMessage)}`;
+			return "assistant: (no content)";
+		case "toolResult":
+			return message.toolName ? `[tool: ${message.toolName}]` : "[tool result]";
+		case "bashExecution":
+			return message.command ? `[bash]: ${collapseWhitespace(message.command)}` : "[bash]";
+		default:
+			return content ? `${role}: ${content}` : `[${role}]`;
+	}
+}
+
+function extractMessageText(message: { content?: unknown; text?: string }): string {
+	if (typeof message.content === "string") return message.content;
+	if (typeof message.text === "string") return message.text;
+	if (!Array.isArray(message.content)) return "";
+
+	return message.content
+		.map((block) => {
+			if (typeof block === "string") return block;
+			if (typeof block !== "object" || block === null) return "";
+			const typedBlock = block as { type?: string; text?: string; thinking?: string };
+			if (typedBlock.type === "text" || typedBlock.type === "toolResult") {
+				return typeof typedBlock.text === "string" ? typedBlock.text : "";
+			}
+			if (typedBlock.type === "thinking") {
+				return typeof typedBlock.thinking === "string" ? typedBlock.thinking : "";
+			}
+			return "";
+		})
+		.filter(Boolean)
+		.join(" ");
+}
+
+function collapseWhitespace(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -537,9 +874,8 @@ export class WsRpcAdapter {
 			}
 
 			case "switch_session": {
-				// Read session file and return messages — do NOT call ctx.switchSession()
-				// because that would resume the session in the TUI, disrupting the
-				// read-only log view that /web displays.
+				// Read session state from disk for browser browsing without mutating the
+				// live Pi runtime that still powers the read-only terminal view.
 				try {
 					const sessionPath = command.sessionPath as string;
 					if (!sessionPath || !fs.existsSync(sessionPath)) {
@@ -552,27 +888,9 @@ export class WsRpcAdapter {
 						};
 					}
 
-					const content = fs.readFileSync(sessionPath, "utf8");
-					const lines = content.split("\n").filter((l: string) => l.trim());
-					const messages: unknown[] = [];
-					let sessionMeta: { id?: string; timestamp?: string; cwd?: string } | undefined;
-
-					for (const line of lines) {
-						try {
-							const entry = JSON.parse(line);
-							if (entry.type === "session") {
-								sessionMeta = entry;
-							} else if (entry.type === "message" && entry.message) {
-								// JSONL entries wrap messages: { type: "message", message: { role, content, ... } }
-								messages.push({ id: entry.id, ...entry.message });
-							} else if (entry.role !== undefined) {
-								// Already-flattened format (shouldn't happen in JSONL but handle it)
-								messages.push(entry);
-							}
-						} catch {
-							// Skip malformed lines
-						}
-					}
+					const sessionManager = openSessionManager(sessionPath);
+					const branch = sessionManager.getBranch();
+					const messages = flattenMessagesForTranscript(branch);
 
 					return {
 						id: correlationId,
@@ -581,8 +899,10 @@ export class WsRpcAdapter {
 						success: true as const,
 						data: {
 							messages,
-							sessionId: sessionMeta?.id ?? "",
-							sessionName: path.basename(sessionPath, ".jsonl"),
+							treeEntries: buildTreeEntriesFromSession(sessionManager),
+							sessionId: sessionManager.getSessionId(),
+							sessionName: sessionDisplayName(sessionManager, sessionPath),
+							sessionPath,
 							cancelled: false,
 						},
 					};
@@ -737,17 +1057,12 @@ export class WsRpcAdapter {
 						for (const file of files) {
 							const filePath = path.join(sessionDir, file);
 							try {
-								const fd = fs.openSync(filePath, "r");
-								const buf = Buffer.alloc(512);
-								const bytesRead = fs.readSync(fd, buf, 0, 512, 0);
-								fs.closeSync(fd);
-								const firstLine = buf.toString("utf8", 0, bytesRead).split("\n")[0];
-								if (!firstLine) continue;
-								const header = JSON.parse(firstLine);
-								if (header.type !== "session") continue;
+								const sessionManager = openSessionManager(filePath);
+								const header = sessionManager.getHeader();
+								if (!header) continue;
 								sessions.push({
 									id: header.id,
-									name: file.replace(/\.jsonl$/, ""),
+									name: sessionDisplayName(sessionManager, filePath),
 									path: filePath,
 									timestamp: header.timestamp,
 								});
@@ -776,35 +1091,18 @@ export class WsRpcAdapter {
 
 			case "list_tree_entries": {
 				try {
-					const branch = ctx.sessionManager.getBranch();
-					const entries = Array.isArray(branch)
-						? branch
-								.filter((e: unknown) => {
-									const entry = e as { id?: string; role?: string; type?: string };
-									return entry.id !== undefined;
-								})
-								.map((e: unknown) => {
-									const entry = e as {
-										id: string;
-										label?: string;
-										role?: string;
-										type?: string;
-										timestamp?: string;
-									};
-									return {
-										id: entry.id,
-										label: entry.label ?? entry.role ?? entry.type ?? "entry",
-										type: entry.type ?? entry.role ?? "unknown",
-										timestamp: entry.timestamp,
-									};
-								})
-						: [];
+					const requestedSessionPath = command.sessionPath;
+					const liveSessionPath = ctx.sessionManager.getSessionFile();
+					const sessionPath = requestedSessionPath ?? liveSessionPath;
+					const entries = sessionPath && fs.existsSync(sessionPath)
+						? buildTreeEntriesForSessionPath(sessionPath)
+						: buildTreeEntriesFromBranch(ctx.sessionManager.getBranch());
 					return {
 						id: correlationId,
 						type: "response" as const,
 						command: "list_tree_entries" as const,
 						success: true as const,
-						data: { entries },
+						data: { entries, sessionPath: sessionPath ?? undefined },
 					};
 				} catch {
 					return {
@@ -812,7 +1110,7 @@ export class WsRpcAdapter {
 						type: "response" as const,
 						command: "list_tree_entries" as const,
 						success: true as const,
-						data: { entries: [] as Array<{ id: string; label?: string; type: string; timestamp?: string }> },
+						data: { entries: [] as RpcTreeEntry[], sessionPath: command.sessionPath },
 					};
 				}
 			}

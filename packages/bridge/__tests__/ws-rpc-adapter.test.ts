@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { WebSocket } from "ws";
 import { BridgeEventBus } from "../bridge-event-bus.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
@@ -491,11 +492,29 @@ describe("WsRpcAdapter", () => {
 			const olderSessionFile = path.join(tmpDir, "older-session.jsonl");
 			fs.writeFileSync(
 				currentSessionFile,
-				JSON.stringify({ type: "session", id: "current-id", timestamp: "2025-01-02T00:00:00Z" }) + "\n"
+				[
+					JSON.stringify({ type: "session", id: "current-id", timestamp: "2025-01-02T00:00:00Z", cwd: "/tmp" }),
+					JSON.stringify({
+						type: "message",
+						id: "current-msg-1",
+						parentId: null,
+						timestamp: new Date().toISOString(),
+						message: { role: "user", content: "Current first prompt", timestamp: Date.now() },
+					}),
+				].join("\n") + "\n"
 			);
 			fs.writeFileSync(
 				olderSessionFile,
-				JSON.stringify({ type: "session", id: "older-id", timestamp: "2025-01-01T00:00:00Z" }) + "\n"
+				[
+					JSON.stringify({ type: "session", id: "older-id", timestamp: "2025-01-01T00:00:00Z", cwd: "/tmp" }),
+					JSON.stringify({
+						type: "message",
+						id: "older-msg-1",
+						parentId: null,
+						timestamp: new Date().toISOString(),
+						message: { role: "user", content: "Older first prompt", timestamp: Date.now() },
+					}),
+				].join("\n") + "\n"
 			);
 			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(currentSessionFile);
 
@@ -517,13 +536,13 @@ describe("WsRpcAdapter", () => {
 			expect(response.payload.data.sessions).toEqual([
 				{
 					id: "older-id",
-					name: "older-session",
+					name: "Older first prompt",
 					path: olderSessionFile,
 					timestamp: "2025-01-01T00:00:00Z",
 				},
 				{
 					id: "current-id",
-					name: "current-session",
+					name: "Current first prompt",
 					path: currentSessionFile,
 					timestamp: "2025-01-02T00:00:00Z",
 				},
@@ -578,7 +597,97 @@ describe("WsRpcAdapter", () => {
 				label: "user",
 				type: "message",
 				timestamp: "2025-01-01T00:00:00Z",
+				parentId: null,
+				depth: 0,
+				trackColumns: [],
+				isActive: false,
+				isOnActivePath: true,
 			});
+		});
+
+		it("should load list_tree_entries from the session file when available", async () => {
+			const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-tree-test-"));
+			const sessionManager = SessionManager.create(tmpDir, tmpDir);
+			sessionManager.appendModelChange("openai", "gpt-4.1");
+			sessionManager.appendThinkingLevelChange("high");
+			sessionManager.appendMessage({ role: "user", content: "Hello", timestamp: Date.now() } as any);
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "Hi" }],
+				timestamp: Date.now(),
+			} as any);
+			const sessionFile = sessionManager.getSessionFile();
+			if (!sessionFile) {
+				throw new Error("session file was not created");
+			}
+			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(sessionFile);
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries).toHaveLength(2);
+			expect(response.payload.data.entries[0]).toMatchObject({ label: "user: Hello", depth: 0 });
+			expect(response.payload.data.entries[1]).toMatchObject({ label: "assistant: Hi", depth: 0, isActive: true });
+
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		});
+
+		it("should indent only after an actual branch point", async () => {
+			const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-branch-depth-test-"));
+			const sessionManager = SessionManager.create(tmpDir, tmpDir);
+			sessionManager.appendMessage({ role: "user", content: "Start", timestamp: Date.now() } as any);
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "Choose a path" }],
+				timestamp: Date.now(),
+			} as any);
+			const branchPoint = sessionManager.getLeafId();
+			sessionManager.appendMessage({ role: "user", content: "Path A", timestamp: Date.now() } as any);
+			if (!branchPoint) {
+				throw new Error("branch point missing");
+			}
+			sessionManager.branch(branchPoint);
+			sessionManager.appendMessage({ role: "user", content: "Path B", timestamp: Date.now() } as any);
+			const sessionFile = sessionManager.getSessionFile();
+			if (!sessionFile) {
+				throw new Error("session file was not created");
+			}
+			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(sessionFile);
+
+			const command: RpcCommand = { id: "cmd-1", type: "list_tree_entries" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+			const response = JSON.parse(lastCall);
+
+			expect(response.payload.success).toBe(true);
+			expect(response.payload.data.entries.map((entry: { label: string; depth: number }) => ({
+				label: entry.label,
+				depth: entry.depth,
+			}))).toEqual([
+				{ label: "user: Start", depth: 0 },
+				{ label: "assistant: Choose a path", depth: 0 },
+				{ label: "user: Path B", depth: 1 },
+				{ label: "user: Path A", depth: 1 },
+			]);
+
+			fs.rmSync(tmpDir, { recursive: true, force: true });
 		});
 
 		it("should handle list_tree_entries with empty branch", async () => {
@@ -809,14 +918,20 @@ describe("WsRpcAdapter", () => {
 		});
 
 		it("should handle switch_session command", async () => {
-			// Create a temporary session file for the test
 			const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-test-"));
-			const sessionFile = path.join(tmpDir, "test-session.jsonl");
-			fs.writeFileSync(sessionFile, [
-				JSON.stringify({ type: "session", id: "test-id-123", timestamp: "2025-01-01T00:00:00Z" }),
-				JSON.stringify({ type: "message", id: "m1", timestamp: "2025-01-01T00:00:01Z", message: { role: "user", content: "Hello" } }),
-				JSON.stringify({ type: "message", id: "m2", timestamp: "2025-01-01T00:00:02Z", message: { role: "assistant", content: "Hi" } }),
-			].join("\n"));
+			const sessionManager = SessionManager.create(tmpDir, tmpDir);
+			sessionManager.appendModelChange("openai", "gpt-4.1");
+			sessionManager.appendThinkingLevelChange("high");
+			sessionManager.appendMessage({ role: "user", content: "Hello", timestamp: Date.now() } as any);
+			sessionManager.appendMessage({
+				role: "assistant",
+				content: [{ type: "text", text: "Hi" }],
+				timestamp: Date.now(),
+			} as any);
+			const sessionFile = sessionManager.getSessionFile();
+			if (!sessionFile) {
+				throw new Error("session file was not created");
+			}
 
 			const command: RpcCommand = { id: "cmd-1", type: "switch_session", sessionPath: sessionFile };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
@@ -830,9 +945,22 @@ describe("WsRpcAdapter", () => {
 			const lastCall = JSON.parse(sendCalls[sendCalls.length - 1][0] as string);
 			expect(lastCall.payload.success).toBe(true);
 			expect(lastCall.payload.data.messages).toHaveLength(2);
-			expect(lastCall.payload.data.sessionId).toBe("test-id-123");
+			expect(lastCall.payload.data.messages[0]).toMatchObject({ role: "user", content: "Hello" });
+			expect(lastCall.payload.data.sessionId).toBe(sessionManager.getSessionId());
+			expect(lastCall.payload.data.sessionName).toBe("Hello");
+			expect(lastCall.payload.data.treeEntries).toHaveLength(2);
+			expect(lastCall.payload.data.treeEntries[0]).toMatchObject({
+				label: "user: Hello",
+				type: "message",
+				depth: 0,
+			});
+			expect(lastCall.payload.data.treeEntries[1]).toMatchObject({
+				label: "assistant: Hi",
+				type: "message",
+				depth: 0,
+				isActive: true,
+			});
 
-			// Cleanup
 			fs.rmSync(tmpDir, { recursive: true, force: true });
 		});
 

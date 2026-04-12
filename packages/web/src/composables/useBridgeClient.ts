@@ -33,11 +33,18 @@ export interface SessionEntry {
   path: string;
 }
 
+export type TreeTrackColumn = "blank" | "line" | "branch" | "branch-last";
+
 export interface TreeEntry {
   id: string;
   label?: string;
   type: string;
   timestamp?: string;
+  parentId?: string | null;
+  depth?: number;
+  trackColumns?: TreeTrackColumn[];
+  isActive?: boolean;
+  isOnActivePath?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +57,8 @@ const transcript = computed(() => normalizeTranscript(rawTranscript.value));
 const sessionState = ref<RpcSessionState | null>(null);
 const sessions = ref<SessionEntry[]>([]);
 const treeEntries = ref<TreeEntry[]>([]);
+const activeTreeSessionPath = ref<string | null>(null);
+const liveSessionPath = ref<string | null>(null);
 const commands = ref<RpcSlashCommand[]>([]);
 const isStreaming = ref(false);
 
@@ -229,8 +238,22 @@ function handleResponse(payload: RpcResponse) {
       case "get_state": {
         const data = payload.data as RpcSessionState | undefined;
         if (data) {
-          sessionState.value = data;
+          liveSessionPath.value = data.sessionFile ?? null;
+          const isBrowsingDifferentSession = Boolean(
+            activeTreeSessionPath.value && data.sessionFile && activeTreeSessionPath.value !== data.sessionFile,
+          );
+          sessionState.value = isBrowsingDifferentSession
+            ? {
+                ...data,
+                sessionId: sessionState.value?.sessionId ?? data.sessionId,
+                sessionName: sessionState.value?.sessionName ?? data.sessionName,
+                sessionFile: activeTreeSessionPath.value ?? data.sessionFile,
+              }
+            : data;
           isStreaming.value = data.isStreaming;
+          if (!activeTreeSessionPath.value && data.sessionFile) {
+            activeTreeSessionPath.value = data.sessionFile;
+          }
         }
         break;
       }
@@ -243,26 +266,42 @@ function handleResponse(payload: RpcResponse) {
         const data = payload.data as
           | {
               messages: TranscriptEntry[];
+              treeEntries?: TreeEntry[];
               sessionId?: string;
               sessionName?: string;
+              sessionPath?: string;
             }
           | undefined;
         if (data && Array.isArray(data.messages)) {
-          // Force a completely new array reference for Vue reactivity
+          // Force a completely new array reference for Vue reactivity.
           rawTranscript.value = [...data.messages];
-          // Update the displayed active session
+          if (data.sessionPath) {
+            activeTreeSessionPath.value = data.sessionPath;
+          }
+          if (Array.isArray(data.treeEntries)) {
+            treeEntries.value = data.treeEntries;
+          }
+          // Update the displayed active session metadata in the UI.
           if (data.sessionId) {
             sessionState.value = {
               ...sessionState.value,
               sessionId: data.sessionId,
+              sessionName: data.sessionName,
+              sessionFile: data.sessionPath ?? sessionState.value?.sessionFile,
             } as RpcSessionState;
           }
         }
         break;
       }
       case "list_tree_entries": {
-        const data = payload.data as { entries: TreeEntry[] } | undefined;
-        if (data) treeEntries.value = data.entries;
+        const data = payload.data as { entries: TreeEntry[]; sessionPath?: string } | undefined;
+        if (data) {
+          const responseSessionPath = data.sessionPath ?? null;
+          if (!activeTreeSessionPath.value || activeTreeSessionPath.value === responseSessionPath) {
+            treeEntries.value = data.entries;
+            activeTreeSessionPath.value = responseSessionPath;
+          }
+        }
         break;
       }
       case "get_commands": {
@@ -486,6 +525,14 @@ export function useBridgeClient() {
       !disposed &&
       !connectionError.value,
   );
+  const isHistoricalView = computed(
+    () =>
+      Boolean(
+        activeTreeSessionPath.value &&
+        liveSessionPath.value &&
+        activeTreeSessionPath.value !== liveSessionPath.value,
+      ),
+  );
 
   return {
     connectionStatus: readonly(connectionStatus),
@@ -493,6 +540,9 @@ export function useBridgeClient() {
     sessionState: readonly(sessionState),
     sessions: readonly(sessions),
     treeEntries: readonly(treeEntries),
+    activeTreeSessionPath: readonly(activeTreeSessionPath),
+    liveSessionPath: readonly(liveSessionPath),
+    isHistoricalView,
     commands: readonly(commands),
     isStreaming: readonly(isStreaming),
     // Reconnect diagnostics
