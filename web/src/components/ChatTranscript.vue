@@ -308,7 +308,6 @@ defineExpose({ preserveScroll });
 .message-content.tool {
 	width: 100%;
 	padding-left: 14px;
-	border-left: 1px solid var(--border);
 }
 
 .message-content.user {
@@ -467,7 +466,6 @@ defineExpose({ preserveScroll });
 	align-items: center;
 	gap: 6px;
 	padding: 0 0 8px 14px;
-	border-left: 1px solid var(--border);
 	width: min(920px, calc(100% - 64px));
 	margin: 0 auto;
 }

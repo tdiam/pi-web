@@ -78,7 +78,10 @@ export function contentBlocks(msg: TranscriptEntryLike): ContentBlock[] {
 		}
 
 		if (type === "thinking" && typeof typedBlock.thinking === "string") {
-			blocks.push({ kind: "thinking", text: typedBlock.thinking });
+			const thinkingText = typedBlock.thinking.trim();
+			if (thinkingText) {
+				blocks.push({ kind: "thinking", text: thinkingText });
+			}
 			continue;
 		}
 

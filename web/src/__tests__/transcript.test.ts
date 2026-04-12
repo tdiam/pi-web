@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentBlocks, normalizeTranscript, type TranscriptEntryLike } from "../transcript";
+import { contentBlocks, messageContent, normalizeTranscript, type TranscriptEntryLike } from "../transcript";
 
 describe("normalizeTranscript", () => {
 	it("merges a standalone tool result into the preceding assistant tool call", () => {
@@ -77,5 +77,22 @@ describe("normalizeTranscript", () => {
 		expect(normalized[0]).not.toBe(assistant);
 		expect(normalized[0].content).not.toBe(assistant.content);
 		expect(assistant.content).toEqual([{ type: "toolCall", name: "bash", arguments: '{"command":"ls"}' }]);
+	});
+
+	it("drops empty thinking blocks from assistant content", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Working on it." },
+				{ type: "thinking", thinking: "   " },
+				{ type: "thinking", thinking: "Need to inspect the log first." },
+			],
+		} satisfies TranscriptEntryLike;
+
+		expect(messageContent(message)).toBe("Working on it.");
+		expect(contentBlocks(message)).toEqual([
+			{ kind: "text", text: "Working on it." },
+			{ kind: "thinking", text: "Need to inspect the log first." },
+		]);
 	});
 });
