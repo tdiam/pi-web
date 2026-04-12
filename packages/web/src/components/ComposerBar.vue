@@ -1,20 +1,28 @@
 <script setup lang="ts">
 import { SendHorizontal } from "lucide-vue-next";
-import { ref, computed, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { ConnectionStatus } from "../composables/useBridgeClient";
 import type { RpcSlashCommand } from "../shared-types";
+import type { RpcModelInfo } from "../utils/models";
 import CommandPalette from "./CommandPalette.vue";
+import ModelDropdown from "./ModelDropdown.vue";
 
 const props = defineProps<{
 	connectionStatus: ConnectionStatus;
 	commands: RpcSlashCommand[];
+	models: RpcModelInfo[];
+	selectedModel: RpcModelInfo | null;
 }>();
 
 const emit = defineEmits<{
 	submit: [message: string];
+	selectModel: [model: RpcModelInfo];
 }>();
 
+const MAX_TEXTAREA_HEIGHT = 160;
+
 const inputText = ref("");
+const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const isDisabled = computed(() => props.connectionStatus !== "connected");
 const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
 
@@ -23,27 +31,72 @@ const filterText = computed(() => {
 	if (!showPalette.value) return "";
 	return inputText.value.slice(1);
 });
+const currentModelText = computed(() => {
+	if (!props.selectedModel) return props.models.length > 0 ? "choose model" : "no models";
+	return `${props.selectedModel.name} · ${props.selectedModel.provider}/${props.selectedModel.id}`;
+});
+const statusText = computed(() => {
+	if (isDisabled.value) return "offline";
+	return "/ commands";
+});
+const normalizedInputText = computed(() => normalizeSubmittedText(inputText.value));
+const canSubmit = computed(() => !isDisabled.value && normalizedInputText.value.length > 0);
+
+function normalizeSubmittedText(value: string): string {
+	const normalized = value.replace(/\r\n/g, "\n");
+	const lines = normalized.split("\n");
+
+	while (lines.length > 0 && lines[0].trim() === "") {
+		lines.shift();
+	}
+	while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+		lines.pop();
+	}
+
+	if (lines.length === 0) return "";
+
+	lines[0] = lines[0].trimStart();
+	lines[lines.length - 1] = lines[lines.length - 1].trimEnd();
+	return lines.join("\n");
+}
+
+function resizeTextarea() {
+	nextTick(() => {
+		const el = textareaRef.value;
+		if (!el) return;
+		el.style.height = "auto";
+		el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+		el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
+	});
+}
 
 watch(inputText, (val) => {
 	showPalette.value = val.startsWith("/");
+	resizeTextarea();
 });
 
 function handleSubmit() {
-	const text = inputText.value.trim();
+	const text = normalizedInputText.value;
 	if (!text || isDisabled.value) return;
 	emit("submit", text);
 	inputText.value = "";
 	showPalette.value = false;
+	resizeTextarea();
 }
 
 function handleCommandSelect(commandName: string) {
 	inputText.value = "";
 	showPalette.value = false;
 	emit("submit", `/${commandName}`);
+	resizeTextarea();
 }
 
 function handlePaletteClose() {
 	showPalette.value = false;
+}
+
+function handleModelSelect(model: RpcModelInfo) {
+	emit("selectModel", model);
 }
 
 function handleInputKeydown(e: KeyboardEvent) {
@@ -59,10 +112,13 @@ function handleInputKeydown(e: KeyboardEvent) {
 		}
 	}
 
-	if (e.key === "Enter" && !showPalette.value) {
+	if (e.key === "Enter" && !e.shiftKey && !showPalette.value) {
+		e.preventDefault();
 		handleSubmit();
 	}
 }
+
+resizeTextarea();
 </script>
 
 <template>
@@ -77,28 +133,45 @@ function handleInputKeydown(e: KeyboardEvent) {
 				@close="handlePaletteClose"
 			/>
 			<div class="composer-dock" :class="{ disabled: isDisabled }">
-				<input
-					v-model="inputText"
-					class="prompt-input"
-					placeholder="Type a message or use / commands"
-					:disabled="isDisabled"
-					@keydown="handleInputKeydown"
-				/>
-				<button
-					class="send-btn"
-					:disabled="isDisabled || !inputText.trim()"
-					aria-label="Send message"
-					@click="handleSubmit"
-				>
-					<SendHorizontal class="send-icon" aria-hidden="true" />
-				</button>
+				<div class="composer-main-row">
+					<textarea
+						ref="textareaRef"
+						v-model="inputText"
+						class="prompt-input"
+						rows="1"
+						placeholder="Type a message or use / commands"
+						:disabled="isDisabled"
+						@keydown="handleInputKeydown"
+						@input="resizeTextarea"
+					/>
+					<button
+						class="send-btn"
+						:disabled="!canSubmit"
+						aria-label="Send message"
+						@click="handleSubmit"
+					>
+						<SendHorizontal class="send-icon" aria-hidden="true" />
+					</button>
+				</div>
+
+				<div class="composer-footer-row">
+					<div class="composer-status-cluster">
+						<ModelDropdown
+							:models="models"
+							:selected-model="selectedModel"
+							:disabled="isDisabled"
+							@select="handleModelSelect"
+						/>
+						<span class="composer-pill composer-pill-model">model {{ currentModelText }}</span>
+					</div>
+
+					<div class="composer-hints">
+						<span class="composer-pill">{{ statusText }}</span>
+						<span class="composer-pill">Enter send</span>
+						<span class="composer-pill">Shift+Enter newline</span>
+					</div>
+				</div>
 			</div>
-		</div>
-		<div class="composer-meta">
-			<span class="composer-status">
-				{{ isDisabled ? 'Offline - waiting for connection' : '/ for commands' }}
-			</span>
-			<span class="composer-shortcut">Enter to send</span>
 		</div>
 	</div>
 </template>
@@ -113,39 +186,58 @@ function handleInputKeydown(e: KeyboardEvent) {
 
 .composer-inner-wrap {
 	position: relative;
-	width: min(920px, 100%);
+	width: min(960px, 100%);
 	margin: 0 auto;
 }
 
 .composer-dock {
 	display: flex;
-	align-items: center;
+	flex-direction: column;
 	gap: 10px;
-	padding: 10px;
-	border-radius: 16px;
+	padding: 12px;
+	border-radius: 18px;
 	border: 1px solid var(--border);
-	background: var(--bg-elevated);
-	transition: border-color 0.15s ease, background 0.15s ease;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--bg-elevated) 92%, transparent), var(--panel));
+	box-shadow: 0 20px 48px rgba(0, 0, 0, 0.12);
+	transition:
+		border-color 0.15s ease,
+		background 0.15s ease,
+		box-shadow 0.15s ease;
 }
 
 .composer-dock:focus-within {
 	border-color: var(--border-strong);
-	background: var(--panel);
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, transparent), var(--panel-2));
+	box-shadow: 0 26px 56px rgba(0, 0, 0, 0.16);
 }
 
 .composer-dock.disabled {
-	opacity: 0.7;
+	opacity: 0.74;
+}
+
+.composer-main-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 10px;
+	min-width: 0;
 }
 
 .prompt-input {
 	flex: 1;
-	height: 44px;
-	padding: 0 6px;
+	min-width: 0;
+	max-height: 160px;
+	padding: 10px 6px 8px;
 	border: none;
 	background: transparent;
 	color: var(--text);
-	font-size: 0.92rem;
+	font-size: 0.94rem;
+	line-height: 1.5;
 	outline: none;
+	resize: none;
+	overflow-y: hidden;
+	scrollbar-gutter: stable;
 }
 
 .prompt-input:disabled {
@@ -160,19 +252,24 @@ function handleInputKeydown(e: KeyboardEvent) {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 36px;
-	height: 36px;
-	border-radius: 10px;
+	width: 40px;
+	height: 40px;
+	border-radius: 12px;
 	border: 1px solid var(--border);
 	background: var(--button-bg);
 	color: var(--text);
 	cursor: pointer;
-	transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+	transition:
+		background 0.15s ease,
+		border-color 0.15s ease,
+		opacity 0.15s ease,
+		transform 0.15s ease;
 }
 
 .send-btn:hover:not(:disabled) {
 	background: var(--button-hover);
 	border-color: var(--border-strong);
+	transform: translateY(-1px);
 }
 
 .send-btn:disabled {
@@ -185,20 +282,54 @@ function handleInputKeydown(e: KeyboardEvent) {
 	height: 15px;
 }
 
-.composer-meta {
+.composer-footer-row {
 	display: flex;
+	align-items: center;
 	justify-content: space-between;
-	gap: 16px;
-	width: min(920px, 100%);
-	margin: 8px auto 0;
-	font-family: "SF Mono", "Monaco", "Menlo", monospace;
-	font-size: 0.68rem;
-	color: var(--text-subtle);
+	gap: 12px;
+	padding-top: 10px;
+	border-top: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+	min-width: 0;
 }
 
-.composer-status,
-.composer-shortcut {
+.composer-status-cluster,
+.composer-hints {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.composer-status-cluster {
+	flex: 1;
+}
+
+.composer-hints {
+	justify-content: flex-end;
+	flex-shrink: 0;
+}
+
+.composer-pill {
+	display: inline-flex;
+	align-items: center;
+	max-width: 100%;
+	height: 26px;
+	padding: 0 10px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+	background: color-mix(in srgb, var(--panel) 70%, transparent);
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.66rem;
+	color: var(--text-subtle);
 	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.composer-pill-model {
+	justify-content: flex-start;
+	min-width: 0;
+	max-width: 100%;
 }
 
 @media (max-width: 900px) {
@@ -210,12 +341,49 @@ function handleInputKeydown(e: KeyboardEvent) {
 		padding-bottom: max(12px, env(safe-area-inset-bottom));
 	}
 
+	.composer-inner-wrap {
+		width: 100%;
+	}
+
 	.prompt-input {
 		font-size: 16px;
 	}
 
-	.composer-meta {
-		font-size: 0.64rem;
+	.composer-footer-row {
+		flex-wrap: wrap;
+		align-items: flex-start;
+	}
+
+	.composer-status-cluster,
+	.composer-hints {
+		width: 100%;
+	}
+
+	.composer-hints {
+		justify-content: space-between;
+		flex-wrap: wrap;
+	}
+}
+
+@media (max-width: 640px) {
+	.composer-dock {
+		gap: 8px;
+		padding: 10px;
+	}
+
+	.composer-main-row {
+		gap: 8px;
+	}
+
+	.composer-footer-row {
+		gap: 10px;
+		padding-top: 8px;
+	}
+
+	.composer-pill {
+		font-size: 0.62rem;
+		height: 24px;
+		padding: 0 8px;
 	}
 }
 </style>

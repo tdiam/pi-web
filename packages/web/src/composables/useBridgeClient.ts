@@ -9,6 +9,7 @@ import type {
   ClientMessage,
   ServerMessage,
 } from "../shared-types";
+import { normalizeRpcModel, upsertModel, type RpcModelInfo } from "../utils/models";
 import { normalizeTranscript } from "../utils/transcript";
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,8 @@ const treeEntries = ref<TreeEntry[]>([]);
 const activeTreeSessionPath = ref<string | null>(null);
 const liveSessionPath = ref<string | null>(null);
 const commands = ref<RpcSlashCommand[]>([]);
+const availableModels = ref<RpcModelInfo[]>([]);
+const currentModel = ref<RpcModelInfo | null>(null);
 const isStreaming = ref(false);
 
 // Reconnect diagnostics
@@ -137,6 +140,23 @@ function scheduleReconnect() {
     if (!disposed) connect();
   }, reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+}
+
+function updateCurrentModel(value: unknown) {
+  currentModel.value = normalizeRpcModel(value);
+  if (currentModel.value) {
+    availableModels.value = upsertModel(availableModels.value, currentModel.value);
+  }
+}
+
+function updateAvailableModels(values: unknown[]) {
+  availableModels.value = values
+    .map((value) => normalizeRpcModel(value))
+    .filter((model): model is RpcModelInfo => model !== null);
+
+  if (currentModel.value) {
+    availableModels.value = upsertModel(availableModels.value, currentModel.value);
+  }
 }
 
 function sendEnvelope(msg: ClientMessage) {
@@ -250,6 +270,7 @@ function handleResponse(payload: RpcResponse) {
                 sessionFile: activeTreeSessionPath.value ?? data.sessionFile,
               }
             : data;
+          updateCurrentModel(data.model);
           isStreaming.value = data.isStreaming;
           if (!activeTreeSessionPath.value && data.sessionFile) {
             activeTreeSessionPath.value = data.sessionFile;
@@ -311,6 +332,18 @@ function handleResponse(payload: RpcResponse) {
         if (data) commands.value = data.commands;
         break;
       }
+      case "set_model": {
+        updateCurrentModel(payload.data);
+        if (currentModel.value) {
+          availableModels.value = upsertModel(availableModels.value, currentModel.value);
+        }
+        break;
+      }
+      case "get_available_models": {
+        const data = payload.data as { models: unknown[] } | undefined;
+        if (data) updateAvailableModels(data.models);
+        break;
+      }
     }
   }
 }
@@ -362,6 +395,14 @@ function handleEvent(payload: Record<string, unknown>) {
       isStreaming.value = false;
       // Refresh state after agent completes
       sendCommand({ type: "get_state" }).catch(() => {});
+      break;
+    }
+    case "model_select": {
+      const model = normalizeRpcModel((payload as { model?: unknown }).model ?? payload);
+      if (model) {
+        currentModel.value = model;
+        availableModels.value = upsertModel(availableModels.value, model);
+      }
       break;
     }
   }
@@ -429,6 +470,7 @@ async function fetchInitialState() {
       sendCommand({ type: "list_sessions" }),
       sendCommand({ type: "list_tree_entries" }),
       sendCommand({ type: "get_commands" }),
+      sendCommand({ type: "get_available_models" }),
     ]);
   } catch {
     // Individual errors already handled by reject; swallow aggregate
@@ -544,6 +586,8 @@ export function useBridgeClient() {
     liveSessionPath: readonly(liveSessionPath),
     isHistoricalView,
     commands: readonly(commands),
+    availableModels: readonly(availableModels),
+    currentModel: readonly(currentModel),
     isStreaming: readonly(isStreaming),
     // Reconnect diagnostics
     isReconnecting,

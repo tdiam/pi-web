@@ -197,6 +197,103 @@ describe("extension_ui_request handling", () => {
 		]);
 	});
 
+	it("tracks currentModel from state and model_select events", async () => {
+		const client = await importComposable();
+		const ws = getLastMockWs();
+		simulateOpen(ws);
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "get_state",
+				success: true,
+				data: {
+					sessionId: "session-1",
+					sessionFile: "/tmp/session-1.jsonl",
+					sessionName: "Session 1",
+					model: { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+					thinkingLevel: "normal",
+					isStreaming: false,
+					isCompacting: false,
+					steeringMode: "all",
+					followUpMode: "all",
+					autoCompactionEnabled: false,
+					messageCount: 0,
+					pendingMessageCount: 0,
+				},
+			},
+		});
+
+		expect(client.currentModel.value).toEqual({
+			provider: "openai",
+			id: "gpt-4.1",
+			name: "GPT-4.1",
+		});
+
+		simulateMessage(ws, {
+			type: "event",
+			payload: {
+				type: "model_select",
+				model: { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+				source: "set",
+			},
+		});
+
+		expect(client.currentModel.value).toEqual({
+			provider: "anthropic",
+			id: "claude-sonnet-4",
+			name: "Claude Sonnet 4",
+		});
+	});
+
+	it("stores available models and upserts new selections", async () => {
+		const client = await importComposable();
+		const ws = getLastMockWs();
+		simulateOpen(ws);
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "get_available_models",
+				success: true,
+				data: {
+					models: [
+						{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+						{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+					],
+				},
+			},
+		});
+
+		expect(client.availableModels.value).toEqual([
+			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+			{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+		]);
+
+		simulateMessage(ws, {
+			type: "response",
+			payload: {
+				type: "response",
+				command: "set_model",
+				success: true,
+				data: { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+			},
+		});
+
+		expect(client.currentModel.value).toEqual({
+			provider: "google",
+			id: "gemini-2.5-pro",
+			name: "Gemini 2.5 Pro",
+		});
+		expect(client.availableModels.value).toEqual([
+			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+			{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+			{ provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+		]);
+	});
+
 	it("handles select method by setting pendingExtensionRequest", async () => {
 		const client = await importComposable();
 		const ws = getLastMockWs();

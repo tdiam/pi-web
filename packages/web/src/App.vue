@@ -9,6 +9,7 @@ import ComposerBar from "./components/ComposerBar.vue";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
 import CompatWarning from "./components/CompatWarning.vue";
 import ReconnectBanner from "./components/ReconnectBanner.vue";
+import type { RpcModelInfo } from "./utils/models";
 
 type ThemeMode = "dark" | "light";
 
@@ -20,6 +21,8 @@ const {
 	treeEntries,
 	isHistoricalView,
 	commands,
+	availableModels,
+	currentModel,
 	isStreaming,
 	isReconnecting,
 	reconnectCount,
@@ -109,6 +112,18 @@ function handleTreeNavigate(entryId: string) {
 
 function handlePrompt(message: string) {
 	sendPrompt(message);
+}
+
+function handleModelSelect(model: RpcModelInfo) {
+	if (
+		currentModel.value &&
+		currentModel.value.provider === model.provider &&
+		currentModel.value.id === model.id
+	) {
+		return;
+	}
+
+	sendCommand({ type: "set_model", provider: model.provider, modelId: model.id }).catch(() => {});
 }
 
 function openTreePanel() {
@@ -224,7 +239,10 @@ watch(
 				<ComposerBar
 					:connection-status="connectionStatus"
 					:commands="commands"
+					:models="availableModels"
+					:selected-model="currentModel"
 					@submit="handlePrompt"
+					@select-model="handleModelSelect"
 				/>
 			</main>
 		</div>
