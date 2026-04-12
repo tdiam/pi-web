@@ -40,11 +40,6 @@ function roleLabel(role: string): string {
 	return role;
 }
 
-function truncateToolResult(text: string, maxLen = 500): { text: string; truncated: boolean } {
-	if (text.length <= maxLen) return { text, truncated: false };
-	return { text: `${text.slice(0, maxLen)}\n... (truncated)`, truncated: true };
-}
-
 const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
 
@@ -142,9 +137,6 @@ defineExpose({ preserveScroll });
 					<div v-if="isToolBlockExpanded(msg.id, -1)" class="tool-result-content">
 						<pre>{{ messageContent(msg) }}</pre>
 					</div>
-					<div v-else class="tool-result-preview">
-						{{ truncateToolResult(messageContent(msg)).text }}
-					</div>
 				</div>
 			</div>
 
@@ -179,9 +171,6 @@ defineExpose({ preserveScroll });
 								</button>
 								<div v-if="isToolBlockExpanded(msg.id, bIdx)" class="tool-result-content">
 									<pre>{{ block.resultText }}</pre>
-								</div>
-								<div v-else class="tool-result-preview">
-									{{ truncateToolResult(block.resultText).text }}
 								</div>
 							</div>
 							<div v-else class="tool-pending">Running...</div>
@@ -336,7 +325,6 @@ defineExpose({ preserveScroll });
 
 .thinking-block {
 	padding-left: 10px;
-	border-left: 1px solid var(--border-strong);
 }
 
 .thinking-toggle {
@@ -372,7 +360,6 @@ defineExpose({ preserveScroll });
 .tool-call-block,
 .tool-row {
 	padding-left: 10px;
-	border-left: 1px solid var(--border-strong);
 }
 
 .tool-call-header {
@@ -440,20 +427,6 @@ defineExpose({ preserveScroll });
 	text-align: center;
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.68rem;
-}
-
-.tool-result-preview {
-	margin-top: 8px;
-	white-space: pre-wrap;
-	word-break: break-word;
-	max-height: 80px;
-	overflow: hidden;
-	mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-	-webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-	font-family: "SF Mono", "Monaco", "Menlo", monospace;
-	font-size: 0.73rem;
-	line-height: 1.55;
-	color: var(--text-muted);
 }
 
 .tool-result-content {
