@@ -7,6 +7,7 @@
  */
 
 import { startBridge, type BridgeController } from "../../../src/bridge/lifecycle.js";
+import { isBridgeExitInput } from "../../../src/bridge/exit-input.js";
 import { createBridgeTerminalView } from "../../../src/bridge/terminal-log-view.js";
 import type { WsRpcAdapterContext } from "../../../src/bridge/ws-rpc-adapter.js";
 import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../../../src/bridge/types.js";
@@ -33,10 +34,15 @@ async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> 
 	};
 
 	let bridgeController: BridgeController | undefined;
+	let terminalView:
+		| (ReturnType<typeof createBridgeTerminalView> & { dispose: () => void })
+		| undefined;
+	let finishWebMode: (() => void) | undefined;
 
 	try {
 		bridgeController = await startBridge(config, adapterContext, () => {
 			terminalView?.requestExit();
+			finishWebMode?.();
 		});
 	} catch (err) {
 		const errorMsg = err instanceof Error ? err.message : String(err);
@@ -49,53 +55,74 @@ async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> 
 						"Press any key to exit...",
 					];
 				},
-				handleInput() { done(); },
+				handleInput() {
+					done();
+				},
 				invalidate() {},
-				done() {},
 			};
 		});
 		return;
 	}
 
-	let terminalView:
-		| (ReturnType<typeof createBridgeTerminalView> & { dispose: () => void })
-		| undefined;
+	const stdinExitHandler = (data: Buffer | string): void => {
+		const input = typeof data === "string" ? data : data.toString("utf8");
+		if (isBridgeExitInput(input)) {
+			finishWebMode?.();
+		}
+	};
 
-	await ctx.ui.custom((tui: any, _theme: any, kb: any, done: () => void) => {
-		terminalView = createBridgeTerminalView(
-			(handler: any) => bridgeController!.subscribe(handler),
-			() => bridgeController!.getState(),
-			() => bridgeController!.getClients(),
-			config,
-			() => bridgeController!.getToken(),
-			() => tui.requestRender()
-		);
+	process.stdin.on("data", stdinExitHandler);
 
-		return {
-			render() {
-				return terminalView.render();
-			},
-			handleInput(input: string) {
-				terminalView.handleInput(input);
-				if (kb?.matches?.(input, "clear") || terminalView.shouldExit()) {
-					done();
+	try {
+		await ctx.ui.custom((tui: any, _theme: any, kb: any, done: () => void) => {
+			let finishRequested = false;
+			finishWebMode = () => {
+				if (finishRequested) {
 					return;
 				}
-			},
-			shouldExit() {
-				return terminalView.shouldExit();
-			},
-			invalidate() {
-				tui.requestRender();
-			},
-			async done() {
-				terminalView?.dispose();
-				if (bridgeController) {
-					await bridgeController.stop();
-				}
-			},
-		};
-	});
+				finishRequested = true;
+				terminalView?.requestExit();
+				done();
+			};
+
+			terminalView = createBridgeTerminalView(
+				(handler: any) => bridgeController!.subscribe(handler),
+				() => bridgeController!.getState(),
+				() => bridgeController!.getClients(),
+				config,
+				() => bridgeController!.getToken(),
+				() => tui.requestRender()
+			);
+
+			return {
+				render() {
+					return terminalView.render();
+				},
+				handleInput(input: string) {
+					terminalView.handleInput(input);
+					if (isBridgeExitInput(input, kb) || terminalView.shouldExit()) {
+						finishWebMode?.();
+					}
+				},
+				shouldExit() {
+					return terminalView.shouldExit();
+				},
+				invalidate() {
+					tui.requestRender();
+				},
+				dispose() {
+					terminalView?.dispose();
+				},
+			};
+		});
+	} finally {
+		finishWebMode = undefined;
+		process.stdin.off("data", stdinExitHandler);
+		terminalView?.dispose();
+		if (bridgeController && bridgeController.getState().status !== "stopped") {
+			await bridgeController.stop();
+		}
+	}
 }
 
 export default function registerWebBridge(pi: any, state: any): void {
