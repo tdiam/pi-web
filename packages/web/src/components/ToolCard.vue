@@ -78,13 +78,13 @@ const editDiff = computed(() => {
 	gap: 10px;
 	padding: 12px 14px;
 	border: 1px solid var(--border);
-	border-left: 2px solid var(--border-strong);
+	/*border-left: 2px solid var(--border-strong);*/
 	border-radius: 12px;
 	background: var(--tool-card-bg);
 }
 
 .tool-card[data-status="success"] {
-	border-left-color: var(--text-subtle);
+	/*border-left-color: var(--text-subtle);*/
 }
 
 .tool-card[data-status="error"] {
