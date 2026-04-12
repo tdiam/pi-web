@@ -6,11 +6,11 @@
  * browser clients to interact with Pi via WebSocket RPC.
  */
 
-import { startBridge, type BridgeController } from "../../../src/bridge/lifecycle.js";
-import { isBridgeExitInput } from "../../../src/bridge/exit-input.js";
-import { createBridgeTerminalView } from "../../../src/bridge/terminal-log-view.js";
-import type { WsRpcAdapterContext } from "../../../src/bridge/ws-rpc-adapter.js";
-import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../../../src/bridge/types.js";
+import { startBridge, type BridgeController } from "../bridge/lifecycle.js";
+import { isBridgeExitInput } from "../bridge/exit-input.js";
+import { createBridgeTerminalView } from "../bridge/terminal-log-view.js";
+import type { WsRpcAdapterContext } from "../bridge/ws-rpc-adapter.js";
+import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../bridge/types.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
@@ -22,7 +22,7 @@ async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> 
 	};
 
 	const thisFile = fileURLToPath(import.meta.url);
-	const projectRoot = join(dirname(thisFile), "..", "..", "..");
+	const projectRoot = join(dirname(thisFile), "..", "..");
 	const webDistDir = join(projectRoot, "web-dist");
 	const staticDir = existsSync(webDistDir) ? webDistDir : undefined;
 
@@ -85,7 +85,7 @@ async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> 
 				done();
 			};
 
-			terminalView = createBridgeTerminalView(
+			const view = createBridgeTerminalView(
 				(handler: any) => bridgeController!.subscribe(handler),
 				() => bridgeController!.getState(),
 				() => bridgeController!.getClients(),
@@ -93,25 +93,26 @@ async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> 
 				() => bridgeController!.getToken(),
 				() => tui.requestRender()
 			);
+			terminalView = view;
 
 			return {
 				render() {
-					return terminalView.render();
+					return view.render();
 				},
 				handleInput(input: string) {
-					terminalView.handleInput(input);
-					if (isBridgeExitInput(input, kb) || terminalView.shouldExit()) {
+					view.handleInput(input);
+					if (isBridgeExitInput(input, kb) || view.shouldExit()) {
 						finishWebMode?.();
 					}
 				},
 				shouldExit() {
-					return terminalView.shouldExit();
+					return view.shouldExit();
 				},
 				invalidate() {
 					tui.requestRender();
 				},
 				dispose() {
-					terminalView?.dispose();
+					view.dispose();
 				},
 			};
 		});

@@ -39,7 +39,7 @@ The bridge is a Pi extension that runs in the same Node.js process:
 ## Project Structure
 
 ```
-src/bridge/
+packages/bridge/
   types.ts              # RPC protocol types, bridge config/state
   bridge-event-bus.ts   # Event fan-out with backpressure handling
   ws-rpc-adapter.ts     # WebSocket ↔ Pi extension API adapter
@@ -48,8 +48,12 @@ src/bridge/
   terminal-log-view.ts  # Read-only terminal UI
   __tests__/            # Comprehensive test suite (111 tests)
 
-.pi/agent/extensions/
-  web-bridge.ts         # Pi extension entry point, /web command
+packages/web/
+  src/                  # Browser chat UI
+  vite.config.ts        # Web app build configuration
+
+packages/bin/
+  index.ts              # Pi extension entry point, /web command
 ```
 
 ## Development

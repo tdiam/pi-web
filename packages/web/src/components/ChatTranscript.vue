@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
-import { contentBlocks, isToolResultMessage, messageContent } from "../transcript";
+import { contentBlocks, isToolResultMessage, messageContent } from "../utils/transcript";
 import MarkdownRenderer from "./MarkdownRenderer.vue";
+import ToolCard from "./ToolCard.vue";
 
 const props = defineProps<{
 	messages: readonly TranscriptEntry[];
@@ -72,6 +73,15 @@ function isThinkingExpanded(msgId: string | undefined, blockIdx: number): boolea
 	return expandedThinking.value.has(toolBlockKey(msgId, blockIdx));
 }
 
+function previewText(text: string, maxLines: number = 8): string {
+	const normalized = text.replace(/\r/g, "").trim();
+	if (!normalized) return "";
+	const lines = normalized.split("\n");
+	if (lines.length <= maxLines) return normalized;
+	const remaining = lines.length - maxLines;
+	return `${lines.slice(0, maxLines).join("\n")}\n... ${remaining} more line${remaining === 1 ? "" : "s"}`;
+}
+
 watch(
 	() => props.messages.length,
 	async () => {
@@ -127,16 +137,20 @@ defineExpose({ preserveScroll });
 					<span class="message-role">{{ roleLabel(msg.role) }}</span>
 				</div>
 				<div class="message-content tool-row">
-					<button
-						class="tool-result-toggle"
-						@click="toggleToolBlock(msg.id, -1)"
-						:title="isToolBlockExpanded(msg.id, -1) ? 'Collapse' : 'Expand'"
-					>
-						<span class="toggle-icon">{{ isToolBlockExpanded(msg.id, -1) ? '-' : '+' }}</span>
-						<span class="tool-result-label">{{ roleLabel(msg.role) }}</span>
-					</button>
-					<div v-if="isToolBlockExpanded(msg.id, -1)" class="tool-result-content">
-						<pre>{{ messageContent(msg) }}</pre>
+					<div class="tool-result-card">
+						<div class="tool-result-card-header">
+							<span class="tool-result-card-label">{{ roleLabel(msg.role) }}</span>
+							<button
+								type="button"
+								class="tool-result-card-toggle"
+								@click="toggleToolBlock(msg.id, -1)"
+								:title="isToolBlockExpanded(msg.id, -1) ? 'Collapse' : 'Expand'"
+							>
+								{{ isToolBlockExpanded(msg.id, -1) ? "Hide" : "Details" }}
+							</button>
+						</div>
+						<pre class="tool-result-card-preview">{{ previewText(messageContent(msg), 6) }}</pre>
+						<pre v-if="isToolBlockExpanded(msg.id, -1)" class="tool-result-card-details">{{ messageContent(msg) }}</pre>
 					</div>
 				</div>
 			</div>
@@ -152,30 +166,13 @@ defineExpose({ preserveScroll });
 							<pre v-if="isThinkingExpanded(msg.id, bIdx)" class="thinking-content">{{ block.text }}</pre>
 						</div>
 
-						<div v-else-if="block.kind === 'tool'" class="tool-call-block">
-							<span class="tool-call-header">
-								<span class="tool-call-kicker">tool</span>
-								<span class="tool-call-name">{{ block.toolName }}</span>
-							</span>
-							<details class="tool-call-details">
-								<summary>Arguments</summary>
-								<pre>{{ block.argumentsText }}</pre>
-							</details>
-							<div v-if="block.resultText" class="tool-result-inline">
-								<button
-									class="tool-result-toggle"
-									@click="toggleToolBlock(msg.id, bIdx)"
-									:title="isToolBlockExpanded(msg.id, bIdx) ? 'Collapse' : 'Expand'"
-								>
-									<span class="toggle-icon">{{ isToolBlockExpanded(msg.id, bIdx) ? '-' : '+' }}</span>
-									<span class="tool-result-label">Result</span>
-								</button>
-								<div v-if="isToolBlockExpanded(msg.id, bIdx)" class="tool-result-content">
-									<pre>{{ block.resultText }}</pre>
-								</div>
-							</div>
-							<div v-else class="tool-pending">Running...</div>
-						</div>
+						<ToolCard
+							v-else-if="block.kind === 'tool'"
+							class="tool-card-block"
+							:block="block"
+							:expanded="isToolBlockExpanded(msg.id, bIdx)"
+							@toggle="toggleToolBlock(msg.id, bIdx)"
+						/>
 
 						<MarkdownRenderer v-else-if="block.kind === 'text' && block.text" :content="block.text" />
 					</template>
@@ -310,11 +307,11 @@ defineExpose({ preserveScroll });
 
 .markdown-body + .markdown-body,
 .markdown-body + .thinking-block,
-.markdown-body + .tool-call-block,
+.markdown-body + .tool-card-block,
 .thinking-block + .markdown-body,
-.tool-call-block + .markdown-body,
-.tool-call-block + .thinking-block,
-.thinking-block + .tool-call-block {
+.tool-card-block + .markdown-body,
+.tool-card-block + .thinking-block,
+.thinking-block + .tool-card-block {
 	margin-top: 12px;
 }
 
@@ -352,69 +349,70 @@ defineExpose({ preserveScroll });
 	word-break: break-word;
 }
 
-.tool-call-block,
 .tool-row {
 	padding-left: 10px;
 }
 
-.tool-call-header {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
+.tool-result-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px 14px;
+	border: 1px solid var(--border);
+	border-left: 2px solid var(--border-strong);
+	border-radius: 12px;
+	background: var(--tool-card-bg);
 }
 
-.tool-call-kicker,
-.tool-result-label,
-.tool-pending {
+.tool-result-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.tool-result-card-label,
+.tool-result-card-toggle {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+}
+
+.tool-result-card-label {
 	font-size: 0.66rem;
+	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
 	color: var(--text-subtle);
 }
 
-.tool-call-name {
-	font-family: "SF Mono", "Monaco", "Menlo", monospace;
-	font-size: 0.76rem;
-	color: var(--text);
-}
-
-.tool-call-details,
-.tool-result-inline {
-	margin-top: 8px;
-}
-
-.tool-call-details summary {
+.tool-result-card-toggle {
+	padding: 5px 9px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--tool-card-bg) 72%, transparent);
+	font-size: 0.66rem;
+	color: var(--text-subtle);
 	cursor: pointer;
-	font-size: 0.73rem;
+}
+
+.tool-result-card-toggle:hover {
+	border-color: var(--border-strong);
 	color: var(--text-muted);
 }
 
-.tool-call-details pre,
-.tool-result-content pre {
-	margin: 8px 0 0;
+.tool-result-card-preview,
+.tool-result-card-details {
+	margin: 0;
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.72rem;
-	line-height: 1.55;
+	line-height: 1.6;
 	white-space: pre-wrap;
 	word-break: break-word;
 	color: var(--text-muted);
 }
 
-.tool-result-toggle {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	padding: 0;
-	background: none;
-	border: none;
-	color: var(--text-muted);
-	cursor: pointer;
-	text-align: left;
-}
-
-.tool-result-toggle:hover {
-	color: var(--text);
+.tool-result-card-details {
+	padding-top: 10px;
+	border-top: 1px solid var(--border);
 }
 
 .toggle-icon {
@@ -422,11 +420,6 @@ defineExpose({ preserveScroll });
 	text-align: center;
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.68rem;
-}
-
-.tool-result-content {
-	max-height: 320px;
-	overflow-y: auto;
 }
 
 .streaming-indicator {

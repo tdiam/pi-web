@@ -15,4 +15,4 @@ export type {
 	RpcExtensionUIResponse,
 	ClientMessage,
 	ServerMessage,
-} from "../../src/bridge/types";
+} from "../../bridge/types";

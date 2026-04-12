@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentBlocks, messageContent, normalizeTranscript, type TranscriptEntryLike } from "../transcript";
+import { contentBlocks, messageContent, normalizeTranscript, type TranscriptEntryLike } from "../utils/transcript";
 
 describe("normalizeTranscript", () => {
 	it("merges a standalone tool result into the preceding assistant tool call", () => {
@@ -28,8 +28,36 @@ describe("normalizeTranscript", () => {
 		expect(blocks[1]).toMatchObject({
 			kind: "tool",
 			toolName: "bash",
+			toolArgs: { command: "pwd" },
 			argumentsText: '{"command":"pwd"}',
 			resultText: "stdout: /repo",
+			toolStatus: "success",
+		});
+	});
+
+	it("preserves tool result details when merging tool messages", () => {
+		const diff = "--- a.ts\n+++ a.ts\n@@ -1 +1 @@\n-old\n+new";
+		const messages: TranscriptEntryLike[] = [
+			{
+				id: "a1",
+				role: "assistant",
+				content: [{ type: "toolCall", name: "edit", arguments: '{"path":"a.ts"}' }],
+			},
+			{
+				id: "t1",
+				role: "tool",
+				content: "Successfully replaced 1 block(s) in a.ts.",
+				details: { diff },
+			},
+		];
+
+		const normalized = normalizeTranscript(messages);
+		const blocks = contentBlocks(normalized[0]);
+		expect(blocks[0]).toMatchObject({
+			kind: "tool",
+			toolName: "edit",
+			resultText: "Successfully replaced 1 block(s) in a.ts.",
+			resultDetails: { diff },
 		});
 	});
 
@@ -50,8 +78,8 @@ describe("normalizeTranscript", () => {
 		const normalized = normalizeTranscript(messages);
 		const blocks = contentBlocks(normalized[0]);
 		expect(blocks).toHaveLength(2);
-		expect(blocks[0]).toMatchObject({ kind: "tool", toolName: "read", resultText: "A" });
-		expect(blocks[1]).toMatchObject({ kind: "tool", toolName: "read", resultText: "B" });
+		expect(blocks[0]).toMatchObject({ kind: "tool", toolName: "read", toolArgs: { path: "a.txt" }, resultText: "A" });
+		expect(blocks[1]).toMatchObject({ kind: "tool", toolName: "read", toolArgs: { path: "b.txt" }, resultText: "B" });
 	});
 
 	it("leaves unmatched tool results as standalone messages", () => {
@@ -77,6 +105,23 @@ describe("normalizeTranscript", () => {
 		expect(normalized[0]).not.toBe(assistant);
 		expect(normalized[0].content).not.toBe(assistant.content);
 		expect(assistant.content).toEqual([{ type: "toolCall", name: "bash", arguments: '{"command":"ls"}' }]);
+	});
+
+	it("marks tool blocks as pending until a result arrives", () => {
+		const message = {
+			role: "assistant",
+			content: [{ type: "toolCall", name: "write", arguments: '{"path":"note.txt","content":"hello"}' }],
+		} satisfies TranscriptEntryLike;
+
+		expect(contentBlocks(message)).toEqual([
+			{
+				kind: "tool",
+				toolName: "write",
+				toolArgs: { path: "note.txt", content: "hello" },
+				argumentsText: '{"path":"note.txt","content":"hello"}',
+				toolStatus: "pending",
+			},
+		]);
 	});
 
 	it("drops empty thinking blocks from assistant content", () => {

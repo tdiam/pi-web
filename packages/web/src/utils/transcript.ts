@@ -7,13 +7,34 @@ export interface TranscriptEntryLike {
 	[key: string]: unknown;
 }
 
-export interface ContentBlock {
-	kind: "text" | "tool" | "thinking" | "image";
-	text?: string;
-	toolName?: string;
-	argumentsText?: string;
-	resultText?: string;
+export type ToolBlockStatus = "pending" | "success" | "error";
+
+export interface TextContentBlock {
+	kind: "text";
+	text: string;
 }
+
+export interface ToolContentBlock {
+	kind: "tool";
+	toolName: string;
+	toolArgs: unknown;
+	argumentsText: string;
+	resultText?: string;
+	resultDetails?: unknown;
+	toolStatus: ToolBlockStatus;
+}
+
+export interface ThinkingContentBlock {
+	kind: "thinking";
+	text: string;
+}
+
+export interface ImageContentBlock {
+	kind: "image";
+	text: string;
+}
+
+export type ContentBlock = TextContentBlock | ToolContentBlock | ThinkingContentBlock | ImageContentBlock;
 
 interface UnknownBlock {
 	type?: string;
@@ -21,6 +42,7 @@ interface UnknownBlock {
 	thinking?: string;
 	name?: string;
 	arguments?: unknown;
+	details?: unknown;
 }
 
 export function isToolResultMessage(msg: TranscriptEntryLike): boolean {
@@ -89,15 +111,16 @@ export function contentBlocks(msg: TranscriptEntryLike): ContentBlock[] {
 			const nextBlock = content[index + 1];
 			const typedNextBlock = typeof nextBlock === "object" && nextBlock !== null ? (nextBlock as UnknownBlock) : undefined;
 			const resultText = typedNextBlock?.type === "toolResult" ? toolResultText(typedNextBlock) : undefined;
+			const resultDetails = typedNextBlock?.type === "toolResult" ? typedNextBlock.details : undefined;
 
 			blocks.push({
 				kind: "tool",
 				toolName: typeof typedBlock.name === "string" ? typedBlock.name : "unknown",
-				argumentsText:
-					typeof typedBlock.arguments === "string"
-						? typedBlock.arguments
-						: JSON.stringify(typedBlock.arguments ?? "", null, 2),
+				toolArgs: parseToolArguments(typedBlock.arguments),
+				argumentsText: toolArgumentsText(typedBlock.arguments),
 				resultText,
+				resultDetails,
+				toolStatus: toolStatusFromResult(resultText),
 			});
 
 			if (typedNextBlock?.type === "toolResult") {
@@ -168,6 +191,7 @@ function mergeToolResultIntoContent(content: unknown, toolResultMessage: Transcr
 	cloned.splice(targetIndex + 1, 0, {
 		type: "toolResult",
 		text: messageContent(toolResultMessage),
+		details: toolResultMessage.details,
 	});
 	return cloned;
 }
@@ -211,4 +235,28 @@ function cloneBlock(block: unknown): unknown {
 function toolResultText(block: UnknownBlock): string {
 	if (typeof block.text === "string") return block.text;
 	return JSON.stringify(block, null, 2);
+}
+
+function parseToolArguments(args: unknown): unknown {
+	if (typeof args !== "string") return args;
+	const trimmed = args.trim();
+	if (!trimmed) return "";
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return args;
+	}
+}
+
+function toolArgumentsText(args: unknown): string {
+	if (typeof args === "string") return args;
+	return JSON.stringify(args ?? "", null, 2);
+}
+
+function toolStatusFromResult(resultText: string | undefined): ToolBlockStatus {
+	if (!resultText) return "pending";
+	const firstLine = resultText.split("\n")[0]?.trim() ?? "";
+	if (/^(error|failed)\b/i.test(firstLine)) return "error";
+	if (/\b(command exited with code|timed out|aborted|not found)\b/i.test(resultText)) return "error";
+	return "success";
 }
