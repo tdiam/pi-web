@@ -1,4 +1,7 @@
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type { WebSocket } from "ws";
 import type { BridgeEventBus } from "./bridge-event-bus.js";
 import type {
@@ -21,10 +24,9 @@ import type {
 interface PiExtensionContext {
 	sessionManager: {
 		getBranch: () => unknown[];
-		messages: unknown[];
-		sessionId: string;
-		sessionFile?: string;
-		sessionName?: string;
+		getEntries: () => unknown[] | undefined;
+		getSessionId: () => string;
+		getSessionFile: () => string | undefined;
 	};
 	model: unknown;
 	modelRegistry: {
@@ -38,6 +40,7 @@ interface PiExtensionContext {
 	hasPendingMessages: () => boolean;
 	getContextUsage: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
 	getSystemPrompt: () => string;
+	cwd: string;
 }
 
 /**
@@ -334,11 +337,11 @@ export class WsRpcAdapter {
 					isCompacting: false, // Not directly exposed
 					steeringMode: "all", // Default, not directly exposed
 					followUpMode: "all", // Default, not directly exposed
-					sessionFile: ctx.sessionManager.sessionFile,
-					sessionId: ctx.sessionManager.sessionId,
-					sessionName: ctx.sessionManager.sessionName,
+					sessionFile: ctx.sessionManager.getSessionFile(),
+					sessionId: ctx.sessionManager.getSessionId(),
+					sessionName: pi.getSessionName() ?? undefined,
 					autoCompactionEnabled: false, // Not directly exposed
-					messageCount: ctx.sessionManager.messages.length,
+					messageCount: ctx.sessionManager.getEntries()?.length ?? 0,
 					pendingMessageCount: ctx.hasPendingMessages() ? 1 : 0,
 				};
 				return { id: correlationId, type: "response", command: "get_state", success: true, data: state };
@@ -518,7 +521,7 @@ export class WsRpcAdapter {
 						tokens: usage?.tokens ?? null,
 						contextWindow: usage?.contextWindow ?? 0,
 						percent: usage?.percent ?? null,
-						messageCount: ctx.sessionManager.messages.length,
+						messageCount: ctx.sessionManager.getEntries()?.length ?? 0,
 					},
 				};
 			}
@@ -534,14 +537,64 @@ export class WsRpcAdapter {
 			}
 
 			case "switch_session": {
-				const result = await ctx.switchSession(command.sessionPath);
-				return {
-					id: correlationId,
-					type: "response",
-					command: "switch_session",
-					success: true,
-					data: result,
-				};
+				// Read session file and return messages — do NOT call ctx.switchSession()
+				// because that would resume the session in the TUI, disrupting the
+				// read-only log view that /web displays.
+				try {
+					const sessionPath = command.sessionPath as string;
+					if (!sessionPath || !fs.existsSync(sessionPath)) {
+						return {
+							id: correlationId,
+							type: "response",
+							command: "switch_session",
+							success: false,
+							error: "Session file not found",
+						};
+					}
+
+					const content = fs.readFileSync(sessionPath, "utf8");
+					const lines = content.split("\n").filter((l: string) => l.trim());
+					const messages: unknown[] = [];
+					let sessionMeta: { id?: string; timestamp?: string; cwd?: string } | undefined;
+
+					for (const line of lines) {
+						try {
+							const entry = JSON.parse(line);
+							if (entry.type === "session") {
+								sessionMeta = entry;
+							} else if (entry.type === "message" && entry.message) {
+								// JSONL entries wrap messages: { type: "message", message: { role, content, ... } }
+								messages.push({ id: entry.id, ...entry.message });
+							} else if (entry.role !== undefined) {
+								// Already-flattened format (shouldn't happen in JSONL but handle it)
+								messages.push(entry);
+							}
+						} catch {
+							// Skip malformed lines
+						}
+					}
+
+					return {
+						id: correlationId,
+						type: "response" as const,
+						command: "switch_session" as const,
+						success: true as const,
+						data: {
+							messages,
+							sessionId: sessionMeta?.id ?? "",
+							sessionName: path.basename(sessionPath, ".jsonl"),
+							cancelled: false,
+						},
+					};
+				} catch (err) {
+					return {
+						id: correlationId,
+						type: "response",
+						command: "switch_session",
+						success: false,
+						error: err instanceof Error ? err.message : String(err),
+					};
+				}
 			}
 
 			case "fork": {
@@ -671,13 +724,44 @@ export class WsRpcAdapter {
 
 			case "list_sessions": {
 				try {
-					const sessions = [
-						{
-							id: ctx.sessionManager.sessionId,
-							name: pi.getSessionName() ?? ctx.sessionManager.sessionName ?? "Untitled",
-							path: ctx.sessionManager.sessionFile ?? "",
-						},
-					];
+					const sessions: Array<{ id: string; name: string; path: string; timestamp?: string }> = [];
+
+					// Scan project session directory for all sessions
+					const gsdHome = process.env.GSD_HOME || path.join(os.homedir(), ".gsd");
+					const safeCwd = ctx.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
+					const projectSessionDir = path.join(gsdHome, "sessions", `--${safeCwd}--`);
+
+					if (fs.existsSync(projectSessionDir)) {
+						const files = fs.readdirSync(projectSessionDir)
+							.filter((f: string) => f.endsWith(".jsonl"))
+							.sort()
+							.reverse(); // newest first
+
+						const currentSessionId = ctx.sessionManager.getSessionId();
+
+						for (const file of files) {
+							const filePath = path.join(projectSessionDir, file);
+							try {
+								const fd = fs.openSync(filePath, "r");
+								const buf = Buffer.alloc(512);
+								const bytesRead = fs.readSync(fd, buf, 0, 512, 0);
+								fs.closeSync(fd);
+								const firstLine = buf.toString("utf8", 0, bytesRead).split("\n")[0];
+								if (!firstLine) continue;
+								const header = JSON.parse(firstLine);
+								if (header.type !== "session") continue;
+								sessions.push({
+									id: header.id,
+									name: file.replace(/\.jsonl$/, ""),
+									path: filePath,
+									timestamp: header.timestamp,
+								});
+							} catch {
+								// Skip malformed session files
+							}
+						}
+					}
+
 					return {
 						id: correlationId,
 						type: "response" as const,
@@ -691,7 +775,7 @@ export class WsRpcAdapter {
 						type: "response" as const,
 						command: "list_sessions" as const,
 						success: true as const,
-						data: { sessions: [] as Array<{ id: string; name: string; path: string }> },
+						data: { sessions: [] as Array<{ id: string; name: string; path: string; timestamp?: string }> },
 					};
 				}
 			}

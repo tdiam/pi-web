@@ -118,7 +118,7 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "abort_bash"; success: true }
 	| { id?: string; type: "response"; command: "get_session_stats"; success: true; data: unknown }
 	| { id?: string; type: "response"; command: "export_html"; success: true; data: { path: string } }
-	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { cancelled: boolean } }
+	| { id?: string; type: "response"; command: "switch_session"; success: true; data: { messages: unknown[]; sessionId: string; sessionName: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "fork"; success: true; data: { text: string; cancelled: boolean } }
 	| { id?: string; type: "response"; command: "get_fork_messages"; success: true; data: { messages: Array<{ entryId: string; text: string }> }
 	}

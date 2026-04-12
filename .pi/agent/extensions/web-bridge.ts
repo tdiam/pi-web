@@ -10,123 +10,27 @@ import { startBridge, type BridgeController } from "../../../src/bridge/lifecycl
 import { createBridgeTerminalView } from "../../../src/bridge/terminal-log-view.js";
 import type { WsRpcAdapterContext } from "../../../src/bridge/ws-rpc-adapter.js";
 import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../../../src/bridge/types.js";
-
-/**
- * Pi extension context provided by the agent
- */
-interface PiAgentContext {
-	sessionManager: {
-		getBranch: () => unknown[];
-		messages: unknown[];
-		sessionId: string;
-		sessionFile?: string;
-		sessionName?: string;
-	};
-	model: unknown;
-	modelRegistry: {
-		getAvailable: () => Promise<unknown[]>;
-	};
-	isIdle: () => boolean;
-	signal: AbortSignal | undefined;
-	abort: () => void;
-	compact: (options?: { onComplete?: (result: unknown) => void; onError?: (error: Error) => void }) => void;
-	shutdown: () => void;
-	hasPendingMessages: () => boolean;
-	getContextUsage: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined;
-	getSystemPrompt: () => string;
-	waitForIdle: () => Promise<void>;
-	newSession: (options?: { parentSession?: string }) => Promise<{ cancelled: boolean }>;
-	fork: (entryId: string) => Promise<{ cancelled: boolean }>;
-	navigateTree: (
-		targetId: string,
-		options?: {
-			summarize?: boolean;
-			customInstructions?: string;
-			replaceInstructions?: boolean;
-			label?: string;
-		}
-	) => Promise<{ cancelled: boolean }>;
-	switchSession: (sessionPath: string) => Promise<{ cancelled: boolean }>;
-}
-
-/**
- * Pi extension API surface
- */
-interface PiExtensionAPI {
-	sendUserMessage: (
-		content: string | unknown[],
-		options?: { deliverAs?: "steer" | "followUp" }
-	) => void;
-	setModel: (model: unknown) => Promise<boolean>;
-	setThinkingLevel: (level: unknown) => void;
-	getThinkingLevel: () => unknown;
-	setSessionName: (name: string) => void;
-	getSessionName: () => string | undefined;
-	getCommands: () => Array<{ name: string; description?: string; source: string }>;
-	on: (event: string, handler: (event: object) => void) => void;
-}
-
-/**
- * Full extension context
- */
-interface ExtensionContext {
-	pi: PiExtensionAPI;
-	ctx: PiAgentContext;
-	ui: {
-		custom: (options: {
-			title: string;
-			header?: string;
-			footer?: string;
-			render: () => string[];
-			handleInput?: (input: string) => void;
-			shouldExit?: () => boolean;
-			done: () => void;
-		}) => void;
-	};
-}
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
 
 /**
  * Command handler for `/web`
  */
-export default async function webBridgeCommand(ctx: ExtensionContext): Promise<void> {
-	// Build the adapter context from extension context
+async function webBridgeHandler(args: string, ctx: any, pi: any): Promise<void> {
+	// Build the adapter context:
+	// - pi (the PiExtensionAPI): sendUserMessage, setModel, on, etc.
+	// - ctx (the command context): sessionManager, model, modelRegistry, ui, etc.
 	const adapterContext: WsRpcAdapterContext = {
-		pi: ctx.pi,
-		ctx: {
-			sessionManager: ctx.ctx.sessionManager,
-			model: ctx.ctx.model,
-			modelRegistry: ctx.ctx.modelRegistry,
-			isIdle: ctx.ctx.isIdle,
-			signal: ctx.ctx.signal,
-			abort: ctx.ctx.abort,
-			compact: ctx.ctx.compact,
-			shutdown: ctx.ctx.shutdown,
-			hasPendingMessages: ctx.ctx.hasPendingMessages,
-			getContextUsage: ctx.ctx.getContextUsage,
-			getSystemPrompt: ctx.ctx.getSystemPrompt,
-			waitForIdle: ctx.ctx.waitForIdle,
-			newSession: ctx.ctx.newSession,
-			fork: ctx.ctx.fork,
-			navigateTree: ctx.ctx.navigateTree,
-			switchSession: ctx.ctx.switchSession,
-		},
+		pi,
+		ctx,
 	};
 
 	// Resolve web-dist directory for static bundle serving
-	const webDistDir = (() => {
-		try {
-			const { fileURLToPath } = await import("node:url");
-			const { dirname, join } = await import("node:path");
-			const thisFile = fileURLToPath(import.meta.url);
-			const projectRoot = join(dirname(thisFile), "..", "..", "..");
-			return join(projectRoot, "web-dist");
-		} catch {
-			return undefined;
-		}
-	})();
-
-	const { existsSync } = await import("node:fs");
-	const staticDir = webDistDir && existsSync(webDistDir) ? webDistDir : undefined;
+	const thisFile = fileURLToPath(import.meta.url);
+	const projectRoot = join(dirname(thisFile), "..", "..", "..");
+	const webDistDir = join(projectRoot, "web-dist");
+	const staticDir = existsSync(webDistDir) ? webDistDir : undefined;
 
 	// Bridge configuration (could be extended to read from config file)
 	// Note: DEFAULT_BRIDGE_CONFIG.host is "0.0.0.0" so the bridge is reachable from LAN.
@@ -151,22 +55,26 @@ export default async function webBridgeCommand(ctx: ExtensionContext): Promise<v
 		});
 	} catch (err) {
 		const errorMsg = err instanceof Error ? err.message : String(err);
-		ctx.ui.custom({
-			title: "🌉 Pi Web Bridge - Error",
-			header: "Failed to start bridge server",
-			render: () => [
-				`Error: ${errorMsg}`,
-				"",
-				"Press any key to exit...",
-			],
-			done: () => {},
+		await ctx.ui.custom((_tui: any, _theme: any, _kb: any, done: () => void) => {
+			return {
+				render() {
+					return [
+						`Error: ${errorMsg}`,
+						"",
+						"Press any key to exit...",
+					];
+				},
+				handleInput() { done(); },
+				invalidate() {},
+				done() {},
+			};
 		});
 		return;
 	}
 
 	// Create terminal log view subscribed to bridge events
 	const terminalView = createBridgeTerminalView(
-		(handler) => bridgeController!.subscribe(handler),
+		(handler: any) => bridgeController!.subscribe(handler),
 		() => bridgeController!.getState(),
 		() => bridgeController!.getClients(),
 		config,
@@ -174,23 +82,39 @@ export default async function webBridgeCommand(ctx: ExtensionContext): Promise<v
 	);
 
 	// Render the custom UI - this degrades terminal to read-only log view
-	ctx.ui.custom({
-		title: "🌉 Pi Web Bridge",
-		render: () => terminalView.render(),
-		handleInput: (input: string) => {
-			// Read-only view - only handle Ctrl+C via shouldExit
-			terminalView.handleInput(input);
-		},
-		shouldExit: () => terminalView.shouldExit(),
-		done: async () => {
-			// Cleanup: stop bridge and dispose view
-			terminalView.dispose();
-			if (bridgeController) {
-				await bridgeController.stop();
-			}
+	await ctx.ui.custom((_tui: any, _theme: any, _kb: any, done: () => void) => {
+		return {
+			render() { return terminalView.render(); },
+			handleInput(input: string) {
+				terminalView.handleInput(input);
+			},
+			shouldExit() { return terminalView.shouldExit(); },
+			invalidate() {},
+			async done() {
+				terminalView.dispose();
+				if (bridgeController) {
+					await bridgeController.stop();
+				}
+			},
+		};
+	});
+}
+
+/**
+ * Extension entry point — registers the /web command.
+ *
+ * Pi calls this with (pi, state) at load time.
+ * pi: the extension API surface (sendUserMessage, registerCommand, on, etc.)
+ * state: shared state bag (rarely needed)
+ */
+export default function registerWebBridge(pi: any, state: any): void {
+	pi.registerCommand("web", {
+		description: "Start web bridge server for browser-based interaction",
+		handler: async (args: string, ctx: any) => {
+			await webBridgeHandler(args, ctx, pi);
 		},
 	});
 }
 
-// Export for testing
-export { webBridgeCommand };
+// Export handler for testing
+export { webBridgeHandler };

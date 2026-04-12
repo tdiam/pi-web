@@ -215,6 +215,18 @@ function handleResponse(payload: RpcResponse) {
 				if (data) sessions.value = data.sessions;
 				break;
 			}
+			case "switch_session": {
+				const data = payload.data as { messages: TranscriptEntry[]; sessionId?: string; sessionName?: string } | undefined;
+				if (data && Array.isArray(data.messages)) {
+					// Force a completely new array reference for Vue reactivity
+					transcript.value = [...data.messages];
+					// Update the displayed active session
+					if (data.sessionId) {
+						sessionState.value = { ...sessionState.value, sessionId: data.sessionId } as RpcSessionState;
+					}
+				}
+				break;
+			}
 			case "list_tree_entries": {
 				const data = payload.data as { entries: TreeEntry[] } | undefined;
 				if (data) treeEntries.value = data.entries;

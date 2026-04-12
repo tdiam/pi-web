@@ -1,4 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type { WebSocket } from "ws";
 import { BridgeEventBus } from "../bridge-event-bus.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
@@ -38,10 +41,9 @@ const createMockContext = (): WsRpcAdapterContext => ({
 	ctx: {
 		sessionManager: {
 			getBranch: vi.fn().mockReturnValue([{ role: "user", content: "Hello" }]),
-			messages: [{ role: "user", content: "Hello" }],
-			sessionId: "session-123",
-			sessionFile: "/path/to/session.json",
-			sessionName: "Test Session",
+			getEntries: vi.fn().mockReturnValue([{ role: "user", content: "Hello" }]),
+			getSessionId: vi.fn().mockReturnValue("session-123"),
+			getSessionFile: vi.fn().mockReturnValue("/path/to/session.json"),
 		},
 		model: { id: "gpt-4", provider: "openai" },
 		modelRegistry: {
@@ -58,6 +60,7 @@ const createMockContext = (): WsRpcAdapterContext => ({
 		hasPendingMessages: vi.fn().mockReturnValue(false),
 		getContextUsage: vi.fn().mockReturnValue({ tokens: 1000, contextWindow: 8000, percent: 12.5 }),
 		getSystemPrompt: vi.fn().mockReturnValue("You are a helpful assistant."),
+		cwd: "/test/project",
 		waitForIdle: vi.fn().mockResolvedValue(undefined),
 		newSession: vi.fn().mockResolvedValue({ cancelled: false }),
 		fork: vi.fn().mockResolvedValue({ cancelled: false }),
@@ -498,17 +501,11 @@ describe("WsRpcAdapter", () => {
 			expect(response.type).toBe("response");
 			expect(response.payload.command).toBe("list_sessions");
 			expect(response.payload.success).toBe(true);
-			expect(response.payload.data.sessions).toHaveLength(1);
-			expect(response.payload.data.sessions[0]).toEqual({
-				id: "session-123",
-				name: "test-session",
-				path: "/path/to/session.json",
-			});
+			expect(Array.isArray(response.payload.data.sessions)).toBe(true);
 		});
 
-		it("should handle list_sessions when sessionName is undefined", async () => {
+		it("should handle list_sessions when no sessions directory exists", async () => {
 			(context.pi.getSessionName as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
-			(context.ctx.sessionManager as { sessionName: string | undefined }).sessionName = undefined;
 
 			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
@@ -523,7 +520,7 @@ describe("WsRpcAdapter", () => {
 			const response = JSON.parse(lastCall);
 
 			expect(response.payload.success).toBe(true);
-			expect(response.payload.data.sessions[0].name).toBe("Untitled");
+			expect(response.payload.data.sessions).toEqual([]);
 		});
 
 		it("should handle list_tree_entries command", async () => {
@@ -598,12 +595,10 @@ describe("WsRpcAdapter", () => {
 			expect(response.payload.data.entries[0].id).toBe("entry-1");
 		});
 
-		it("should return empty sessions when sessionManager throws", async () => {
-			(context.ctx.sessionManager as unknown as { sessionId: string }).sessionId = undefined as unknown as string;
-			Object.defineProperty(context.ctx.sessionManager, 'sessionId', {
-				get() { throw new Error("Session not available"); },
-				configurable: true,
-			});
+		it("should return empty sessions when scanning fails", async () => {
+			// Force an error in session scanning by making cwd undefined
+			const origCwd = context.ctx.cwd;
+			(context.ctx as unknown as Record<string, unknown>).cwd = undefined;
 
 			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
@@ -619,6 +614,8 @@ describe("WsRpcAdapter", () => {
 
 			expect(response.payload.success).toBe(true);
 			expect(response.payload.data.sessions).toEqual([]);
+			// Restore
+			(context.ctx as unknown as Record<string, unknown>).cwd = origCwd;
 		});
 
 		it("should return empty entries when getBranch throws", async () => {
@@ -785,7 +782,16 @@ describe("WsRpcAdapter", () => {
 		});
 
 		it("should handle switch_session command", async () => {
-			const command: RpcCommand = { id: "cmd-1", type: "switch_session", sessionPath: "/path/to/session.json" };
+			// Create a temporary session file for the test
+			const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-test-"));
+			const sessionFile = path.join(tmpDir, "test-session.jsonl");
+			fs.writeFileSync(sessionFile, [
+				JSON.stringify({ type: "session", id: "test-id-123", timestamp: "2025-01-01T00:00:00Z" }),
+				JSON.stringify({ type: "message", id: "m1", timestamp: "2025-01-01T00:00:01Z", message: { role: "user", content: "Hello" } }),
+				JSON.stringify({ type: "message", id: "m2", timestamp: "2025-01-01T00:00:02Z", message: { role: "assistant", content: "Hi" } }),
+			].join("\n"));
+
+			const command: RpcCommand = { id: "cmd-1", type: "switch_session", sessionPath: sessionFile };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
 				"message",
 				Buffer.from(JSON.stringify({ type: "command", payload: command }))
@@ -793,11 +799,29 @@ describe("WsRpcAdapter", () => {
 
 			await new Promise((r) => setTimeout(r, 10));
 
-			expect(context.ctx.switchSession).toHaveBeenCalledWith("/path/to/session.json");
-
 			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
 			const lastCall = JSON.parse(sendCalls[sendCalls.length - 1][0] as string);
 			expect(lastCall.payload.success).toBe(true);
+			expect(lastCall.payload.data.messages).toHaveLength(2);
+			expect(lastCall.payload.data.sessionId).toBe("test-id-123");
+
+			// Cleanup
+			fs.rmSync(tmpDir, { recursive: true, force: true });
+		});
+
+		it("should return error for switch_session with non-existent file", async () => {
+			const command: RpcCommand = { id: "cmd-1", type: "switch_session", sessionPath: "/non/existent/path.json" };
+			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+				"message",
+				Buffer.from(JSON.stringify({ type: "command", payload: command }))
+			);
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+			const lastCall = JSON.parse(sendCalls[sendCalls.length - 1][0] as string);
+			expect(lastCall.payload.success).toBe(false);
+			expect(lastCall.payload.error).toContain("not found");
 		});
 	});
 });

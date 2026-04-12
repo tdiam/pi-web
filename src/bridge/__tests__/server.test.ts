@@ -63,10 +63,9 @@ describe("BridgeServer", () => {
 		ctx: {
 			sessionManager: {
 				getBranch: vi.fn().mockReturnValue([]),
-				messages: [],
-				sessionId: "test-session",
-				sessionFile: "/test/session.json",
-				sessionName: "Test Session",
+				getEntries: vi.fn().mockReturnValue([]),
+				getSessionId: vi.fn().mockReturnValue("test-session"),
+				getSessionFile: vi.fn().mockReturnValue("/test/session.json"),
 			},
 			model: { id: "test-model", provider: "test" },
 			modelRegistry: {
@@ -80,6 +79,7 @@ describe("BridgeServer", () => {
 			hasPendingMessages: vi.fn().mockReturnValue(false),
 			getContextUsage: vi.fn().mockReturnValue({ tokens: 100, contextWindow: 1000, percent: 10 }),
 			getSystemPrompt: vi.fn().mockReturnValue("test prompt"),
+			cwd: "/test/project",
 			waitForIdle: vi.fn().mockResolvedValue(undefined),
 			newSession: vi.fn().mockResolvedValue({ cancelled: false }),
 			fork: vi.fn().mockResolvedValue({ cancelled: false }),
