@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
+import { contentBlocks, isToolResultMessage, messageContent } from "../transcript";
 
 const props = defineProps<{
 	messages: readonly TranscriptEntry[];
@@ -41,92 +42,40 @@ function roleLabel(role: string): string {
 	return role;
 }
 
-interface ContentBlock {
-	kind: "text" | "toolCall" | "thinking" | "image";
-	text: string;
-	toolName?: string;
-}
-
-function contentBlocks(msg: TranscriptEntry): ContentBlock[] {
-	const content = msg.content;
-	const blocks: ContentBlock[] = [];
-
-	if (typeof content === "string") {
-		blocks.push({ kind: "text", text: content });
-		return blocks;
-	}
-
-	if (typeof msg.text === "string") {
-		blocks.push({ kind: "text", text: msg.text });
-		return blocks;
-	}
-
-	if (!Array.isArray(content)) return blocks;
-
-	for (const block of content as unknown[]) {
-		if (typeof block === "string") {
-			blocks.push({ kind: "text", text: block });
-			continue;
-		}
-
-		const b = block as Record<string, unknown>;
-		const type = b.type as string | undefined;
-
-		if (type === "text" && typeof b.text === "string") {
-			blocks.push({ kind: "text", text: b.text });
-		} else if (type === "thinking" && typeof b.thinking === "string") {
-			blocks.push({ kind: "thinking", text: b.thinking });
-		} else if (type === "toolCall") {
-			blocks.push({
-				kind: "toolCall",
-				text: typeof b.arguments === "string" ? b.arguments : JSON.stringify(b.arguments ?? "", null, 2),
-				toolName: (b.name as string) ?? "unknown",
-			});
-		} else if (type === "toolResult") {
-			const text = typeof b.text === "string" ? b.text : JSON.stringify(block, null, 2);
-			blocks.push({ kind: "text", text });
-		} else if (type === "image" || type === "image_url") {
-			blocks.push({ kind: "image", text: "[image]" });
-		}
-	}
-
-	return blocks;
-}
-
 function truncateToolResult(text: string, maxLen = 500): { text: string; truncated: boolean } {
 	if (text.length <= maxLen) return { text, truncated: false };
-	return { text: text.slice(0, maxLen) + "\n... (truncated)", truncated: true };
+	return { text: `${text.slice(0, maxLen)}\n... (truncated)`, truncated: true };
 }
 
-function isToolResultMessage(msg: TranscriptEntry): boolean {
-	return msg.role === "toolResult" || msg.role === "tool";
-}
-
-const expandedToolResults = ref(new Set<string>());
+const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
 
-function toggleToolResult(msgId: string | undefined) {
-	if (!msgId) return;
-	const next = new Set(expandedToolResults.value);
-	if (next.has(msgId)) next.delete(msgId);
-	else next.add(msgId);
-	expandedToolResults.value = next;
+function toolBlockKey(msgId: string | undefined, blockIdx: number): string {
+	return `${msgId ?? ""}-${blockIdx}`;
+}
+
+function toggleToolBlock(msgId: string | undefined, blockIdx: number) {
+	const key = toolBlockKey(msgId, blockIdx);
+	const next = new Set(expandedToolBlocks.value);
+	if (next.has(key)) next.delete(key);
+	else next.add(key);
+	expandedToolBlocks.value = next;
 }
 
 function toggleThinking(msgId: string | undefined, blockIdx: number) {
-	const key = `${msgId ?? ""}-${blockIdx}`;
+	const key = toolBlockKey(msgId, blockIdx);
 	const next = new Set(expandedThinking.value);
 	if (next.has(key)) next.delete(key);
 	else next.add(key);
 	expandedThinking.value = next;
 }
 
-function isToolResultExpanded(msgId: string | undefined): boolean {
-	return msgId ? expandedToolResults.value.has(msgId) : false;
+function isToolBlockExpanded(msgId: string | undefined, blockIdx: number): boolean {
+	return expandedToolBlocks.value.has(toolBlockKey(msgId, blockIdx));
 }
 
 function isThinkingExpanded(msgId: string | undefined, blockIdx: number): boolean {
-	return expandedThinking.value.has(`${msgId ?? ""}-${blockIdx}`);
+	return expandedThinking.value.has(toolBlockKey(msgId, blockIdx));
 }
 
 watch(
@@ -159,7 +108,7 @@ watch(
 watch(
 	() => props.messages,
 	() => {
-		expandedToolResults.value = new Set();
+		expandedToolBlocks.value = new Set();
 		expandedThinking.value = new Set();
 	},
 	{ deep: false },
@@ -186,13 +135,13 @@ defineExpose({ preserveScroll });
 				<div class="message-content tool-row">
 					<button
 						class="tool-result-toggle"
-						@click="toggleToolResult(msg.id)"
-						:title="isToolResultExpanded(msg.id) ? 'Collapse' : 'Expand'"
+						@click="toggleToolBlock(msg.id, -1)"
+						:title="isToolBlockExpanded(msg.id, -1) ? 'Collapse' : 'Expand'"
 					>
-						<span class="toggle-icon">{{ isToolResultExpanded(msg.id) ? '-' : '+' }}</span>
+						<span class="toggle-icon">{{ isToolBlockExpanded(msg.id, -1) ? '-' : '+' }}</span>
 						<span class="tool-result-label">{{ roleLabel(msg.role) }}</span>
 					</button>
-					<div v-if="isToolResultExpanded(msg.id)" class="tool-result-content">
+					<div v-if="isToolBlockExpanded(msg.id, -1)" class="tool-result-content">
 						<pre>{{ messageContent(msg) }}</pre>
 					</div>
 					<div v-else class="tool-result-preview">
@@ -215,15 +164,32 @@ defineExpose({ preserveScroll });
 							<pre v-if="isThinkingExpanded(msg.id, bIdx)" class="thinking-content">{{ block.text }}</pre>
 						</div>
 
-						<div v-else-if="block.kind === 'toolCall'" class="tool-call-block">
+						<div v-else-if="block.kind === 'tool'" class="tool-call-block">
 							<span class="tool-call-header">
 								<span class="tool-call-kicker">tool</span>
 								<span class="tool-call-name">{{ block.toolName }}</span>
 							</span>
 							<details class="tool-call-details">
 								<summary>Arguments</summary>
-								<pre>{{ block.text }}</pre>
+								<pre>{{ block.argumentsText }}</pre>
 							</details>
+							<div v-if="block.resultText" class="tool-result-inline">
+								<button
+									class="tool-result-toggle"
+									@click="toggleToolBlock(msg.id, bIdx)"
+									:title="isToolBlockExpanded(msg.id, bIdx) ? 'Collapse' : 'Expand'"
+								>
+									<span class="toggle-icon">{{ isToolBlockExpanded(msg.id, bIdx) ? '-' : '+' }}</span>
+									<span class="tool-result-label">Result</span>
+								</button>
+								<div v-if="isToolBlockExpanded(msg.id, bIdx)" class="tool-result-content">
+									<pre>{{ block.resultText }}</pre>
+								</div>
+								<div v-else class="tool-result-preview">
+									{{ truncateToolResult(block.resultText).text }}
+								</div>
+							</div>
+							<div v-else class="tool-pending">Running...</div>
 						</div>
 
 						<div v-else-if="block.kind === 'text' && block.text" class="text-block">
@@ -242,27 +208,6 @@ defineExpose({ preserveScroll });
 		</div>
 	</div>
 </template>
-
-<script lang="ts">
-function messageContent(msg: { content?: unknown; text?: string }): string {
-	const content = msg.content;
-	if (typeof content === "string") return content;
-	if (typeof msg.text === "string") return msg.text;
-	if (Array.isArray(content)) {
-		return (content as unknown[])
-			.map((block: unknown) => {
-				if (typeof block === "string") return block;
-				const b = block as { type?: string; text?: string };
-				if (b.type === "text" && typeof b.text === "string") return b.text;
-				return "";
-			})
-			.filter(Boolean)
-			.join("\n");
-	}
-	return "";
-}
-export { messageContent };
-</script>
 
 <style scoped>
 .chat-transcript {
@@ -423,7 +368,8 @@ export { messageContent };
 
 .tool-call-kicker,
 .tool-result-label,
-.streaming-label {
+.streaming-label,
+.tool-pending {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.66rem;
 	text-transform: uppercase;
@@ -437,7 +383,8 @@ export { messageContent };
 	color: var(--text);
 }
 
-.tool-call-details {
+.tool-call-details,
+.tool-result-inline {
 	margin-top: 8px;
 }
 

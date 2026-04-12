@@ -9,6 +9,7 @@ import type {
 	ClientMessage,
 	ServerMessage,
 } from "../shared-types";
+import { normalizeTranscript } from "../transcript";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,7 +45,8 @@ export interface TreeEntry {
 // ---------------------------------------------------------------------------
 
 const connectionStatus = ref<ConnectionStatus>("disconnected");
-const transcript = ref<TranscriptEntry[]>([]);
+const rawTranscript = ref<TranscriptEntry[]>([]);
+const transcript = computed(() => normalizeTranscript(rawTranscript.value));
 const sessionState = ref<RpcSessionState | null>(null);
 const sessions = ref<SessionEntry[]>([]);
 const treeEntries = ref<TreeEntry[]>([]);
@@ -199,7 +201,7 @@ function handleResponse(payload: RpcResponse) {
 		switch (payload.command) {
 			case "get_messages": {
 				const data = payload.data as { messages: TranscriptEntry[] } | undefined;
-				if (data) transcript.value = data.messages;
+				if (data) rawTranscript.value = data.messages;
 				break;
 			}
 			case "get_state": {
@@ -219,7 +221,7 @@ function handleResponse(payload: RpcResponse) {
 				const data = payload.data as { messages: TranscriptEntry[]; sessionId?: string; sessionName?: string } | undefined;
 				if (data && Array.isArray(data.messages)) {
 					// Force a completely new array reference for Vue reactivity
-					transcript.value = [...data.messages];
+					rawTranscript.value = [...data.messages];
 					// Update the displayed active session
 					if (data.sessionId) {
 						sessionState.value = { ...sessionState.value, sessionId: data.sessionId } as RpcSessionState;
@@ -249,7 +251,7 @@ function handleEvent(payload: Record<string, unknown>) {
 			isStreaming.value = true;
 			const msg = payload as unknown as TranscriptEntry;
 			if (msg.role) {
-				transcript.value = [...transcript.value, msg];
+				rawTranscript.value = [...rawTranscript.value, msg];
 			}
 			break;
 		}
@@ -257,25 +259,25 @@ function handleEvent(payload: Record<string, unknown>) {
 			// Update the last message with matching id, or append
 			const msg = payload as unknown as TranscriptEntry;
 			const idx = msg.id
-				? transcript.value.findIndex((m) => m.id === msg.id)
-				: transcript.value.length - 1;
+				? rawTranscript.value.findIndex((m) => m.id === msg.id)
+				: rawTranscript.value.length - 1;
 			if (idx >= 0) {
-				const updated = [...transcript.value];
+				const updated = [...rawTranscript.value];
 				updated[idx] = { ...updated[idx], ...msg };
-				transcript.value = updated;
+				rawTranscript.value = updated;
 			} else {
-				transcript.value = [...transcript.value, msg];
+				rawTranscript.value = [...rawTranscript.value, msg];
 			}
 			break;
 		}
 		case "message_end": {
 			const msg = payload as unknown as TranscriptEntry;
 			if (msg.id) {
-				const idx = transcript.value.findIndex((m) => m.id === msg.id);
+				const idx = rawTranscript.value.findIndex((m) => m.id === msg.id);
 				if (idx >= 0) {
-					const updated = [...transcript.value];
+					const updated = [...rawTranscript.value];
 					updated[idx] = { ...updated[idx], ...msg };
-					transcript.value = updated;
+					rawTranscript.value = updated;
 				}
 			}
 			break;
