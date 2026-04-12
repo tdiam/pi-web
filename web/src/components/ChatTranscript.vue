@@ -9,7 +9,6 @@ const props = defineProps<{
 
 const container = ref<HTMLDivElement | null>(null);
 
-// Scroll preservation for reconnect scenarios
 let wasDisconnected = false;
 let savedScrollTop = 0;
 let savedScrollHeight = 0;
@@ -28,14 +27,12 @@ function restoreScroll() {
 	wasDisconnected = false;
 }
 
-/** Map message role to display category */
 function roleClass(role: string): "user" | "assistant" | "tool" {
 	if (role === "user") return "user";
 	if (role === "assistant") return "assistant";
 	return "tool";
 }
 
-/** Display label for role */
 function roleLabel(role: string): string {
 	if (role === "user") return "You";
 	if (role === "assistant") return "Assistant";
@@ -44,13 +41,10 @@ function roleLabel(role: string): string {
 	return role;
 }
 
-/** Extract content blocks from a message into a structured array */
 interface ContentBlock {
 	kind: "text" | "toolCall" | "thinking" | "image";
 	text: string;
 	toolName?: string;
-	toolId?: string;
-	isError?: boolean;
 }
 
 function contentBlocks(msg: TranscriptEntry): ContentBlock[] {
@@ -87,54 +81,44 @@ function contentBlocks(msg: TranscriptEntry): ContentBlock[] {
 				kind: "toolCall",
 				text: typeof b.arguments === "string" ? b.arguments : JSON.stringify(b.arguments ?? "", null, 2),
 				toolName: (b.name as string) ?? "unknown",
-				toolId: (b.id as string) ?? undefined,
 			});
 		} else if (type === "toolResult") {
-			// toolResult can be a top-level block in some formats
 			const text = typeof b.text === "string" ? b.text : JSON.stringify(block, null, 2);
-			blocks.push({
-				kind: "text",
-				text,
-				isError: b.isError === true,
-			});
+			blocks.push({ kind: "text", text });
 		} else if (type === "image" || type === "image_url") {
 			blocks.push({ kind: "image", text: "[image]" });
 		}
-		// Skip unknown block types
 	}
 
 	return blocks;
 }
 
-/** For toolResult role messages, truncate the raw text display */
 function truncateToolResult(text: string, maxLen = 500): { text: string; truncated: boolean } {
 	if (text.length <= maxLen) return { text, truncated: false };
 	return { text: text.slice(0, maxLen) + "\n... (truncated)", truncated: true };
 }
 
-/** Is this a toolResult message that should be collapsed? */
 function isToolResultMessage(msg: TranscriptEntry): boolean {
 	return msg.role === "toolResult" || msg.role === "tool";
 }
 
-// Toggle state for collapsible blocks
 const expandedToolResults = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
 
 function toggleToolResult(msgId: string | undefined) {
 	if (!msgId) return;
-	const s = new Set(expandedToolResults.value);
-	if (s.has(msgId)) s.delete(msgId);
-	else s.add(msgId);
-	expandedToolResults.value = s;
+	const next = new Set(expandedToolResults.value);
+	if (next.has(msgId)) next.delete(msgId);
+	else next.add(msgId);
+	expandedToolResults.value = next;
 }
 
 function toggleThinking(msgId: string | undefined, blockIdx: number) {
 	const key = `${msgId ?? ""}-${blockIdx}`;
-	const s = new Set(expandedThinking.value);
-	if (s.has(key)) s.delete(key);
-	else s.add(key);
-	expandedThinking.value = s;
+	const next = new Set(expandedThinking.value);
+	if (next.has(key)) next.delete(key);
+	else next.add(key);
+	expandedThinking.value = next;
 }
 
 function isToolResultExpanded(msgId: string | undefined): boolean {
@@ -145,7 +129,6 @@ function isThinkingExpanded(msgId: string | undefined, blockIdx: number): boolea
 	return expandedThinking.value.has(`${msgId ?? ""}-${blockIdx}`);
 }
 
-// Watch for reconnection-driven transcript repopulation.
 watch(
 	() => props.messages.length,
 	async () => {
@@ -158,10 +141,9 @@ watch(
 		}
 		await nextTick();
 		restoreScroll();
-	}
+	},
 );
 
-// Also scroll when streaming updates happen
 watch(
 	() => props.isStreaming,
 	async (streaming) => {
@@ -171,17 +153,16 @@ watch(
 				container.value.scrollTop = container.value.scrollHeight;
 			}
 		}
-	}
+	},
 );
 
-// Reset collapse state when messages change to a different session
 watch(
 	() => props.messages,
 	() => {
 		expandedToolResults.value = new Set();
 		expandedThinking.value = new Set();
 	},
-	{ deep: false }
+	{ deep: false },
 );
 
 defineExpose({ preserveScroll });
@@ -190,50 +171,53 @@ defineExpose({ preserveScroll });
 <template>
 	<div ref="container" class="chat-transcript">
 		<div v-if="messages.length === 0" class="empty-state">
-			<p>No messages yet</p>
+			<p class="empty-title">Start a conversation</p>
+			<p class="empty-subtitle">Use / to open commands, then keep the session moving.</p>
+			<div class="empty-hints">
+				<span class="hint-chip">/ commands</span>
+				<span class="hint-chip">Enter send</span>
+			</div>
 		</div>
 		<template v-for="(msg, index) in messages" :key="msg.id ?? index">
-			<!-- Tool result messages: collapsible, dimmed -->
 			<div v-if="isToolResultMessage(msg)" class="message-row tool">
-				<div class="tool-result-bubble" :class="{ expanded: isToolResultExpanded(msg.id) }">
+				<div class="message-meta">
+					<span class="message-role">{{ roleLabel(msg.role) }}</span>
+				</div>
+				<div class="message-content tool-row">
 					<button
 						class="tool-result-toggle"
 						@click="toggleToolResult(msg.id)"
 						:title="isToolResultExpanded(msg.id) ? 'Collapse' : 'Expand'"
 					>
-						<span class="toggle-icon">{{ isToolResultExpanded(msg.id) ? '▼' : '▶' }}</span>
+						<span class="toggle-icon">{{ isToolResultExpanded(msg.id) ? '-' : '+' }}</span>
 						<span class="tool-result-label">{{ roleLabel(msg.role) }}</span>
 					</button>
-					<div class="tool-result-content" v-if="isToolResultExpanded(msg.id)">
+					<div v-if="isToolResultExpanded(msg.id)" class="tool-result-content">
 						<pre>{{ messageContent(msg) }}</pre>
 					</div>
-					<div class="tool-result-preview" v-else>
+					<div v-else class="tool-result-preview">
 						{{ truncateToolResult(messageContent(msg)).text }}
 					</div>
 				</div>
 			</div>
 
-			<!-- User / Assistant messages: rich content blocks -->
 			<div v-else class="message-row" :class="roleClass(msg.role)">
-				<div class="message-bubble" :class="roleClass(msg.role)">
+				<div class="message-meta">
 					<span class="message-role">{{ roleLabel(msg.role) }}</span>
+				</div>
+				<div class="message-content" :class="roleClass(msg.role)">
 					<template v-for="(block, bIdx) in contentBlocks(msg)" :key="bIdx">
-						<!-- Thinking block: collapsible, dimmed -->
 						<div v-if="block.kind === 'thinking'" class="thinking-block">
-							<button
-								class="thinking-toggle"
-								@click="toggleThinking(msg.id, bIdx)"
-							>
-								<span class="toggle-icon">{{ isThinkingExpanded(msg.id, bIdx) ? '▼' : '▶' }}</span>
-								Thinking...
+							<button class="thinking-toggle" @click="toggleThinking(msg.id, bIdx)">
+								<span class="toggle-icon">{{ isThinkingExpanded(msg.id, bIdx) ? '-' : '+' }}</span>
+								Thinking
 							</button>
 							<pre v-if="isThinkingExpanded(msg.id, bIdx)" class="thinking-content">{{ block.text }}</pre>
 						</div>
 
-						<!-- Tool call block: show tool name + collapsed args -->
 						<div v-else-if="block.kind === 'toolCall'" class="tool-call-block">
 							<span class="tool-call-header">
-								<span class="tool-call-icon">⚙</span>
+								<span class="tool-call-kicker">tool</span>
 								<span class="tool-call-name">{{ block.toolName }}</span>
 							</span>
 							<details class="tool-call-details">
@@ -242,17 +226,16 @@ defineExpose({ preserveScroll });
 							</details>
 						</div>
 
-						<!-- Text block: normal rendering -->
 						<div v-else-if="block.kind === 'text' && block.text" class="text-block">
 							{{ block.text }}
 						</div>
 					</template>
-					<span v-if="msg.timestamp" class="message-time">{{ msg.timestamp }}</span>
 				</div>
 			</div>
 		</template>
 
 		<div v-if="isStreaming" class="streaming-indicator">
+			<span class="streaming-label">Assistant</span>
 			<span class="dot"></span>
 			<span class="dot"></span>
 			<span class="dot"></span>
@@ -261,7 +244,6 @@ defineExpose({ preserveScroll });
 </template>
 
 <script lang="ts">
-/** Helper used by tool result rendering — extracts plain text from message */
 function messageContent(msg: { content?: unknown; text?: string }): string {
 	const content = msg.content;
 	if (typeof content === "string") return content;
@@ -285,264 +267,261 @@ export { messageContent };
 <style scoped>
 .chat-transcript {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
-	padding: 16px;
+	padding: 24px 32px 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 12px;
-	background: #1a1a2e;
+	gap: 16px;
+	background: transparent;
 }
 
 .empty-state {
 	display: flex;
+	flex-direction: column;
 	align-items: center;
 	justify-content: center;
+	gap: 10px;
 	flex: 1;
-	color: #6b7280;
-	font-style: italic;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.empty-title {
+	margin: 0;
+	font-size: 1.1rem;
+	font-weight: 500;
+	color: var(--text);
+}
+
+.empty-subtitle {
+	margin: 0;
+	max-width: 420px;
+	font-size: 0.85rem;
+	line-height: 1.6;
+	color: var(--text-subtle);
+}
+
+.empty-hints {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	justify-content: center;
+}
+
+.hint-chip {
+	display: inline-flex;
+	align-items: center;
+	height: 24px;
+	padding: 0 10px;
+	border-radius: 999px;
+	border: 1px solid var(--border);
+	background: var(--panel);
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.68rem;
+	color: var(--text-subtle);
 }
 
 .message-row {
-	display: flex;
-	max-width: 100%;
+	display: grid;
+	grid-template-columns: 96px minmax(0, 1fr);
+	gap: 16px;
+	width: 100%;
+	max-width: 920px;
+	margin: 0 auto;
 }
 
-.message-row.user {
-	justify-content: flex-end;
-}
-
-.message-row.assistant {
-	justify-content: flex-start;
-}
-
-.message-row.tool {
-	justify-content: flex-start;
-}
-
-/* ---- Message Bubbles ---- */
-.message-bubble {
-	max-width: 80%;
-	padding: 10px 14px;
-	border-radius: 12px;
-	font-size: 0.9rem;
-	line-height: 1.5;
-	position: relative;
-	word-break: break-word;
-}
-
-.message-bubble.user {
-	background: #2563eb;
-	color: #fff;
-	border-bottom-right-radius: 4px;
-}
-
-.message-bubble.assistant {
-	background: #2d2d44;
-	color: #e2e8f0;
-	border-bottom-left-radius: 4px;
+.message-meta {
+	padding-top: 2px;
 }
 
 .message-role {
-	display: block;
-	font-size: 0.7rem;
+	display: inline-block;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.64rem;
 	font-weight: 600;
 	text-transform: uppercase;
-	letter-spacing: 0.05em;
-	margin-bottom: 4px;
-	opacity: 0.5;
+	letter-spacing: 0.08em;
+	color: var(--text-subtle);
+}
+
+.message-content {
+	min-width: 0;
+	padding-left: 14px;
+	border-left: 1px solid var(--border);
+	font-size: 0.9rem;
+	line-height: 1.7;
+	color: var(--text);
+	word-break: break-word;
+}
+
+.message-content.user {
+	max-width: 720px;
+	margin-left: 28px;
 }
 
 .text-block {
 	white-space: pre-wrap;
 }
 
-.message-time {
-	display: block;
-	font-size: 0.65rem;
-	margin-top: 4px;
-	opacity: 0.4;
-	text-align: right;
+.text-block + .text-block,
+.text-block + .thinking-block,
+.text-block + .tool-call-block,
+.thinking-block + .text-block,
+.tool-call-block + .text-block,
+.tool-call-block + .thinking-block,
+.thinking-block + .tool-call-block {
+	margin-top: 12px;
 }
 
-/* ---- Thinking Block ---- */
 .thinking-block {
-	margin: 4px 0;
-	border-left: 2px solid #6366f1;
-	padding-left: 8px;
+	padding-left: 10px;
+	border-left: 1px solid var(--border-strong);
 }
 
 .thinking-toggle {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 6px;
+	padding: 0;
 	background: none;
 	border: none;
-	color: #818cf8;
-	font-size: 0.75rem;
+	color: var(--text-muted);
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.7rem;
 	cursor: pointer;
-	padding: 2px 0;
-	opacity: 0.7;
 }
 
 .thinking-toggle:hover {
-	opacity: 1;
+	color: var(--text);
 }
 
 .thinking-content {
-	margin: 4px 0 0 0;
-	padding: 6px 8px;
-	background: rgba(99, 102, 241, 0.08);
-	border-radius: 4px;
-	font-size: 0.8rem;
-	color: #a5b4fc;
+	margin: 8px 0 0;
+	padding: 10px 0 0;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.74rem;
+	line-height: 1.55;
+	color: var(--text-muted);
 	max-height: 300px;
 	overflow-y: auto;
 	white-space: pre-wrap;
 	word-break: break-word;
 }
 
-/* ---- Tool Call Block ---- */
-.tool-call-block {
-	margin: 6px 0;
-	padding: 6px 10px;
-	background: rgba(234, 179, 8, 0.06);
-	border: 1px solid rgba(234, 179, 8, 0.15);
-	border-radius: 6px;
-	font-size: 0.8rem;
+.tool-call-block,
+.tool-row {
+	padding-left: 10px;
+	border-left: 1px solid var(--border-strong);
 }
 
 .tool-call-header {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
-	gap: 6px;
-	color: #fbbf24;
-	font-weight: 600;
+	gap: 8px;
 }
 
-.tool-call-icon {
-	font-size: 0.85rem;
+.tool-call-kicker,
+.tool-result-label,
+.streaming-label {
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.66rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--text-subtle);
 }
 
 .tool-call-name {
-	font-family: 'Monaco', 'Menlo', monospace;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.76rem;
+	color: var(--text);
 }
 
 .tool-call-details {
-	margin-top: 4px;
+	margin-top: 8px;
 }
 
 .tool-call-details summary {
 	cursor: pointer;
-	color: #9ca3af;
-	font-size: 0.75rem;
+	font-size: 0.73rem;
+	color: var(--text-muted);
 }
 
-.tool-call-details pre {
-	margin: 4px 0 0;
-	padding: 6px 8px;
-	background: rgba(0, 0, 0, 0.2);
-	border-radius: 4px;
-	font-size: 0.75rem;
-	color: #d1d5db;
-	max-height: 200px;
-	overflow-y: auto;
+.tool-call-details pre,
+.tool-result-content pre {
+	margin: 8px 0 0;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.72rem;
+	line-height: 1.55;
 	white-space: pre-wrap;
 	word-break: break-word;
-}
-
-/* ---- Tool Result Bubble ---- */
-.tool-result-bubble {
-	max-width: 85%;
-	padding: 6px 10px;
-	border-radius: 8px;
-	background: #1e1e32;
-	border: 1px solid #2d2d44;
-	font-size: 0.8rem;
-	color: #9ca3af;
+	color: var(--text-muted);
 }
 
 .tool-result-toggle {
-	display: flex;
+	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 8px;
+	padding: 0;
 	background: none;
 	border: none;
-	color: #9ca3af;
+	color: var(--text-muted);
 	cursor: pointer;
-	padding: 0;
-	font-size: 0.75rem;
-	width: 100%;
 	text-align: left;
 }
 
 .tool-result-toggle:hover {
-	color: #e2e8f0;
+	color: var(--text);
 }
 
 .toggle-icon {
-	font-size: 0.6rem;
 	width: 12px;
-	display: inline-block;
 	text-align: center;
-}
-
-.tool-result-label {
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
-	font-size: 0.65rem;
-	opacity: 0.6;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.68rem;
 }
 
 .tool-result-preview {
-	margin-top: 4px;
+	margin-top: 8px;
 	white-space: pre-wrap;
 	word-break: break-word;
 	max-height: 80px;
 	overflow: hidden;
-	position: relative;
 	mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
 	-webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-	font-family: 'Monaco', 'Menlo', monospace;
-	font-size: 0.75rem;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.73rem;
+	line-height: 1.55;
+	color: var(--text-muted);
 }
 
 .tool-result-content {
-	margin-top: 4px;
-	max-height: 400px;
+	max-height: 320px;
 	overflow-y: auto;
 }
 
-.tool-result-content pre {
-	margin: 0;
-	white-space: pre-wrap;
-	word-break: break-word;
-	font-family: 'Monaco', 'Menlo', monospace;
-	font-size: 0.75rem;
-	color: #d1d5db;
-}
-
-/* ---- Streaming ---- */
 .streaming-indicator {
 	display: flex;
-	gap: 4px;
-	padding: 8px 14px;
 	align-items: center;
+	gap: 6px;
+	padding: 0 32px 8px;
+	width: min(920px, 100%);
+	margin: 0 auto;
 }
 
 .streaming-indicator .dot {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
-	background: #60a5fa;
+	background: var(--text-muted);
 	animation: blink 1.2s infinite;
 }
 
-.streaming-indicator .dot:nth-child(2) {
+.streaming-indicator .dot:nth-child(3) {
 	animation-delay: 0.2s;
 }
 
-.streaming-indicator .dot:nth-child(3) {
+.streaming-indicator .dot:nth-child(4) {
 	animation-delay: 0.4s;
 }
 
@@ -554,6 +533,28 @@ export { messageContent };
 	}
 	40% {
 		opacity: 1;
+	}
+}
+
+@media (max-width: 900px) {
+	.chat-transcript {
+		padding: 16px 16px 10px;
+	}
+
+	.message-row {
+		grid-template-columns: 1fr;
+		gap: 8px;
+	}
+
+	.message-content,
+	.message-content.user,
+	.tool-row {
+		margin-left: 0;
+		max-width: 100%;
+	}
+
+	.streaming-indicator {
+		padding: 0 16px 6px;
 	}
 }
 </style>

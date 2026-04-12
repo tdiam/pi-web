@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import type { RpcExtensionUIRequest, RpcExtensionUIResponse } from "../shared-types";
 
 const props = defineProps<{
@@ -14,7 +14,6 @@ const inputValue = ref("");
 const editorValue = ref("");
 const selectedIndex = ref(-1);
 
-/** Send a value response (for select method). */
 function handleSelect(option: string) {
 	if (!props.request) return;
 	emit("respond", {
@@ -24,7 +23,6 @@ function handleSelect(option: string) {
 	});
 }
 
-/** Send a confirmed response (for confirm method). */
 function handleConfirm(confirmed: boolean) {
 	if (!props.request) return;
 	emit("respond", {
@@ -34,31 +32,26 @@ function handleConfirm(confirmed: boolean) {
 	});
 }
 
-/** Send an input value response. */
 function handleInputSubmit() {
 	if (!props.request) return;
-	const text = inputValue.value;
 	emit("respond", {
 		type: "extension_ui_response",
 		id: props.request.id,
-		value: text,
+		value: inputValue.value,
 	});
 	inputValue.value = "";
 }
 
-/** Send an editor value response. */
 function handleEditorSubmit() {
 	if (!props.request) return;
-	const text = editorValue.value;
 	emit("respond", {
 		type: "extension_ui_response",
 		id: props.request.id,
-		value: text,
+		value: editorValue.value,
 	});
 	editorValue.value = "";
 }
 
-/** Cancel the current dialog. */
 function handleCancel() {
 	if (!props.request) return;
 	emit("respond", {
@@ -70,10 +63,9 @@ function handleCancel() {
 	editorValue.value = "";
 }
 
-/** Initialize local state when a new request arrives. */
 function initFromRequest() {
 	if (!props.request) return;
-	if (props.request.method === "input" && props.request.placeholder) {
+	if (props.request.method === "input") {
 		inputValue.value = "";
 	}
 	if (props.request.method === "editor" && props.request.prefill) {
@@ -84,8 +76,6 @@ function initFromRequest() {
 	selectedIndex.value = -1;
 }
 
-// Watch for request changes to initialize editor prefill
-import { watch } from "vue";
 watch(() => props.request, initFromRequest, { immediate: true });
 </script>
 
@@ -93,15 +83,14 @@ watch(() => props.request, initFromRequest, { immediate: true });
 	<Teleport to="body">
 		<div v-if="request" class="dialog-overlay" @click.self="handleCancel">
 			<div class="dialog-panel">
-				<!-- Header -->
 				<div class="dialog-header">
-					<h3 class="dialog-title">{{ request.title }}</h3>
-					<button class="dialog-close" aria-label="Cancel" @click="handleCancel">
-						&times;
-					</button>
+					<div>
+						<div class="dialog-kicker">Extension request</div>
+						<h3 class="dialog-title">{{ request.title }}</h3>
+					</div>
+					<button class="dialog-close" aria-label="Cancel" @click="handleCancel">x</button>
 				</div>
 
-				<!-- Body: select -->
 				<div v-if="request.method === 'select'" class="dialog-body">
 					<ul class="select-list">
 						<li
@@ -118,38 +107,27 @@ watch(() => props.request, initFromRequest, { immediate: true });
 					</ul>
 				</div>
 
-				<!-- Body: confirm -->
 				<div v-else-if="request.method === 'confirm'" class="dialog-body">
 					<p class="confirm-message">{{ request.message }}</p>
 					<div class="dialog-actions">
-						<button class="btn btn-cancel" @click="handleConfirm(false)">
-							Cancel
-						</button>
-						<button class="btn btn-primary" @click="handleConfirm(true)">
-							Confirm
-						</button>
+						<button class="btn btn-cancel" @click="handleConfirm(false)">Cancel</button>
+						<button class="btn btn-primary" @click="handleConfirm(true)">Confirm</button>
 					</div>
 				</div>
 
-				<!-- Body: input -->
 				<div v-else-if="request.method === 'input'" class="dialog-body">
 					<input
 						v-model="inputValue"
 						class="dialog-input"
-						:placeholder="request.placeholder ?? 'Enter a value…'"
+						:placeholder="request.placeholder ?? 'Enter a value...'"
 						@keydown.enter="handleInputSubmit"
 					/>
 					<div class="dialog-actions">
-						<button class="btn btn-cancel" @click="handleCancel">
-							Cancel
-						</button>
-						<button class="btn btn-primary" @click="handleInputSubmit">
-							Submit
-						</button>
+						<button class="btn btn-cancel" @click="handleCancel">Cancel</button>
+						<button class="btn btn-primary" @click="handleInputSubmit">Submit</button>
 					</div>
 				</div>
 
-				<!-- Body: editor -->
 				<div v-else-if="request.method === 'editor'" class="dialog-body">
 					<textarea
 						v-model="editorValue"
@@ -160,20 +138,13 @@ watch(() => props.request, initFromRequest, { immediate: true });
 					></textarea>
 					<div class="dialog-hint">Ctrl+Enter to submit</div>
 					<div class="dialog-actions">
-						<button class="btn btn-cancel" @click="handleCancel">
-							Cancel
-						</button>
-						<button class="btn btn-primary" @click="handleEditorSubmit">
-							Submit
-						</button>
+						<button class="btn btn-cancel" @click="handleCancel">Cancel</button>
+						<button class="btn btn-primary" @click="handleEditorSubmit">Submit</button>
 					</div>
 				</div>
 
-				<!-- Cancel button for select -->
-				<div v-if="request.method === 'select'" class="dialog-actions">
-					<button class="btn btn-cancel" @click="handleCancel">
-						Cancel
-					</button>
+				<div v-if="request.method === 'select'" class="dialog-actions select-actions">
+					<button class="btn btn-cancel" @click="handleCancel">Cancel</button>
 				</div>
 			</div>
 		</div>
@@ -188,52 +159,61 @@ watch(() => props.request, initFromRequest, { immediate: true });
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: rgba(0, 0, 0, 0.6);
-	backdrop-filter: blur(2px);
+	background: var(--overlay);
+	backdrop-filter: blur(6px);
 }
 
 .dialog-panel {
-	width: 90%;
-	max-width: 480px;
+	width: min(92vw, 520px);
 	max-height: 80vh;
+	max-height: 80dvh;
 	overflow-y: auto;
-	background: #1a1a2e;
-	border: 1px solid #2d2d44;
-	border-radius: 12px;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+	background: var(--panel);
+	border: 1px solid var(--border-strong);
+	border-radius: 16px;
+	box-shadow: var(--shadow);
 	display: flex;
 	flex-direction: column;
 }
 
 .dialog-header {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: space-between;
-	padding: 16px 20px;
-	border-bottom: 1px solid #2d2d44;
+	gap: 16px;
+	padding: 18px 20px 16px;
+	border-bottom: 1px solid var(--border);
 	flex-shrink: 0;
+}
+
+.dialog-kicker {
+	margin-bottom: 6px;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.66rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--text-subtle);
 }
 
 .dialog-title {
 	margin: 0;
 	font-size: 1rem;
 	font-weight: 600;
-	color: #e2e8f0;
+	color: var(--text);
 }
 
 .dialog-close {
 	background: none;
 	border: none;
-	color: #9ca3af;
-	font-size: 1.5rem;
+	color: var(--text-subtle);
+	font-size: 0.95rem;
 	cursor: pointer;
 	line-height: 1;
-	padding: 0 4px;
-	transition: color 0.15s;
+	padding: 4px;
 }
 
 .dialog-close:hover {
-	color: #e2e8f0;
+	color: var(--text);
 }
 
 .dialog-body {
@@ -242,147 +222,131 @@ watch(() => props.request, initFromRequest, { immediate: true });
 	overflow-y: auto;
 }
 
-/* Select list */
 .select-list {
 	list-style: none;
 	margin: 0;
 	padding: 0;
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 6px;
 }
 
 .select-item {
-	padding: 10px 14px;
-	border-radius: 8px;
+	padding: 12px 14px;
+	border-radius: 10px;
 	cursor: pointer;
-	color: #e2e8f0;
+	color: var(--text);
 	font-size: 0.9rem;
-	transition: background 0.1s;
-	border: 1px solid transparent;
+	transition: background 0.1s ease, border-color 0.1s ease;
+	border: 1px solid var(--border);
+	background: var(--panel-2);
 }
 
 .select-item:hover,
 .select-item.selected {
-	background: #2d2d44;
-	border-color: #3b3b5c;
+	background: var(--panel-3);
+	border-color: var(--border-strong);
 }
 
-/* Confirm message */
 .confirm-message {
-	margin: 0 0 16px 0;
-	color: #c4c9d4;
+	margin: 0 0 16px;
+	color: var(--text-muted);
 	font-size: 0.9rem;
-	line-height: 1.5;
+	line-height: 1.6;
 }
 
-/* Input */
-.dialog-input {
+.dialog-input,
+.dialog-textarea {
 	width: 100%;
-	padding: 10px 14px;
-	border-radius: 8px;
-	border: 1px solid #2d2d44;
-	background: #0f0f23;
-	color: #e2e8f0;
-	font-size: 0.9rem;
+	padding: 12px 14px;
+	border-radius: 12px;
+	border: 1px solid var(--border);
+	background: var(--bg-elevated);
+	color: var(--text);
+	font-size: 0.92rem;
 	outline: none;
-	transition: border-color 0.15s;
-	margin-bottom: 16px;
 	box-sizing: border-box;
 }
 
-.dialog-input:focus {
-	border-color: #2563eb;
+.dialog-input:focus,
+.dialog-textarea:focus {
+	border-color: var(--border-strong);
 }
 
 .dialog-input::placeholder {
-	color: #4b5563;
+	color: var(--text-subtle);
 }
 
-/* Textarea */
 .dialog-textarea {
-	width: 100%;
-	padding: 10px 14px;
-	border-radius: 8px;
-	border: 1px solid #2d2d44;
-	background: #0f0f23;
-	color: #e2e8f0;
-	font-size: 0.9rem;
-	font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
-	outline: none;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	resize: vertical;
-	transition: border-color 0.15s;
-	margin-bottom: 4px;
-	box-sizing: border-box;
-}
-
-.dialog-textarea:focus {
-	border-color: #2563eb;
+	margin-bottom: 6px;
 }
 
 .dialog-hint {
-	font-size: 0.7rem;
-	color: #4b5563;
-	margin-bottom: 12px;
+	margin-bottom: 14px;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.68rem;
+	color: var(--text-subtle);
 }
 
-/* Actions */
 .dialog-actions {
 	display: flex;
 	justify-content: flex-end;
 	gap: 8px;
-	padding-top: 8px;
+	padding: 0 20px 18px;
+}
+
+.select-actions {
+	padding-top: 0;
 }
 
 .btn {
-	padding: 8px 18px;
-	border-radius: 8px;
-	border: none;
-	font-size: 0.85rem;
+	height: 38px;
+	padding: 0 16px;
+	border-radius: 10px;
+	border: 1px solid var(--border);
+	font-size: 0.84rem;
 	font-weight: 600;
 	cursor: pointer;
-	transition: background 0.15s, opacity 0.15s;
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 .btn-primary {
-	background: #2563eb;
-	color: #fff;
+	background: var(--button-bg);
+	color: var(--text);
 }
 
 .btn-primary:hover {
-	background: #1d4ed8;
+	background: var(--button-hover);
+	border-color: var(--border-strong);
 }
 
 .btn-cancel {
-	background: #2d2d44;
-	color: #9ca3af;
+	background: transparent;
+	color: var(--text-muted);
 }
 
 .btn-cancel:hover {
-	background: #3b3b5c;
-	color: #e2e8f0;
+	background: var(--panel-2);
+	color: var(--text);
 }
 
 @media (max-width: 900px) {
 	.dialog-panel {
+		width: min(95vw, 520px);
 		max-height: 90vh;
 		max-height: 90dvh;
-		width: 95%;
 	}
 
-	.select-item {
-		padding: 14px 16px;
-		min-height: 44px;
-	}
-
+	.select-item,
 	.btn {
-		padding: 12px 20px;
 		min-height: 44px;
 	}
 
 	.dialog-input,
 	.dialog-textarea {
-		font-size: 16px; /* Prevents iOS zoom on focus */
+		font-size: 16px;
 	}
 }
 </style>

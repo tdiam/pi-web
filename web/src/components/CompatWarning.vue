@@ -2,7 +2,6 @@
 import { ref } from "vue";
 
 defineProps<{
-	/** Whether to show the warning banner. */
 	visible: boolean;
 }>();
 
@@ -14,23 +13,14 @@ function handleDismiss() {
 </script>
 
 <template>
-	<div
-		v-if="visible && !dismissed"
-		class="compat-warning"
-		role="alert"
-	>
-		<span class="compat-icon">⚠️</span>
+	<div v-if="visible && !dismissed" class="compat-warning" role="alert">
+		<span class="compat-kicker">compat</span>
 		<span class="compat-text">
-			This extension uses a custom TUI interface (ctx.ui.custom()) that is
-			not supported in the web browser. Use the terminal for full
-			functionality.
+			This extension uses a custom TUI interface that is not supported in the browser.
+			Use the terminal for full functionality.
 		</span>
-		<button
-			class="compat-dismiss"
-			aria-label="Dismiss warning"
-			@click="handleDismiss"
-		>
-			&times;
+		<button class="compat-dismiss" aria-label="Dismiss warning" @click="handleDismiss">
+			x
 		</button>
 	</div>
 </template>
@@ -40,18 +30,24 @@ function handleDismiss() {
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: 10px 16px;
-	background: #422006;
-	border-bottom: 1px solid #854d0e;
-	color: #fbbf24;
+	margin: 12px 24px 0;
+	padding: 10px 12px;
+	border-radius: 12px;
+	border: 1px solid var(--border);
+	background: var(--panel);
+	color: var(--text-muted);
 	font-size: 0.8rem;
-	line-height: 1.4;
+	line-height: 1.5;
 	flex-shrink: 0;
 }
 
-.compat-icon {
+.compat-kicker {
 	flex-shrink: 0;
-	font-size: 1rem;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.66rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	color: var(--text-subtle);
 }
 
 .compat-text {
@@ -62,16 +58,20 @@ function handleDismiss() {
 	flex-shrink: 0;
 	background: none;
 	border: none;
-	color: #fbbf24;
-	font-size: 1.25rem;
+	color: var(--text-subtle);
+	font-size: 0.92rem;
 	cursor: pointer;
-	padding: 0 4px;
+	padding: 0;
 	line-height: 1;
-	opacity: 0.7;
-	transition: opacity 0.15s;
 }
 
 .compat-dismiss:hover {
-	opacity: 1;
+	color: var(--text);
+}
+
+@media (max-width: 900px) {
+	.compat-warning {
+		margin: 12px 16px 0;
+	}
 }
 </style>

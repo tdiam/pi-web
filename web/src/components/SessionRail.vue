@@ -23,7 +23,7 @@ const emit = defineEmits<{
 				:title="s.path"
 				@click="emit('select', s.path)"
 			>
-				<span class="item-indicator" v-if="s.id === activeSessionId"></span>
+				<span class="item-indicator"></span>
 				<span class="item-label">{{ s.name }}</span>
 			</li>
 		</ul>
@@ -35,70 +35,73 @@ const emit = defineEmits<{
 .session-rail {
 	display: flex;
 	flex-direction: column;
-	height: 100%;
+	padding: 12px 10px 0;
 	overflow: hidden;
 }
 
 .rail-header {
-	padding: 12px 12px 8px;
-	font-size: 0.7rem;
-	font-weight: 700;
+	padding: 8px 10px;
+	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+	font-size: 0.68rem;
+	font-weight: 600;
 	text-transform: uppercase;
-	letter-spacing: 0.1em;
-	color: #6b7280;
+	letter-spacing: 0.08em;
+	color: var(--text-subtle);
 	flex-shrink: 0;
 }
 
 .rail-list {
 	list-style: none;
 	margin: 0;
-	padding: 0 6px;
+	padding: 0;
 	overflow-y: auto;
-	flex: 1;
 }
 
 .rail-item {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	padding: 7px 10px;
-	border-radius: 6px;
-	font-size: 0.8rem;
-	color: #d1d5db;
+	gap: 10px;
+	height: 32px;
+	padding: 0 10px;
+	border-radius: 8px;
+	color: var(--text-muted);
 	cursor: pointer;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	transition: background 0.12s;
+	font-size: 0.82rem;
+	transition: background 0.12s ease, color 0.12s ease;
 }
 
 .rail-item:hover {
-	background: #2a2a42;
+	background: var(--panel-2);
 }
 
 .rail-item.active {
-	background: #1e3a5f;
-	color: #60a5fa;
+	background: var(--panel-3);
+	color: var(--text);
 }
 
 .item-indicator {
-	width: 6px;
-	height: 6px;
-	border-radius: 50%;
-	background: #60a5fa;
+	width: 2px;
+	height: 14px;
+	border-radius: 999px;
+	background: transparent;
 	flex-shrink: 0;
 }
 
+.rail-item.active .item-indicator {
+	background: var(--text);
+}
+
 .item-label {
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .rail-empty {
-	color: #4b5563;
-	font-size: 0.75rem;
-	font-style: italic;
-	padding: 8px 12px;
 	margin: 0;
+	padding: 8px 10px;
+	font-size: 0.78rem;
+	color: var(--text-subtle);
 }
 </style>
