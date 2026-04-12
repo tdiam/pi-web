@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ListTree, Moon, Sun } from "lucide-vue-next";
+import { ListTree, Menu, Moon, Sun, X } from "lucide-vue-next";
 import { ref, computed, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import ChatTranscript from "./components/ChatTranscript.vue";
@@ -146,7 +146,7 @@ watch(
 				aria-label="Toggle sidebar"
 				@click="sidebarOpen = !sidebarOpen"
 			>
-				<span></span><span></span><span></span>
+				<Menu class="hamburger-icon" aria-hidden="true" />
 			</button>
 			<div class="header-brand">
 				<h1 class="app-title">Pi</h1>
@@ -251,7 +251,7 @@ watch(
 					aria-label="Dismiss notification"
 					@click="handleDismissNotification(notif.id)"
 				>
-					x
+					<X aria-hidden="true" />
 				</button>
 			</div>
 		</div>
@@ -365,21 +365,21 @@ watch(
 
 .hamburger {
 	display: none;
-	flex-direction: column;
-	gap: 3px;
-	padding: 10px;
-	margin-left: -10px;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	margin-left: -6px;
 	background: none;
 	border: none;
+	color: var(--text-muted);
 	cursor: pointer;
 }
 
-.hamburger span {
-	display: block;
-	width: 16px;
-	height: 1.5px;
-	background: var(--text-muted);
-	border-radius: 999px;
+.hamburger-icon {
+	width: 18px;
+	height: 18px;
 }
 
 .header-brand {
@@ -647,13 +647,20 @@ watch(
 
 .toast-dismiss {
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: none;
 	border: none;
 	color: var(--text-subtle);
-	font-size: 0.95rem;
 	cursor: pointer;
 	padding: 0;
 	line-height: 1;
+}
+
+.toast-dismiss svg {
+	width: 14px;
+	height: 14px;
 }
 
 .toast-dismiss:hover {

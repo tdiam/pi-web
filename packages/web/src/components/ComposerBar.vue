@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SendHorizontal } from "lucide-vue-next";
 import { ref, computed, watch } from "vue";
 import type { ConnectionStatus } from "../composables/useBridgeClient";
 import type { RpcSlashCommand } from "../shared-types";
@@ -89,18 +90,7 @@ function handleInputKeydown(e: KeyboardEvent) {
 					aria-label="Send message"
 					@click="handleSubmit"
 				>
-					<svg
-						class="send-icon"
-						viewBox="0 0 24 24"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="1.8"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-					>
-						<path d="M5 12h12"></path>
-						<path d="M13 6l6 6-6 6"></path>
-					</svg>
+					<SendHorizontal class="send-icon" aria-hidden="true" />
 				</button>
 			</div>
 		</div>

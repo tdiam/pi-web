@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import { ref, watch } from "vue";
 import type { RpcExtensionUIRequest, RpcExtensionUIResponse } from "../shared-types";
 
@@ -88,7 +89,9 @@ watch(() => props.request, initFromRequest, { immediate: true });
 						<div class="dialog-kicker">Extension request</div>
 						<h3 class="dialog-title">{{ request.title }}</h3>
 					</div>
-					<button class="dialog-close" aria-label="Cancel" @click="handleCancel">x</button>
+					<button class="dialog-close" aria-label="Cancel" @click="handleCancel">
+						<X aria-hidden="true" />
+					</button>
 				</div>
 
 				<div v-if="request.method === 'select'" class="dialog-body">
@@ -203,13 +206,20 @@ watch(() => props.request, initFromRequest, { immediate: true });
 }
 
 .dialog-close {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: none;
 	border: none;
 	color: var(--text-subtle);
-	font-size: 0.95rem;
 	cursor: pointer;
 	line-height: 1;
 	padding: 4px;
+}
+
+.dialog-close svg {
+	width: 16px;
+	height: 16px;
 }
 
 .dialog-close:hover {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import { ref } from "vue";
 
 defineProps<{
@@ -20,7 +21,7 @@ function handleDismiss() {
 			Use the terminal for full functionality.
 		</span>
 		<button class="compat-dismiss" aria-label="Dismiss warning" @click="handleDismiss">
-			x
+			<X aria-hidden="true" />
 		</button>
 	</div>
 </template>
@@ -56,13 +57,20 @@ function handleDismiss() {
 
 .compat-dismiss {
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: none;
 	border: none;
 	color: var(--text-subtle);
-	font-size: 0.92rem;
 	cursor: pointer;
 	padding: 0;
 	line-height: 1;
+}
+
+.compat-dismiss svg {
+	width: 14px;
+	height: 14px;
 }
 
 .compat-dismiss:hover {

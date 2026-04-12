@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import type { TreeEntry } from "../composables/useBridgeClient";
 
@@ -71,7 +72,9 @@ function handleNavigate(entryId: string) {
 					<p class="panel-kicker">Session tree</p>
 					<h2 class="panel-title">{{ sessionLabel }}</h2>
 				</div>
-				<button class="close-button" type="button" aria-label="Close tree" @click="emit('close')">x</button>
+				<button class="close-button" type="button" aria-label="Close tree" @click="emit('close')">
+					<X aria-hidden="true" />
+				</button>
 			</header>
 
 			<div class="panel-toolbar">
@@ -196,13 +199,20 @@ function handleNavigate(entryId: string) {
 .close-button {
 	width: 28px;
 	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	border-radius: 999px;
 	border: 1px solid var(--border);
 	background: var(--panel);
 	color: var(--text-muted);
-	font-size: 0.9rem;
 	cursor: pointer;
 	transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.close-button svg {
+	width: 14px;
+	height: 14px;
 }
 
 .close-button:hover {

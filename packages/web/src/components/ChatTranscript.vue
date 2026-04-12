@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import { ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import { contentBlocks, isToolResultMessage, messageContent } from "../utils/transcript";
@@ -160,7 +161,8 @@ defineExpose({ preserveScroll });
 					<template v-for="(block, bIdx) in contentBlocks(msg)" :key="bIdx">
 						<div v-if="block.kind === 'thinking'" class="thinking-block">
 							<button class="thinking-toggle" @click="toggleThinking(msg.id, bIdx)">
-								<span class="toggle-icon">{{ isThinkingExpanded(msg.id, bIdx) ? '-' : '+' }}</span>
+								<ChevronDown v-if="isThinkingExpanded(msg.id, bIdx)" class="toggle-icon" aria-hidden="true" />
+								<ChevronRight v-else class="toggle-icon" aria-hidden="true" />
 								Thinking
 							</button>
 							<pre v-if="isThinkingExpanded(msg.id, bIdx)" class="thinking-content">{{ block.text }}</pre>
@@ -416,10 +418,9 @@ defineExpose({ preserveScroll });
 }
 
 .toggle-icon {
-	width: 12px;
-	text-align: center;
-	font-family: "SF Mono", "Monaco", "Menlo", monospace;
-	font-size: 0.68rem;
+	width: 14px;
+	height: 14px;
+	flex-shrink: 0;
 }
 
 .streaming-indicator {
