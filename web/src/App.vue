@@ -10,7 +10,6 @@ import CompatWarning from "./components/CompatWarning.vue";
 import ReconnectBanner from "./components/ReconnectBanner.vue";
 
 type ThemeMode = "dark" | "light";
-const THEME_STORAGE_KEY = "pi-web-theme";
 
 const {
 	connectionStatus,
@@ -48,19 +47,26 @@ const theme = ref<ThemeMode>("dark");
 const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
 const themeLabel = computed(() => `Theme: ${theme.value === "dark" ? "Dark" : "Light"}`);
 
-onMounted(() => {
-	if (typeof window === "undefined") return;
-	const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-	if (savedTheme === "dark" || savedTheme === "light") {
-		theme.value = savedTheme;
-		return;
+// Fetch persisted plugin state from server on mount, then sync back on change.
+onMounted(async () => {
+	try {
+		const res = await sendCommand({ type: "get_plugin_state", key: "theme" });
+		if (res.success && (res.data as { value?: unknown }).value) {
+			const saved = (res.data as { value: string }).value;
+			if (saved === "dark" || saved === "light") {
+				theme.value = saved;
+				return;
+			}
+		}
+	} catch {
+		// Server unavailable — fall through to system preference
 	}
+	if (typeof window === "undefined") return;
 	theme.value = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 });
 
 watch(theme, (value) => {
-	if (typeof window === "undefined") return;
-	window.localStorage.setItem(THEME_STORAGE_KEY, value);
+	sendCommand({ type: "set_plugin_state", key: "theme", value }).catch(() => {});
 });
 
 watch(connectionStatus, (status) => {

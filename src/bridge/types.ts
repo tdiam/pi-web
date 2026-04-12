@@ -59,7 +59,10 @@ export type RpcCommand =
 	| { id?: string; type: "get_commands" }
 	// Discovery
 	| { id?: string; type: "list_sessions" }
-	| { id?: string; type: "list_tree_entries" };
+	| { id?: string; type: "list_tree_entries" }
+	// Plugin state persistence
+	| { id?: string; type: "get_plugin_state"; key: string }
+	| { id?: string; type: "set_plugin_state"; key: string; value: unknown };
 
 /** Helper type to extract the `type` discriminant. */
 export type RpcCommandType = RpcCommand["type"];
@@ -130,6 +133,9 @@ export type RpcResponse =
 	// Discovery responses
 	| { id?: string; type: "response"; command: "list_sessions"; success: true; data: { sessions: Array<{ id: string; name: string; path: string }> } }
 	| { id?: string; type: "response"; command: "list_tree_entries"; success: true; data: { entries: Array<{ id: string; label?: string; type: string; timestamp?: string }> } }
+	// Plugin state persistence
+	| { id?: string; type: "response"; command: "get_plugin_state"; success: true; data: { value: unknown } }
+	| { id?: string; type: "response"; command: "set_plugin_state"; success: true }
 	// Error — any command can fail
 	| { id?: string; type: "response"; command: string; success: false; error: string };
 

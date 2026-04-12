@@ -16,6 +16,7 @@ import type {
 	ServerMessage,
 	WsClient,
 } from "./types.js";
+import { getPluginState, setPluginState } from "./plugin-state.js";
 
 /**
  * Extended context available in Pi extension API
@@ -814,6 +815,31 @@ export class WsRpcAdapter {
 						data: { entries: [] as Array<{ id: string; label?: string; type: string; timestamp?: string }> },
 					};
 				}
+			}
+
+			// =================================================================
+			// Plugin state persistence (~/.pi/agent/pi-web.json)
+			// =================================================================
+
+			case "get_plugin_state": {
+				const value = getPluginState(command.key);
+				return {
+					id: correlationId,
+					type: "response" as const,
+					command: "get_plugin_state" as const,
+					success: true as const,
+					data: { value },
+				};
+			}
+
+			case "set_plugin_state": {
+				setPluginState(command.key, command.value);
+				return {
+					id: correlationId,
+					type: "response" as const,
+					command: "set_plugin_state" as const,
+					success: true as const,
+				};
 			}
 
 			default: {
