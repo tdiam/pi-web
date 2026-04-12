@@ -1,7 +1,6 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
 import type { WebSocket } from "ws";
 import type { BridgeEventBus } from "./bridge-event-bus.js";
 import type {
@@ -725,22 +724,17 @@ export class WsRpcAdapter {
 			case "list_sessions": {
 				try {
 					const sessions: Array<{ id: string; name: string; path: string; timestamp?: string }> = [];
+					const currentSessionFile = ctx.sessionManager.getSessionFile();
+					const sessionDir = currentSessionFile ? path.dirname(currentSessionFile) : undefined;
 
-					// Scan project session directory for all sessions
-					const gsdHome = process.env.GSD_HOME || path.join(os.homedir(), ".gsd");
-					const safeCwd = ctx.cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-");
-					const projectSessionDir = path.join(gsdHome, "sessions", `--${safeCwd}--`);
-
-					if (fs.existsSync(projectSessionDir)) {
-						const files = fs.readdirSync(projectSessionDir)
+					if (sessionDir && fs.existsSync(sessionDir)) {
+						const files = fs.readdirSync(sessionDir)
 							.filter((f: string) => f.endsWith(".jsonl"))
 							.sort()
 							.reverse(); // newest first
 
-						const currentSessionId = ctx.sessionManager.getSessionId();
-
 						for (const file of files) {
-							const filePath = path.join(projectSessionDir, file);
+							const filePath = path.join(sessionDir, file);
 							try {
 								const fd = fs.openSync(filePath, "r");
 								const buf = Buffer.alloc(512);
@@ -761,7 +755,6 @@ export class WsRpcAdapter {
 							}
 						}
 					}
-
 					return {
 						id: correlationId,
 						type: "response" as const,

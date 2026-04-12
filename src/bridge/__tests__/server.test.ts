@@ -472,6 +472,43 @@ describe("BridgeServer", () => {
 
 			await server.stop();
 		});
+
+		it("emits client_connect after the client is registered", async () => {
+			let server: BridgeServer;
+			let clientCountAtConnect = -1;
+			let connectedClientId: string | undefined;
+
+			server = new BridgeServer(
+				{ ...DEFAULT_BRIDGE_CONFIG, port: 0 },
+				mockContext,
+				eventBus,
+				(event) => {
+					events.push(event);
+					if (event.type === "client_connect") {
+						clientCountAtConnect = server.getClientCount();
+						connectedClientId = server.getClients()[0]?.id;
+					}
+				},
+				TOKEN
+			);
+			const address = await server.start();
+
+			const ws = new WebSocket(`ws://localhost:${address.port}/ws?token=${TOKEN}`);
+			await new Promise<void>((resolve, reject) => {
+				ws.once("open", () => resolve());
+				ws.once("error", reject);
+			});
+			await waitForAsyncWork();
+
+			const connectEvent = events.find((event) => event.type === "client_connect");
+			expect(connectEvent).toBeTruthy();
+			expect(clientCountAtConnect).toBe(1);
+			expect(connectedClientId).toBe((connectEvent as Extract<BridgeEvent, { type: "client_connect" }>).client.id);
+
+			ws.close();
+			await waitForAsyncWork();
+			await server.stop();
+		});
 	});
 
 	describe("staticDir serving", () => {

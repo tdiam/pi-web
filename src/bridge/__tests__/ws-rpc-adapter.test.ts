@@ -486,6 +486,19 @@ describe("WsRpcAdapter", () => {
 
 	describe("discovery commands", () => {
 		it("should handle list_sessions command", async () => {
+			const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-sessions-"));
+			const currentSessionFile = path.join(tmpDir, "current-session.jsonl");
+			const olderSessionFile = path.join(tmpDir, "older-session.jsonl");
+			fs.writeFileSync(
+				currentSessionFile,
+				JSON.stringify({ type: "session", id: "current-id", timestamp: "2025-01-02T00:00:00Z" }) + "\n"
+			);
+			fs.writeFileSync(
+				olderSessionFile,
+				JSON.stringify({ type: "session", id: "older-id", timestamp: "2025-01-01T00:00:00Z" }) + "\n"
+			);
+			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(currentSessionFile);
+
 			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
 				"message",
@@ -501,11 +514,26 @@ describe("WsRpcAdapter", () => {
 			expect(response.type).toBe("response");
 			expect(response.payload.command).toBe("list_sessions");
 			expect(response.payload.success).toBe(true);
-			expect(Array.isArray(response.payload.data.sessions)).toBe(true);
+			expect(response.payload.data.sessions).toEqual([
+				{
+					id: "older-id",
+					name: "older-session",
+					path: olderSessionFile,
+					timestamp: "2025-01-01T00:00:00Z",
+				},
+				{
+					id: "current-id",
+					name: "current-session",
+					path: currentSessionFile,
+					timestamp: "2025-01-02T00:00:00Z",
+				},
+			]);
+
+			fs.rmSync(tmpDir, { recursive: true, force: true });
 		});
 
-		it("should handle list_sessions when no sessions directory exists", async () => {
-			(context.pi.getSessionName as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+		it("should handle list_sessions when no session file is available", async () => {
+			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
 
 			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
@@ -596,9 +624,10 @@ describe("WsRpcAdapter", () => {
 		});
 
 		it("should return empty sessions when scanning fails", async () => {
-			// Force an error in session scanning by making cwd undefined
-			const origCwd = context.ctx.cwd;
-			(context.ctx as unknown as Record<string, unknown>).cwd = undefined;
+			// Force an error in session scanning by making getSessionFile throw
+			(context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockImplementation(() => {
+				throw new Error("session file unavailable");
+			});
 
 			const command: RpcCommand = { id: "cmd-1", type: "list_sessions" };
 			(ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
@@ -614,8 +643,6 @@ describe("WsRpcAdapter", () => {
 
 			expect(response.payload.success).toBe(true);
 			expect(response.payload.data.sessions).toEqual([]);
-			// Restore
-			(context.ctx as unknown as Record<string, unknown>).cwd = origCwd;
 		});
 
 		it("should return empty entries when getBranch throws", async () => {
@@ -825,3 +852,4 @@ describe("WsRpcAdapter", () => {
 		});
 	});
 });
+

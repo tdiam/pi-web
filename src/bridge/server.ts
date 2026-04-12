@@ -355,12 +355,8 @@ export class BridgeServer {
 			connectedAt: new Date().toISOString(),
 		};
 
-		this.emitEvent({
-			type: "client_connect",
-			client,
-		});
-
-		// Create adapter for this connection
+		// Register the connection before emitting client_connect so any
+		// render triggered by the event sees the updated client list.
 		const adapter = new WsRpcAdapter(
 			client,
 			ws,
@@ -377,6 +373,11 @@ export class BridgeServer {
 			if (ws.readyState === 1) { // WebSocket.OPEN
 				ws.send(data);
 			}
+		});
+
+		this.emitEvent({
+			type: "client_connect",
+			client,
 		});
 
 		// Clean up on close
