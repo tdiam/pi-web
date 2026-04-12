@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import ChatTranscript from "./components/ChatTranscript.vue";
 import SessionRail from "./components/SessionRail.vue";
@@ -47,8 +47,11 @@ const theme = ref<ThemeMode>("dark");
 const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
 const themeLabel = computed(() => `Theme: ${theme.value === "dark" ? "Dark" : "Light"}`);
 
-// Fetch persisted plugin state from server on mount, then sync back on change.
-onMounted(async () => {
+// Wait for WS connection before fetching persisted state, then sync back on change.
+let themeLoaded = false;
+watch(connectionStatus, async (status) => {
+	if (status !== "connected" || themeLoaded) return;
+	themeLoaded = true;
 	try {
 		const res = await sendCommand({ type: "get_plugin_state", key: "theme" });
 		if (res.success && (res.data as { value?: unknown }).value) {
