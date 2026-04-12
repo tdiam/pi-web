@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ListTree, Moon, Sun } from "lucide-vue-next";
 import { ref, computed, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import ChatTranscript from "./components/ChatTranscript.vue";
@@ -57,7 +58,7 @@ function readCachedTheme(): ThemeMode {
 	return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 const theme = ref<ThemeMode>(readCachedTheme());
-const themeLabel = computed(() => `Theme: ${theme.value === "dark" ? "Dark" : "Light"}`);
+const nextThemeLabel = computed(() => (theme.value === "dark" ? "light" : "dark"));
 
 // Once connected, sync the authoritative server state.
 let themeLoaded = false;
@@ -112,6 +113,7 @@ function handlePrompt(message: string) {
 
 function openTreePanel() {
 	treePanelOpen.value = true;
+	sidebarOpen.value = false;
 }
 
 function handleUIRespond(payload: Parameters<typeof respondToUIRequest>[0]) {
@@ -155,16 +157,15 @@ watch(
 			</div>
 			<div class="header-status">
 				<span v-if="networkUrl" class="network-url">{{ networkUrl }}</span>
-				<button class="tree-toggle" type="button" @click="openTreePanel">
-					{{ isHistoricalView ? 'Browse Tree' : 'Open Tree' }}
-				</button>
 				<button
 					class="theme-toggle"
 					type="button"
-					:title="`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`"
+					:aria-label="`Switch to ${nextThemeLabel} theme`"
+					:title="`Switch to ${nextThemeLabel} theme`"
 					@click="toggleTheme"
 				>
-					{{ themeLabel }}
+					<Sun v-if="theme === 'dark'" class="theme-icon" aria-hidden="true" />
+					<Moon v-else class="theme-icon" aria-hidden="true" />
 				</button>
 				<span
 					class="connection-indicator"
@@ -189,7 +190,20 @@ watch(
 					:sessions="sessions"
 					:active-session-id="activeSessionId"
 					@select="handleSessionSelect"
-				/>
+				>
+					<template #header-action>
+						<button
+							class="tree-rail-button"
+							:class="{ active: treePanelOpen }"
+							type="button"
+							:aria-label="isHistoricalView ? 'Browse tree' : 'Open tree'"
+							:title="isHistoricalView ? 'Browse tree' : 'Open tree'"
+							@click="openTreePanel"
+						>
+							<ListTree aria-hidden="true" />
+						</button>
+					</template>
+				</SessionRail>
 			</aside>
 			<div class="rail-backdrop" @click="sidebarOpen = false"></div>
 
@@ -417,8 +431,7 @@ watch(
 
 .network-url,
 .connection-indicator,
-.theme-toggle,
-.tree-toggle {
+.theme-toggle {
 	display: inline-flex;
 	align-items: center;
 	gap: 8px;
@@ -431,23 +444,30 @@ watch(
 	color: var(--text-subtle);
 }
 
-.network-url,
-.theme-toggle,
-.tree-toggle {
+.network-url {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 }
 
-.theme-toggle,
-.tree-toggle {
+.theme-toggle {
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border-radius: 999px;
 	cursor: pointer;
-	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
-.theme-toggle:hover,
-.tree-toggle:hover {
+.theme-toggle:hover {
 	background: var(--panel-2);
 	border-color: var(--border-strong);
 	color: var(--text-muted);
+	transform: translateY(-1px);
+}
+
+.theme-icon {
+	width: 16px;
+	height: 16px;
 }
 
 .connection-indicator.connected,
@@ -500,6 +520,39 @@ watch(
 	background: var(--rail-bg);
 	border-right: 1px solid var(--border);
 	overflow: hidden;
+}
+
+.tree-rail-button {
+	width: 28px;
+	height: 28px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: transparent;
+	color: var(--text-subtle);
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.tree-rail-button:hover {
+	background: var(--panel-2);
+	border-color: var(--border-strong);
+	color: var(--text-muted);
+}
+
+.tree-rail-button.active {
+	background: var(--panel-3);
+	border-color: var(--border-strong);
+	color: var(--text);
+}
+
+.tree-rail-button svg {
+	width: 16px;
+	height: 16px;
 }
 
 .rail-backdrop {
@@ -631,13 +684,8 @@ watch(
 	}
 
 	.session-kicker,
-	.network-url,
-	.theme-toggle {
+	.network-url {
 		display: none;
-	}
-
-	.tree-toggle {
-		height: 30px;
 	}
 
 	.app-body {

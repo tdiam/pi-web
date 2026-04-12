@@ -13,7 +13,10 @@ const emit = defineEmits<{
 
 <template>
 	<div class="session-rail">
-		<div class="rail-header">Sessions</div>
+		<div class="rail-header">
+			<span class="rail-title">Sessions</span>
+			<slot name="header-action"></slot>
+		</div>
 		<ul v-if="sessions.length > 0" class="rail-list">
 			<li
 				v-for="s in sessions"
@@ -40,14 +43,21 @@ const emit = defineEmits<{
 }
 
 .rail-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
 	padding: 8px 10px;
+	color: var(--text-subtle);
+	flex-shrink: 0;
+}
+
+.rail-title {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.68rem;
 	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.08em;
-	color: var(--text-subtle);
-	flex-shrink: 0;
 }
 
 .rail-list {
