@@ -43,11 +43,20 @@ const networkUrl = computed(() => {
 	return h;
 });
 const sidebarOpen = ref(false);
-const theme = ref<ThemeMode>("dark");
 const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
+
+// localStorage as instant cache to avoid flash; server as authoritative source.
+const THEME_CACHE_KEY = "pi-web-theme";
+function readCachedTheme(): ThemeMode {
+	if (typeof window === "undefined") return "dark";
+	const cached = window.localStorage.getItem(THEME_CACHE_KEY);
+	if (cached === "dark" || cached === "light") return cached;
+	return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+const theme = ref<ThemeMode>(readCachedTheme());
 const themeLabel = computed(() => `Theme: ${theme.value === "dark" ? "Dark" : "Light"}`);
 
-// Wait for WS connection before fetching persisted state, then sync back on change.
+// Once connected, sync the authoritative server state.
 let themeLoaded = false;
 watch(connectionStatus, async (status) => {
 	if (status !== "connected" || themeLoaded) return;
@@ -62,13 +71,13 @@ watch(connectionStatus, async (status) => {
 			}
 		}
 	} catch {
-		// Server unavailable — fall through to system preference
+		// Server unavailable — keep cached value
 	}
-	if (typeof window === "undefined") return;
-	theme.value = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 });
 
+// On change: persist to server and update localStorage cache.
 watch(theme, (value) => {
+	if (typeof window !== "undefined") window.localStorage.setItem(THEME_CACHE_KEY, value);
 	sendCommand({ type: "set_plugin_state", key: "theme", value }).catch(() => {});
 });
 
