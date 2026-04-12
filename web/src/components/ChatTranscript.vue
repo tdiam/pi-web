@@ -35,8 +35,6 @@ function roleClass(role: string): "user" | "assistant" | "tool" {
 }
 
 function roleLabel(role: string): string {
-	if (role === "user") return "You";
-	if (role === "assistant") return "Assistant";
 	if (role === "toolResult") return "Tool Result";
 	if (role === "tool") return "Tool";
 	return role;
@@ -151,9 +149,6 @@ defineExpose({ preserveScroll });
 			</div>
 
 			<div v-else class="message-row" :class="roleClass(msg.role)">
-				<div class="message-meta">
-					<span class="message-role">{{ roleLabel(msg.role) }}</span>
-				</div>
 				<div class="message-content" :class="roleClass(msg.role)">
 					<template v-for="(block, bIdx) in contentBlocks(msg)" :key="bIdx">
 						<div v-if="block.kind === 'thinking'" class="thinking-block">
@@ -201,7 +196,6 @@ defineExpose({ preserveScroll });
 		</template>
 
 		<div v-if="isStreaming" class="streaming-indicator">
-			<span class="streaming-label">Assistant</span>
 			<span class="dot"></span>
 			<span class="dot"></span>
 			<span class="dot"></span>
@@ -268,12 +262,24 @@ defineExpose({ preserveScroll });
 }
 
 .message-row {
-	display: grid;
-	grid-template-columns: 96px minmax(0, 1fr);
-	gap: 16px;
 	width: 100%;
 	max-width: 920px;
 	margin: 0 auto;
+}
+
+.message-row.assistant,
+.message-row.user {
+	display: flex;
+}
+
+.message-row.user {
+	justify-content: flex-end;
+}
+
+.message-row.tool {
+	display: grid;
+	grid-template-columns: 96px minmax(0, 1fr);
+	gap: 16px;
 }
 
 .message-meta {
@@ -292,17 +298,27 @@ defineExpose({ preserveScroll });
 
 .message-content {
 	min-width: 0;
-	padding-left: 14px;
-	border-left: 1px solid var(--border);
 	font-size: 0.9rem;
 	line-height: 1.7;
 	color: var(--text);
 	word-break: break-word;
 }
 
+.message-content.assistant,
+.message-content.tool {
+	width: 100%;
+	padding-left: 14px;
+	border-left: 1px solid var(--border);
+}
+
 .message-content.user {
-	max-width: 720px;
-	margin-left: 28px;
+	width: fit-content;
+	max-width: min(720px, 100%);
+	margin-left: auto;
+	padding: 12px 16px;
+	border: 1px solid var(--border);
+	border-radius: 18px 18px 8px 18px;
+	background: linear-gradient(180deg, var(--panel-2), var(--panel));
 }
 
 .text-block {
@@ -368,7 +384,6 @@ defineExpose({ preserveScroll });
 
 .tool-call-kicker,
 .tool-result-label,
-.streaming-label,
 .tool-pending {
 	font-family: "SF Mono", "Monaco", "Menlo", monospace;
 	font-size: 0.66rem;
@@ -451,8 +466,9 @@ defineExpose({ preserveScroll });
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	padding: 0 32px 8px;
-	width: min(920px, 100%);
+	padding: 0 0 8px 14px;
+	border-left: 1px solid var(--border);
+	width: min(920px, calc(100% - 64px));
 	margin: 0 auto;
 }
 
@@ -464,11 +480,11 @@ defineExpose({ preserveScroll });
 	animation: blink 1.2s infinite;
 }
 
-.streaming-indicator .dot:nth-child(3) {
+.streaming-indicator .dot:nth-child(2) {
 	animation-delay: 0.2s;
 }
 
-.streaming-indicator .dot:nth-child(4) {
+.streaming-indicator .dot:nth-child(3) {
 	animation-delay: 0.4s;
 }
 
@@ -488,12 +504,13 @@ defineExpose({ preserveScroll });
 		padding: 16px 16px 10px;
 	}
 
-	.message-row {
+	.message-row.tool {
 		grid-template-columns: 1fr;
 		gap: 8px;
 	}
 
-	.message-content,
+	.message-content.assistant,
+	.message-content.tool,
 	.message-content.user,
 	.tool-row {
 		margin-left: 0;
@@ -501,7 +518,7 @@ defineExpose({ preserveScroll });
 	}
 
 	.streaming-indicator {
-		padding: 0 16px 6px;
+		width: calc(100% - 32px);
 	}
 }
 </style>
