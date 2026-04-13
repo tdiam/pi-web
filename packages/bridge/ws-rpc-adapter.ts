@@ -737,12 +737,16 @@ export class WsRpcAdapter {
 
   private async ensureSelectedSession(): Promise<AgentSession> {
     const sessionPath = this.selectedSessionPath;
-    if (!sessionPath || !fs.existsSync(sessionPath)) {
+    if (!sessionPath) {
       throw new Error("Selected session file not found");
     }
 
     if (this.selectedSession?.sessionFile === sessionPath) {
       return this.selectedSession;
+    }
+
+    if (!fs.existsSync(sessionPath)) {
+      throw new Error("Selected session file not found");
     }
 
     this.disposeSelectedSession();
@@ -1658,6 +1662,28 @@ export class WsRpcAdapter {
         if (sessionFile) {
           this.selectedSessionPath = sessionFile;
         }
+
+        const created = await createAgentSession({
+          cwd: sessionManager.getCwd() || cwd,
+          sessionManager,
+        });
+        await created.session.bindExtensions({
+          uiContext: this.createExtensionUIContext() as never,
+          onError: (error) => {
+            console.error(
+              `WsRpcAdapter[${this.client.id}]: Detached session extension error:`,
+              error,
+            );
+          },
+          shutdownHandler: () => {},
+        });
+        this.selectedSession = created.session;
+        this.selectedSessionUnsubscribe = created.session.subscribe((event) => {
+          this.sendResponse({
+            type: "event",
+            payload: toClientEventPayload(event),
+          });
+        });
 
         return {
           id: correlationId,

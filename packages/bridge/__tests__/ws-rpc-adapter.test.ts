@@ -1210,11 +1210,29 @@ describe("WsRpcAdapter", () => {
 
     it("should handle new_session command", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-test-"));
-      const sessionFile = path.join(tmpDir, "session.jsonl");
-      // Seed a dummy session file so path.dirname gives a valid dir
       const sm = SessionManager.create(tmpDir, tmpDir);
       const existingFile = sm.getSessionFile()!;
       (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(existingFile);
+
+      // Mock createAgentSession for the detached session
+      const mockSubscribe = vi.fn();
+      const mockBindExtensions = vi.fn().mockResolvedValue(undefined);
+      const mockDispose = vi.fn();
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          sessionFile: undefined,
+          sessionManager: sm,
+          subscribe: mockSubscribe,
+          bindExtensions: mockBindExtensions,
+          dispose: mockDispose,
+          isStreaming: false,
+          pendingMessageCount: 0,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          sessionId: sm.getSessionId(),
+        },
+      });
 
       const command: RpcCommand = { id: "cmd-1", type: "new_session" };
       (
@@ -1228,6 +1246,8 @@ describe("WsRpcAdapter", () => {
 
       // ctx.newSession should NOT be called (bridge creates session locally)
       expect(context.ctx.newSession).not.toHaveBeenCalled();
+      // createAgentSession should be called to set up the detached session
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
 
       const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
       const lastCall = JSON.parse(sendCalls[sendCalls.length - 1][0] as string);
