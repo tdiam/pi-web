@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronRight } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, Sparkle } from "lucide-vue-next";
 import { ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import {
@@ -184,19 +184,14 @@ defineExpose({ preserveScroll });
                 class="thinking-toggle"
                 @click="toggleThinking(msg.id, bIdx)"
               >
-                <ChevronDown
-                  v-if="isThinkingExpanded(msg.id, bIdx)"
-                  class="toggle-icon"
-                  aria-hidden="true"
-                />
-                <ChevronRight v-else class="toggle-icon" aria-hidden="true" />
+                <Sparkle class="toggle-icon" aria-hidden="true" />
                 Thinking
               </button>
-              <pre
+              <MarkdownRenderer
                 v-if="isThinkingExpanded(msg.id, bIdx)"
                 class="thinking-content"
-                >{{ block.text }}</pre
-              >
+                :content="block.text"
+              />
             </div>
 
             <ToolCard
@@ -372,13 +367,11 @@ defineExpose({ preserveScroll });
 .thinking-content {
   margin: 8px 0 0;
   padding: 10px 0 0;
-  font-family: inherit;
   font-size: 0.74rem;
   line-height: 1.55;
   color: var(--text-muted);
-  max-height: 300px;
+  max-height: 400px;
   overflow-y: auto;
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
