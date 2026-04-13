@@ -16,6 +16,7 @@ const emit = defineEmits<{
 
 const model = computed(() => buildToolCardModel(props.block));
 const hasDetails = computed(() => model.value.details.length > 0);
+const showPreview = computed(() => !props.expanded || !hasDetails.value);
 const readPath = computed(() => {
 	const args = props.block.toolArgs;
 	if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
@@ -53,9 +54,13 @@ const editDiff = computed(() => {
 			</button>
 		</header>
 
-		<DiffView v-if="editDiff" :diff="editDiff" />
-		<HighlightedCode v-else-if="model.preview && block.toolName === 'read'" :code="model.preview" :path="readPath" />
-		<pre v-else-if="model.preview" class="tool-card-preview">{{ model.preview }}</pre>
+		<DiffView v-if="showPreview && editDiff" :diff="editDiff" />
+		<HighlightedCode
+			v-else-if="showPreview && model.preview && block.toolName === 'read'"
+			:code="model.preview"
+			:path="readPath"
+		/>
+		<pre v-else-if="showPreview && model.preview" class="tool-card-preview">{{ model.preview }}</pre>
 
 		<div v-if="expanded && hasDetails" class="tool-card-details">
 			<section v-for="section in model.details" :key="section.label" class="tool-card-section">
