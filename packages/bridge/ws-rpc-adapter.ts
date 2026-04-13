@@ -1011,15 +1011,25 @@ export class WsRpcAdapter {
         const targetPath = requestedPath ?? liveSessionPath;
 
         // If targeting a historical (non-live) session, read from disk
-        if (targetPath && targetPath !== liveSessionPath && fs.existsSync(targetPath)) {
+        if (
+          targetPath &&
+          targetPath !== liveSessionPath &&
+          fs.existsSync(targetPath)
+        ) {
           try {
             const diskSession = openSessionManager(targetPath);
             const branch = diskSession.getBranch();
             let totalCost = 0;
             let lastAssistantEntry: {
-              usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+              usage?: {
+                input?: number;
+                output?: number;
+                cacheRead?: number;
+                cacheWrite?: number;
+              };
             } | null = null;
-            let lastModel: { provider?: string; modelId?: string } | null = null;
+            let lastModel: { provider?: string; modelId?: string } | null =
+              null;
             for (const entry of branch) {
               const e = entry as {
                 type?: string;
@@ -1058,19 +1068,24 @@ export class WsRpcAdapter {
             let percent: number | null = null;
             if (lastAssistantEntry?.usage) {
               const u = lastAssistantEntry.usage;
-              tokens = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+              tokens =
+                (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
             }
             if (lastModel?.provider && lastModel?.modelId && tokens != null) {
               const models = await ctx.modelRegistry.getAvailable();
               const matched = models.find(
                 (m: unknown) =>
-                  (m as { provider: string; id: string }).provider === lastModel!.provider &&
-                  (m as { provider: string; id: string }).id === lastModel!.modelId,
+                  (m as { provider: string; id: string }).provider ===
+                    lastModel!.provider &&
+                  (m as { provider: string; id: string }).id ===
+                    lastModel!.modelId,
               );
               if (matched) {
-                contextWindow = (matched as { contextWindow?: number }).contextWindow ?? 0;
+                contextWindow =
+                  (matched as { contextWindow?: number }).contextWindow ?? 0;
                 if (contextWindow > 0) {
-                  percent = Math.round((tokens / contextWindow) * 100 * 10) / 10;
+                  percent =
+                    Math.round((tokens / contextWindow) * 100 * 10) / 10;
                 }
               }
             }

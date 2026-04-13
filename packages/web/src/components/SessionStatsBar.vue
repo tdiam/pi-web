@@ -123,7 +123,9 @@ const barColor = computed(() => {
 .context-bar-fill {
   height: 100%;
   border-radius: 2px;
-  transition: width 0.4s ease, background 0.3s ease;
+  transition:
+    width 0.4s ease,
+    background 0.3s ease;
 }
 
 .stat-label {
