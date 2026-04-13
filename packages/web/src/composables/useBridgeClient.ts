@@ -406,6 +406,7 @@ function handleResponse(payload: RpcResponse) {
           treeEntries.value = [];
           sessionState.value = null;
         }
+        sessionStats.value = null;
         sendCommand({ type: "list_sessions" }).catch(() => {});
         break;
       }
