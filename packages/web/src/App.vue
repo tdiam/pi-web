@@ -126,9 +126,16 @@ function handleModelSelect(model: RpcModelInfo) {
 	sendCommand({ type: "set_model", provider: model.provider, modelId: model.id }).catch(() => {});
 }
 
-function openTreePanel() {
-	treePanelOpen.value = true;
+async function openTreePanel() {
 	sidebarOpen.value = false;
+	if (connectionStatus.value === "connected") {
+		try {
+			await sendCommand({ type: "list_tree_entries", sessionPath: sessionState.value?.sessionFile });
+		} catch {
+			// Keep the panel reachable even if the refresh fails.
+		}
+	}
+	treePanelOpen.value = true;
 }
 
 function handleUIRespond(payload: Parameters<typeof respondToUIRequest>[0]) {

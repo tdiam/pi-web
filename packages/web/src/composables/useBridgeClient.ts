@@ -468,7 +468,6 @@ async function fetchInitialState() {
       sendCommand({ type: "get_state" }),
       sendCommand({ type: "get_messages" }),
       sendCommand({ type: "list_sessions" }),
-      sendCommand({ type: "list_tree_entries" }),
       sendCommand({ type: "get_commands" }),
       sendCommand({ type: "get_available_models" }),
     ]);

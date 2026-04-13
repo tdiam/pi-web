@@ -61,6 +61,9 @@ const editDiff = computed(() => {
 				:path="readPath"
 			/>
 		</div>
+		<div v-else-if="showPreview && model.preview && block.toolName === 'bash'" class="tool-card-code-panel">
+			<pre class="tool-card-preview">{{ model.preview }}</pre>
+		</div>
 		<pre v-else-if="showPreview && model.preview" class="tool-card-preview">{{ model.preview }}</pre>
 
 		<div v-if="expanded && hasDetails" class="tool-card-details">
@@ -71,6 +74,9 @@ const editDiff = computed(() => {
 						:code="section.text"
 						:path="readPath"
 					/>
+				</div>
+				<div v-else-if="block.toolName === 'bash'" class="tool-card-code-panel">
+					<pre class="tool-card-section-text">{{ section.text }}</pre>
 				</div>
 				<pre v-else class="tool-card-section-text">{{ section.text }}</pre>
 			</section>
@@ -201,6 +207,7 @@ const editDiff = computed(() => {
 	max-height: 360px;
 }
 
+.tool-card-code-panel pre,
 .tool-card-code-panel :deep(pre) {
 	margin: 0;
 	padding: 10px 12px;

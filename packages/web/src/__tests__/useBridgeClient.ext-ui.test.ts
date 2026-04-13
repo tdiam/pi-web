@@ -104,6 +104,31 @@ describe("extension_ui_request handling", () => {
 		expect(client.isReconnecting.value).toBe(false);
 	});
 
+	it("does not request tree entries during initial connect", async () => {
+		await importComposable();
+		const ws = getLastMockWs();
+		simulateOpen(ws);
+
+		const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
+			const payload = JSON.parse(message) as { payload?: { type?: string } };
+			return payload.payload?.type;
+		});
+
+		expect(sentCommandTypes).toEqual(
+			expect.arrayContaining([
+				"get_state",
+				"get_messages",
+				"list_sessions",
+				"get_commands",
+				"get_available_models",
+			]),
+		);
+		
+		// Tree data is loaded lazily when the panel is opened.
+		const treeRequests = sentCommandTypes.filter((type) => type === "list_tree_entries");
+		expect(treeRequests).toHaveLength(0);
+	});
+
 	it("updates tree entries from switch_session responses", async () => {
 		const client = await importComposable();
 		const ws = getLastMockWs();
