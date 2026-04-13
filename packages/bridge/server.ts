@@ -25,438 +25,461 @@ let clientSeqCounter = 0;
  * Generate a unique client ID
  */
 function generateClientId(): string {
-	return `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  return `client_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /**
  * Bridge HTTP/WebSocket server
  */
 export class BridgeServer {
-	private config: BridgeConfig;
-	private context: WsRpcAdapterContext;
-	private eventBus: BridgeEventBus;
-	private emitEvent: (event: BridgeEvent) => void;
-	private readonly token: string;
+  private config: BridgeConfig;
+  private context: WsRpcAdapterContext;
+  private eventBus: BridgeEventBus;
+  private emitEvent: (event: BridgeEvent) => void;
+  private readonly token: string;
 
-	private httpServer: http.Server | undefined;
-	private wsServer: WebSocketServer | undefined;
-	private adapters = new Map<string, WsRpcAdapter>();
+  private httpServer: http.Server | undefined;
+  private wsServer: WebSocketServer | undefined;
+  private adapters = new Map<string, WsRpcAdapter>();
 
-	private isRunning = false;
-	private host: string = "localhost";
-	private port: number = 0;
+  private isRunning = false;
+  private host: string = "localhost";
+  private port: number = 0;
 
-	constructor(
-		config: BridgeConfig,
-		context: WsRpcAdapterContext,
-		eventBus: BridgeEventBus,
-		emitEvent: (event: BridgeEvent) => void,
-		token: string
-	) {
-		this.config = config;
-		this.context = context;
-		this.eventBus = eventBus;
-		this.emitEvent = emitEvent;
-		this.token = token;
-	}
+  constructor(
+    config: BridgeConfig,
+    context: WsRpcAdapterContext,
+    eventBus: BridgeEventBus,
+    emitEvent: (event: BridgeEvent) => void,
+    token: string,
+  ) {
+    this.config = config;
+    this.context = context;
+    this.eventBus = eventBus;
+    this.emitEvent = emitEvent;
+    this.token = token;
+  }
 
-	/**
-	 * Start the HTTP and WebSocket server
-	 * @returns Promise resolving to the bound address
-	 */
-	async start(): Promise<{ host: string; port: number }> {
-		if (this.isRunning) {
-			throw new Error("Server is already running");
-		}
+  /**
+   * Start the HTTP and WebSocket server
+   * @returns Promise resolving to the bound address
+   */
+  async start(): Promise<{ host: string; port: number }> {
+    if (this.isRunning) {
+      throw new Error("Server is already running");
+    }
 
-		// Try to bind to port with fallback
-		const startPort = this.config.port || 0;
-		const maxPort = this.config.portMax || startPort;
+    // Try to bind to port with fallback
+    const startPort = this.config.port || 0;
+    const maxPort = this.config.portMax || startPort;
 
-		let boundPort = 0;
-		let lastError: Error | undefined;
+    let boundPort = 0;
+    let lastError: Error | undefined;
 
-		for (let tryPort = startPort; tryPort <= maxPort || (startPort === 0 && tryPort === 0); ) {
-			try {
-				await this.bindToPort(tryPort);
-				boundPort = tryPort === 0 ? (this.httpServer?.address() as { port: number })?.port ?? 0 : tryPort;
-				break;
-			} catch (err) {
-				lastError = err instanceof Error ? err : new Error(String(err));
-				if (startPort === 0) {
-					// OS-assigned port failed, this shouldn't happen
-					throw lastError;
-				}
-				// Try next port in range
-				tryPort++;
-				if (tryPort > maxPort) {
-					throw new Error(
-						`Failed to bind to any port in range ${startPort}-${maxPort}: ${lastError.message}`
-					);
-				}
-			}
-		}
+    for (
+      let tryPort = startPort;
+      tryPort <= maxPort || (startPort === 0 && tryPort === 0);
+    ) {
+      try {
+        await this.bindToPort(tryPort);
+        boundPort =
+          tryPort === 0
+            ? ((this.httpServer?.address() as { port: number })?.port ?? 0)
+            : tryPort;
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        if (startPort === 0) {
+          // OS-assigned port failed, this shouldn't happen
+          throw lastError;
+        }
+        // Try next port in range
+        tryPort++;
+        if (tryPort > maxPort) {
+          throw new Error(
+            `Failed to bind to any port in range ${startPort}-${maxPort}: ${lastError.message}`,
+          );
+        }
+      }
+    }
 
-		this.host = this.config.host;
-		this.port = boundPort;
-		this.isRunning = true;
+    this.host = this.config.host;
+    this.port = boundPort;
+    this.isRunning = true;
 
-		this.emitEvent({
-			type: "server_start",
-			host: this.host,
-			port: this.port,
-		});
+    this.emitEvent({
+      type: "server_start",
+      host: this.host,
+      port: this.port,
+    });
 
-		return { host: this.host, port: this.port };
-	}
+    return { host: this.host, port: this.port };
+  }
 
-	/**
-	 * Bind HTTP server to a specific port.
-	 * Creates a fresh HTTP server each time (Node.js doesn't reliably
-	 * support re-listening after a bind failure). The WebSocketServer
-	 * is only attached after the bind succeeds to avoid interference
-	 * with error handling.
-	 */
-	private bindToPort(port: number): Promise<void> {
-		// Discard any previous server (let GC handle it)
-		this.httpServer = undefined;
-		this.wsServer = undefined;
+  /**
+   * Bind HTTP server to a specific port.
+   * Creates a fresh HTTP server each time (Node.js doesn't reliably
+   * support re-listening after a bind failure). The WebSocketServer
+   * is only attached after the bind succeeds to avoid interference
+   * with error handling.
+   */
+  private bindToPort(port: number): Promise<void> {
+    // Discard any previous server (let GC handle it)
+    this.httpServer = undefined;
+    this.wsServer = undefined;
 
-		this.httpServer = http.createServer((req, res) => {
-			this.handleHttpRequest(req, res);
-		});
+    this.httpServer = http.createServer((req, res) => {
+      this.handleHttpRequest(req, res);
+    });
 
-		return new Promise((resolve, reject) => {
-			const server = this.httpServer!;
+    return new Promise((resolve, reject) => {
+      const server = this.httpServer!;
 
-			const onError = (err: Error) => {
-				server.off("error", onError);
-				server.off("listening", onListening);
-				reject(err);
-			};
+      const onError = (err: Error) => {
+        server.off("error", onError);
+        server.off("listening", onListening);
+        reject(err);
+      };
 
-			const onListening = () => {
-				server.off("error", onError);
-				server.off("listening", onListening);
-				// Create WebSocket server only after HTTP server is listening
-				this.wsServer = new WebSocketServer({
-					server,
-					path: "/ws",
-					verifyClient: (info, callback) => {
-						const url = new URL(info.req.url || "/", `http://${info.req.headers.host}`);
-						const clientToken = url.searchParams.get("token");
-						const clientIp = info.req.socket.remoteAddress || "unknown";
-						if (clientToken === this.token) {
-							callback(true);
-						} else {
-							this.emitEvent({ type: "auth_rejected", clientIp, protocol: "ws" });
-							callback(false, 401, "Unauthorized: invalid or missing token");
-						}
-					},
-				});
-				this.wsServer.on("connection", (ws, req) => {
-					this.handleWsConnection(ws, req);
-				});
-				resolve();
-			};
+      const onListening = () => {
+        server.off("error", onError);
+        server.off("listening", onListening);
+        // Create WebSocket server only after HTTP server is listening
+        this.wsServer = new WebSocketServer({
+          server,
+          path: "/ws",
+          verifyClient: (info, callback) => {
+            const url = new URL(
+              info.req.url || "/",
+              `http://${info.req.headers.host}`,
+            );
+            const clientToken = url.searchParams.get("token");
+            const clientIp = info.req.socket.remoteAddress || "unknown";
+            if (clientToken === this.token) {
+              callback(true);
+            } else {
+              this.emitEvent({
+                type: "auth_rejected",
+                clientIp,
+                protocol: "ws",
+              });
+              callback(false, 401, "Unauthorized: invalid or missing token");
+            }
+          },
+        });
+        this.wsServer.on("connection", (ws, req) => {
+          this.handleWsConnection(ws, req);
+        });
+        resolve();
+      };
 
-			server.once("error", onError);
-			server.once("listening", onListening);
-			server.listen(port, this.config.host);
-		});
-	}
+      server.once("error", onError);
+      server.once("listening", onListening);
+      server.listen(port, this.config.host);
+    });
+  }
 
-	/**
-	 * Stop the server and close all connections
-	 */
-	async stop(): Promise<void> {
-		if (!this.isRunning) {
-			return;
-		}
+  /**
+   * Stop the server and close all connections
+   */
+  async stop(): Promise<void> {
+    if (!this.isRunning) {
+      return;
+    }
 
-		// Close all WebSocket connections
-		for (const [clientId, adapter] of this.adapters) {
-			adapter.dispose();
-		}
-		this.adapters.clear();
+    // Close all WebSocket connections
+    for (const [clientId, adapter] of this.adapters) {
+      adapter.dispose();
+    }
+    this.adapters.clear();
 
-		// Close WebSocket server
-		if (this.wsServer) {
-			await new Promise<void>((resolve) => {
-				this.wsServer?.close(() => resolve());
-			});
-			this.wsServer = undefined;
-		}
+    // Close WebSocket server
+    if (this.wsServer) {
+      await new Promise<void>((resolve) => {
+        this.wsServer?.close(() => resolve());
+      });
+      this.wsServer = undefined;
+    }
 
-		// Close HTTP server
-		if (this.httpServer) {
-			await new Promise<void>((resolve, reject) => {
-				this.httpServer?.close((err) => {
-					if (err) reject(err);
-					else resolve();
-				});
-			});
-			this.httpServer = undefined;
-		}
+    // Close HTTP server
+    if (this.httpServer) {
+      await new Promise<void>((resolve, reject) => {
+        this.httpServer?.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+      this.httpServer = undefined;
+    }
 
-		this.isRunning = false;
-		this.port = 0;
+    this.isRunning = false;
+    this.port = 0;
 
-		this.emitEvent({ type: "server_stop" });
-	}
+    this.emitEvent({ type: "server_stop" });
+  }
 
-	/**
-	 * Check if the server is running
-	 */
-	getIsRunning(): boolean {
-		return this.isRunning;
-	}
+  /**
+   * Check if the server is running
+   */
+  getIsRunning(): boolean {
+    return this.isRunning;
+  }
 
-	/**
-	 * Get the current server address
-	 */
-	getAddress(): { host: string; port: number } | undefined {
-		if (!this.isRunning) return undefined;
-		return { host: this.host, port: this.port };
-	}
+  /**
+   * Get the current server address
+   */
+  getAddress(): { host: string; port: number } | undefined {
+    if (!this.isRunning) return undefined;
+    return { host: this.host, port: this.port };
+  }
 
-	/**
-	 * Get the number of connected clients
-	 */
-	getClientCount(): number {
-		return this.adapters.size;
-	}
+  /**
+   * Get the number of connected clients
+   */
+  getClientCount(): number {
+    return this.adapters.size;
+  }
 
-	/**
-	 * Get list of connected clients
-	 */
-	getClients(): WsClient[] {
-		return Array.from(this.adapters.values()).map((adapter) => {
-			// Access the private client field through type assertion
-			return (adapter as unknown as { client: WsClient }).client;
-		});
-	}
+  /**
+   * Get list of connected clients
+   */
+  getClients(): WsClient[] {
+    return Array.from(this.adapters.values()).map((adapter) => {
+      // Access the private client field through type assertion
+      return (adapter as unknown as { client: WsClient }).client;
+    });
+  }
 
-	/**
-	 * Handle HTTP requests
-	 */
-	private handleHttpRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-		// Only handle GET requests
-		if (req.method !== "GET") {
-			res.writeHead(405, { "Content-Type": "text/plain" });
-			res.end("Method Not Allowed");
-			return;
-		}
+  /**
+   * Handle HTTP requests
+   */
+  private handleHttpRequest(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    // Only handle GET requests
+    if (req.method !== "GET") {
+      res.writeHead(405, { "Content-Type": "text/plain" });
+      res.end("Method Not Allowed");
+      return;
+    }
 
-		// Parse URL
-		const url = new URL(req.url || "/", `http://${req.headers.host}`);
+    // Parse URL
+    const url = new URL(req.url || "/", `http://${req.headers.host}`);
 
-		// Token authentication: check query param first, then cookie
-		const queryToken = url.searchParams.get("token");
-		if (queryToken === this.token) {
-			// Valid token via query param — set cookie and strip token from URL for downstream
-			res.setHeader("Set-Cookie", `pi_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`);
-		} else {
-			// Check cookie
-			const cookies = parseCookies(req.headers.cookie);
-			if (cookies.pi_token !== this.token) {
-				const clientIp = req.socket.remoteAddress || "unknown";
-				this.emitEvent({ type: "auth_rejected", clientIp, protocol: "http" });
-				res.writeHead(401, { "Content-Type": "text/plain" });
-				res.end("Unauthorized");
-				return;
-			}
-		}
+    // Token authentication: check query param first, then cookie
+    const queryToken = url.searchParams.get("token");
+    if (queryToken === this.token) {
+      // Valid token via query param — set cookie and strip token from URL for downstream
+      res.setHeader(
+        "Set-Cookie",
+        `pi_token=${this.token}; Path=/; HttpOnly; SameSite=Strict`,
+      );
+    } else {
+      // Check cookie
+      const cookies = parseCookies(req.headers.cookie);
+      if (cookies.pi_token !== this.token) {
+        const clientIp = req.socket.remoteAddress || "unknown";
+        this.emitEvent({ type: "auth_rejected", clientIp, protocol: "http" });
+        res.writeHead(401, { "Content-Type": "text/plain" });
+        res.end("Unauthorized");
+        return;
+      }
+    }
 
-		let pathname = url.pathname;
+    let pathname = url.pathname;
 
-		// Default to index.html
-		if (pathname === "/") {
-			pathname = "/index.html";
-		}
+    // Default to index.html
+    if (pathname === "/") {
+      pathname = "/index.html";
+    }
 
-		// Security: prevent directory traversal
-		const safePath = path.normalize(pathname).replace(/^(\.\.(\/|$))+/, "");
+    // Security: prevent directory traversal
+    const safePath = path.normalize(pathname).replace(/^(\.\.(\/|$))+/, "");
 
-		// Check if static directory is configured
-		if (!this.config.staticDir) {
-			// No static directory - return 404 placeholder
-			if (safePath === "/index.html") {
-				res.writeHead(200, { "Content-Type": "text/html" });
-				res.end(getPlaceholderHtml(this.host, this.port, this.token));
-			} else {
-				res.writeHead(404, { "Content-Type": "text/plain" });
-				res.end("Not Found - No web bundle configured");
-			}
-			return;
-		}
+    // Check if static directory is configured
+    if (!this.config.staticDir) {
+      // No static directory - return 404 placeholder
+      if (safePath === "/index.html") {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(getPlaceholderHtml(this.host, this.port, this.token));
+      } else {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not Found - No web bundle configured");
+      }
+      return;
+    }
 
-		// Serve from static directory
-		const filePath = path.join(this.config.staticDir, safePath);
+    // Serve from static directory
+    const filePath = path.join(this.config.staticDir, safePath);
 
-		// Security: ensure the resolved path is within staticDir
-		if (!filePath.startsWith(path.resolve(this.config.staticDir))) {
-			res.writeHead(403, { "Content-Type": "text/plain" });
-			res.end("Forbidden");
-			return;
-		}
+    // Security: ensure the resolved path is within staticDir
+    if (!filePath.startsWith(path.resolve(this.config.staticDir))) {
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("Forbidden");
+      return;
+    }
 
-		// Check if file exists and is a file
-		fs.stat(filePath, (err, stats) => {
-			if (err || !stats.isFile()) {
-				// Return index.html for SPA routing (client-side routing)
-				const indexPath = path.join(this.config.staticDir!, "index.html");
-				fs.stat(indexPath, (indexErr, indexStats) => {
-					if (indexErr || !indexStats.isFile()) {
-						res.writeHead(404, { "Content-Type": "text/plain" });
-						res.end("Not Found");
-						return;
-					}
-					this.serveFile(indexPath, res);
-				});
-				return;
-			}
+    // Check if file exists and is a file
+    fs.stat(filePath, (err, stats) => {
+      if (err || !stats.isFile()) {
+        // Return index.html for SPA routing (client-side routing)
+        const indexPath = path.join(this.config.staticDir!, "index.html");
+        fs.stat(indexPath, (indexErr, indexStats) => {
+          if (indexErr || !indexStats.isFile()) {
+            res.writeHead(404, { "Content-Type": "text/plain" });
+            res.end("Not Found");
+            return;
+          }
+          this.serveFile(indexPath, res);
+        });
+        return;
+      }
 
-			this.serveFile(filePath, res);
-		});
-	}
+      this.serveFile(filePath, res);
+    });
+  }
 
-	/**
-	 * Serve a file with appropriate content type
-	 */
-	private serveFile(filePath: string, res: http.ServerResponse): void {
-		const ext = path.extname(filePath).toLowerCase();
-		const contentType = MIME_TYPES[ext] || "application/octet-stream";
+  /**
+   * Serve a file with appropriate content type
+   */
+  private serveFile(filePath: string, res: http.ServerResponse): void {
+    const ext = path.extname(filePath).toLowerCase();
+    const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
-		fs.readFile(filePath, (err, data) => {
-			if (err) {
-				res.writeHead(500, { "Content-Type": "text/plain" });
-				res.end("Internal Server Error");
-				return;
-			}
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("Internal Server Error");
+        return;
+      }
 
-			res.writeHead(200, {
-				"Content-Type": contentType,
-				"Cache-Control": "no-cache",
-			});
-			res.end(data);
-		});
-	}
+      res.writeHead(200, {
+        "Content-Type": contentType,
+        "Cache-Control": "no-cache",
+      });
+      res.end(data);
+    });
+  }
 
-	/**
-	 * Handle WebSocket connection
-	 */
-	private handleWsConnection(ws: WebSocket, req: http.IncomingMessage): void {
-		clientSeqCounter++;
+  /**
+   * Handle WebSocket connection
+   */
+  private handleWsConnection(ws: WebSocket, req: http.IncomingMessage): void {
+    clientSeqCounter++;
 
-		const client: WsClient = {
-			id: generateClientId(),
-			seq: clientSeqCounter,
-			connectedAt: new Date().toISOString(),
-		};
+    const client: WsClient = {
+      id: generateClientId(),
+      seq: clientSeqCounter,
+      connectedAt: new Date().toISOString(),
+    };
 
-		// Register the connection before emitting client_connect so any
-		// render triggered by the event sees the updated client list.
-		const adapter = new WsRpcAdapter(
-			client,
-			ws,
-			this.context,
-			this.config,
-			this.eventBus,
-			this.emitEvent
-		);
+    // Register the connection before emitting client_connect so any
+    // render triggered by the event sees the updated client list.
+    const adapter = new WsRpcAdapter(
+      client,
+      ws,
+      this.context,
+      this.config,
+      this.eventBus,
+      this.emitEvent,
+    );
 
-		this.adapters.set(client.id, adapter);
+    this.adapters.set(client.id, adapter);
 
-		// Register client with EventBus for event fan-out
-		const unregister = this.eventBus.registerClient(client, (data) => {
-			if (ws.readyState === 1) { // WebSocket.OPEN
-				ws.send(data);
-			}
-		});
+    // Register client with EventBus for event fan-out
+    const unregister = this.eventBus.registerClient(client, (data) => {
+      if (ws.readyState === 1) {
+        // WebSocket.OPEN
+        ws.send(data);
+      }
+    });
 
-		this.emitEvent({
-			type: "client_connect",
-			client,
-		});
+    this.emitEvent({
+      type: "client_connect",
+      client,
+    });
 
-		// Clean up on close
-		ws.on("close", () => {
-			unregister();
-			this.adapters.delete(client.id);
-			this.emitEvent({
-				type: "client_disconnect",
-				client,
-				reason: "websocket_closed",
-			});
-		});
+    // Clean up on close
+    ws.on("close", () => {
+      unregister();
+      this.adapters.delete(client.id);
+      this.emitEvent({
+        type: "client_disconnect",
+        client,
+        reason: "websocket_closed",
+      });
+    });
 
-		ws.on("error", (err) => {
-			console.error(`WebSocket error for client ${client.id}:`, err);
-			this.emitEvent({
-				type: "command_error",
-				client,
-				commandType: "websocket",
-				error: err.message,
-			});
-		});
-	}
+    ws.on("error", (err) => {
+      console.error(`WebSocket error for client ${client.id}:`, err);
+      this.emitEvent({
+        type: "command_error",
+        client,
+        commandType: "websocket",
+        error: err.message,
+      });
+    });
+  }
 }
 
 /**
  * MIME type mapping
  */
 const MIME_TYPES: Record<string, string> = {
-	".html": "text/html",
-	".js": "application/javascript",
-	".mjs": "application/javascript",
-	".css": "text/css",
-	".json": "application/json",
-	".png": "image/png",
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif": "image/gif",
-	".svg": "image/svg+xml",
-	".ico": "image/x-icon",
-	".woff": "font/woff",
-	".woff2": "font/woff2",
-	".ttf": "font/ttf",
-	".otf": "font/otf",
-	".eot": "application/vnd.ms-fontobject",
+  ".html": "text/html",
+  ".js": "application/javascript",
+  ".mjs": "application/javascript",
+  ".css": "text/css",
+  ".json": "application/json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".eot": "application/vnd.ms-fontobject",
 };
 
 /**
  * Parse a Cookie header string into a key-value map.
  */
 function parseCookies(header: string | undefined): Record<string, string> {
-	const cookies: Record<string, string> = {};
-	if (!header) return cookies;
-	for (const part of header.split(";")) {
-		const trimmed = part.trim();
-		const eqIdx = trimmed.indexOf("=");
-		if (eqIdx > 0) {
-			cookies[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
-		}
-	}
-	return cookies;
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const part of header.split(";")) {
+    const trimmed = part.trim();
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx > 0) {
+      cookies[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+    }
+  }
+  return cookies;
 }
 
 /**
  * Get placeholder HTML when no static bundle exists
  */
 function getPlaceholderHtml(host: string, port: number, token: string): string {
-	const lanIps = getLanIps();
-	const tokenParam = token ? `?token=${token}` : "";
-	const wsUrl = (ip: string) => `ws://${ip}:${port}/ws`;
-	const httpUrl = (ip: string) => `http://${ip}:${port}${tokenParam}`;
-	const lanUrlLines = lanIps.length > 0
-		? lanIps.map(ip => {
-				const label = isTailscaleIp(ip) ? " 🦎 Tailscale" : "";
-				return `<span class="code">${httpUrl(ip)}</span>${label}`;
-			}).join("<br>\n\t\t\t")
-		: "";
+  const lanIps = getLanIps();
+  const tokenParam = token ? `?token=${token}` : "";
+  const wsUrl = (ip: string) => `ws://${ip}:${port}/ws`;
+  const httpUrl = (ip: string) => `http://${ip}:${port}${tokenParam}`;
+  const lanUrlLines =
+    lanIps.length > 0
+      ? lanIps
+          .map((ip) => {
+            const label = isTailscaleIp(ip) ? " 🦎 Tailscale" : "";
+            return `<span class="code">${httpUrl(ip)}</span>${label}`;
+          })
+          .join("<br>\n\t\t\t")
+      : "";
 
-	return `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8">
@@ -494,10 +517,14 @@ function getPlaceholderHtml(host: string, port: number, token: string): string {
 			<strong>Bridge Address:</strong><br>
 			<span class="code">http://localhost:${port}${tokenParam}</span>
 		</div>
-		${lanIps.length > 0 ? `<div class="lan-info">
+		${
+      lanIps.length > 0
+        ? `<div class="lan-info">
 			<strong>📡 LAN Addresses (use on other devices):</strong><br>
 			${lanUrlLines}
-		</div>` : ""}
+		</div>`
+        : ""
+    }
 		
 		<div class="status">
 			<div class="status-dot"></div>

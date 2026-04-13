@@ -6,142 +6,169 @@ import DiffView from "./DiffView.vue";
 import HighlightedCode from "./HighlightedCode.vue";
 
 const props = defineProps<{
-	block: ToolContentBlock;
-	expanded: boolean;
+  block: ToolContentBlock;
+  expanded: boolean;
 }>();
 
 const emit = defineEmits<{
-	toggle: [];
+  toggle: [];
 }>();
 
 const model = computed(() => buildToolCardModel(props.block));
 const hasDetails = computed(() => model.value.details.length > 0);
 const showPreview = computed(() => !props.expanded || !hasDetails.value);
 const readPath = computed(() => {
-	const args = props.block.toolArgs;
-	if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
-	return typeof (args as Record<string, unknown>).path === "string"
-		? ((args as Record<string, unknown>).path as string)
-		: undefined;
+  const args = props.block.toolArgs;
+  if (!args || typeof args !== "object" || Array.isArray(args))
+    return undefined;
+  return typeof (args as Record<string, unknown>).path === "string"
+    ? ((args as Record<string, unknown>).path as string)
+    : undefined;
 });
 const editDiff = computed(() => {
-	if (props.block.toolName !== "edit") return undefined;
-	const details = props.block.resultDetails;
-	if (!details || typeof details !== "object" || Array.isArray(details)) return undefined;
-	return typeof (details as Record<string, unknown>).diff === "string"
-		? ((details as Record<string, unknown>).diff as string)
-		: undefined;
+  if (props.block.toolName !== "edit") return undefined;
+  const details = props.block.resultDetails;
+  if (!details || typeof details !== "object" || Array.isArray(details))
+    return undefined;
+  return typeof (details as Record<string, unknown>).diff === "string"
+    ? ((details as Record<string, unknown>).diff as string)
+    : undefined;
 });
 </script>
 
 <template>
-	<article class="tool-card" :data-status="model.status" :data-tool="block.toolName">
-		<header class="tool-card-header">
-			<div class="tool-card-heading">
-				<span class="tool-card-label">{{ model.label }}</span>
-				<div class="tool-card-title-row">
-					<span class="tool-card-title">{{ model.title }}</span>
-					<template v-if="model.diffStats">
-						<span class="tool-card-stat tool-card-stat-added">+{{ model.diffStats.added }}</span>
-						<span class="tool-card-stat tool-card-stat-removed">-{{ model.diffStats.removed }}</span>
-						<span v-if="model.diffStats.suffix" class="tool-card-meta">{{ model.diffStats.suffix }}</span>
-					</template>
-					<span v-else-if="model.meta" class="tool-card-meta">{{ model.meta }}</span>
-				</div>
-			</div>
-			<button v-if="hasDetails" type="button" class="tool-card-toggle" @click="emit('toggle')">
-				{{ expanded ? "Hide" : "Details" }}
-			</button>
-		</header>
+  <article
+    class="tool-card"
+    :data-status="model.status"
+    :data-tool="block.toolName"
+  >
+    <header class="tool-card-header">
+      <div class="tool-card-heading">
+        <span class="tool-card-label">{{ model.label }}</span>
+        <div class="tool-card-title-row">
+          <span class="tool-card-title">{{ model.title }}</span>
+          <template v-if="model.diffStats">
+            <span class="tool-card-stat tool-card-stat-added"
+              >+{{ model.diffStats.added }}</span
+            >
+            <span class="tool-card-stat tool-card-stat-removed"
+              >-{{ model.diffStats.removed }}</span
+            >
+            <span v-if="model.diffStats.suffix" class="tool-card-meta">{{
+              model.diffStats.suffix
+            }}</span>
+          </template>
+          <span v-else-if="model.meta" class="tool-card-meta">{{
+            model.meta
+          }}</span>
+        </div>
+      </div>
+      <button
+        v-if="hasDetails"
+        type="button"
+        class="tool-card-toggle"
+        @click="emit('toggle')"
+      >
+        {{ expanded ? "Hide" : "Details" }}
+      </button>
+    </header>
 
-		<DiffView v-if="showPreview && editDiff" :diff="editDiff" />
-		<div v-else-if="showPreview && model.preview && block.toolName === 'read'" class="tool-card-code-panel">
-			<HighlightedCode
-				:code="model.preview"
-				:path="readPath"
-			/>
-		</div>
-		<div v-else-if="showPreview && model.preview && block.toolName === 'bash'" class="tool-card-code-panel">
-			<pre class="tool-card-preview">{{ model.preview }}</pre>
-		</div>
-		<pre v-else-if="showPreview && model.preview" class="tool-card-preview">{{ model.preview }}</pre>
+    <DiffView v-if="showPreview && editDiff" :diff="editDiff" />
+    <div
+      v-else-if="showPreview && model.preview && block.toolName === 'read'"
+      class="tool-card-code-panel"
+    >
+      <HighlightedCode :code="model.preview" :path="readPath" />
+    </div>
+    <div
+      v-else-if="showPreview && model.preview && block.toolName === 'bash'"
+      class="tool-card-code-panel"
+    >
+      <pre class="tool-card-preview">{{ model.preview }}</pre>
+    </div>
+    <pre v-else-if="showPreview && model.preview" class="tool-card-preview">{{
+      model.preview
+    }}</pre>
 
-		<div v-if="expanded && hasDetails" class="tool-card-details">
-			<section v-for="section in model.details" :key="section.label" class="tool-card-section">
-				<div class="tool-card-section-label">{{ section.label }}</div>
-				<div v-if="block.toolName === 'read' && section.label === 'Contents'" class="tool-card-code-panel">
-					<HighlightedCode
-						:code="section.text"
-						:path="readPath"
-					/>
-				</div>
-				<div v-else-if="block.toolName === 'bash'" class="tool-card-code-panel">
-					<pre class="tool-card-section-text">{{ section.text }}</pre>
-				</div>
-				<pre v-else class="tool-card-section-text">{{ section.text }}</pre>
-			</section>
-		</div>
-	</article>
+    <div v-if="expanded && hasDetails" class="tool-card-details">
+      <section
+        v-for="section in model.details"
+        :key="section.label"
+        class="tool-card-section"
+      >
+        <div class="tool-card-section-label">{{ section.label }}</div>
+        <div
+          v-if="block.toolName === 'read' && section.label === 'Contents'"
+          class="tool-card-code-panel"
+        >
+          <HighlightedCode :code="section.text" :path="readPath" />
+        </div>
+        <div v-else-if="block.toolName === 'bash'" class="tool-card-code-panel">
+          <pre class="tool-card-section-text">{{ section.text }}</pre>
+        </div>
+        <pre v-else class="tool-card-section-text">{{ section.text }}</pre>
+      </section>
+    </div>
+  </article>
 </template>
 
 <style scoped>
 .tool-card {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 12px 14px;
-	border: 1px solid var(--border);
-	/*border-left: 2px solid var(--border-strong);*/
-	border-radius: 12px;
-	background: var(--tool-card-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  /*border-left: 2px solid var(--border-strong);*/
+  border-radius: 12px;
+  background: var(--tool-card-bg);
 }
 
 .tool-card[data-status="success"] {
-	/*border-left-color: var(--text-subtle);*/
+  /*border-left-color: var(--text-subtle);*/
 }
 
 .tool-card[data-status="error"] {
-	border-color: var(--error-border);
-	border-left-color: var(--error-border);
-	background: var(--tool-card-bg);
+  border-color: var(--error-border);
+  border-left-color: var(--error-border);
+  background: var(--tool-card-bg);
 }
 
 .tool-card-header {
-	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .tool-card-heading {
-	min-width: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .tool-card-label,
 .tool-card-section-label {
-	font-size: 0.64rem;
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	color: var(--text-subtle);
+  font-size: 0.64rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
 }
 
 .tool-card-title-row {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
 }
 
-
 .tool-card-title {
-	font-size: 0.78rem;
-	line-height: 1.5;
-	color: var(--text);
-	word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+  word-break: break-word;
 }
 
 .tool-card[data-tool="bash"] .tool-card-label,
@@ -150,90 +177,90 @@ const editDiff = computed(() => {
 .tool-card[data-tool="bash"] .tool-card-preview,
 .tool-card[data-tool="bash"] .tool-card-section-label,
 .tool-card[data-tool="bash"] .tool-card-section-text {
-	font-family: "SF Mono", "Monaco", "Menlo", monospace;
+  font-family: "SF Mono", "Monaco", "Menlo", monospace;
 }
 
 .tool-card-meta {
-	font-size: 0.68rem;
-	color: var(--text-subtle);
+  font-size: 0.68rem;
+  color: var(--text-subtle);
 }
 
 .tool-card-stat {
-	font-size: 0.68rem;
-	font-weight: 700;
-	letter-spacing: 0.01em;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .tool-card-stat-added {
-	color: var(--diff-added-accent);
+  color: var(--diff-added-accent);
 }
 
 .tool-card-stat-removed {
-	color: var(--diff-removed-accent);
+  color: var(--diff-removed-accent);
 }
 
 .tool-card-toggle {
-	flex: none;
-	padding: 5px 9px;
-	border: 1px solid var(--border);
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--tool-card-bg) 72%, transparent);
-	font-size: 0.66rem;
-	color: var(--text-subtle);
-	cursor: pointer;
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tool-card-bg) 72%, transparent);
+  font-size: 0.66rem;
+  color: var(--text-subtle);
+  cursor: pointer;
 }
 
 .tool-card-toggle:hover {
-	border-color: var(--border-strong);
-	color: var(--text-muted);
+  border-color: var(--border-strong);
+  color: var(--text-muted);
 }
 
 .tool-card-preview,
 .tool-card-section-text {
-	margin: 0;
-	font-family: inherit;
-	font-size: 0.72rem;
-	line-height: 1.6;
-	white-space: pre-wrap;
-	word-break: break-word;
-	color: var(--text-muted);
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
 }
 
 .tool-card-code-panel {
-	border: 1px solid var(--border-strong);
-	border-radius: 10px;
-	background: var(--tool-card-bg-strong);
-	overflow: auto;
-	max-height: 360px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--tool-card-bg-strong);
+  overflow: auto;
+  max-height: 360px;
 }
 
 .tool-card-code-panel pre,
 .tool-card-code-panel :deep(pre) {
-	margin: 0;
-	padding: 10px 12px;
-	background: transparent !important;
+  margin: 0;
+  padding: 10px 12px;
+  background: transparent !important;
 }
 
 .tool-card[data-status="error"] .tool-card-preview,
 .tool-card[data-status="error"] .tool-card-section-text {
-	color: var(--error-text);
+  color: var(--error-text);
 }
 
 .tool-card-details {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	padding-top: 10px;
-	border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .tool-card[data-status="error"] .tool-card-details {
-	border-top-color: var(--error-border);
+  border-top-color: var(--error-border);
 }
 
 .tool-card-section {
-	display: flex;
-	flex-direction: column;
-	gap: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 </style>

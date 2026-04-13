@@ -14,39 +14,48 @@ import type { RpcModelInfo } from "./utils/models";
 type ThemeMode = "dark" | "light";
 
 const {
-	connectionStatus,
-	transcript,
-	sessionState,
-	sessions,
-	treeEntries,
-	isHistoricalView,
-	commands,
-	availableModels,
-	currentModel,
-	isStreaming,
-	isReconnecting,
-	reconnectCount,
-	lastDisconnectReason,
-	connectionError,
-	sendPrompt,
-	sendCommand,
-	pendingExtensionRequest,
-	notifications,
-	statusEntries,
-	respondToUIRequest,
-	dismissNotification,
+  connectionStatus,
+  transcript,
+  sessionState,
+  sessions,
+  treeEntries,
+  isHistoricalView,
+  commands,
+  availableModels,
+  currentModel,
+  currentThinkingLevel,
+  isStreaming,
+  isReconnecting,
+  reconnectCount,
+  lastDisconnectReason,
+  connectionError,
+  sendPrompt,
+  sendCommand,
+  setThinkingLevel,
+  pendingExtensionRequest,
+  notifications,
+  statusEntries,
+  respondToUIRequest,
+  dismissNotification,
 } = useBridgeClient();
 
 const activeSessionId = computed(() => sessionState.value?.sessionId ?? null);
 const activeSessionLabel = computed(() => {
-	const active = sessions.value.find((session) => session.id === activeSessionId.value);
-	return active?.name ?? sessionState.value?.sessionName ?? sessionState.value?.sessionId ?? "No active session";
+  const active = sessions.value.find(
+    (session) => session.id === activeSessionId.value,
+  );
+  return (
+    active?.name ??
+    sessionState.value?.sessionName ??
+    sessionState.value?.sessionId ??
+    "No active session"
+  );
 });
 const networkUrl = computed(() => {
-	if (typeof window === "undefined") return "";
-	const h = window.location.host;
-	if (h.startsWith("localhost") || h.startsWith("127.")) return "";
-	return h;
+  if (typeof window === "undefined") return "";
+  const h = window.location.host;
+  if (h.startsWith("localhost") || h.startsWith("127.")) return "";
+  return h;
 });
 const sidebarOpen = ref(false);
 const treePanelOpen = ref(false);
@@ -55,714 +64,757 @@ const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
 // localStorage as instant cache to avoid flash; server as authoritative source.
 const THEME_CACHE_KEY = "pi-web-theme";
 function readCachedTheme(): ThemeMode {
-	if (typeof window === "undefined") return "dark";
-	const cached = window.localStorage.getItem(THEME_CACHE_KEY);
-	if (cached === "dark" || cached === "light") return cached;
-	return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  if (typeof window === "undefined") return "dark";
+  const cached = window.localStorage.getItem(THEME_CACHE_KEY);
+  if (cached === "dark" || cached === "light") return cached;
+  return window.matchMedia("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
 }
 const theme = ref<ThemeMode>(readCachedTheme());
-const nextThemeLabel = computed(() => (theme.value === "dark" ? "light" : "dark"));
+const nextThemeLabel = computed(() =>
+  theme.value === "dark" ? "light" : "dark",
+);
 
 // Once connected, sync the authoritative server state.
 let themeLoaded = false;
 watch(connectionStatus, async (status) => {
-	if (status !== "connected" || themeLoaded) return;
-	themeLoaded = true;
-	try {
-		const res = await sendCommand({ type: "get_plugin_state", key: "theme" });
-		if (res.success && (res.data as { value?: unknown }).value) {
-			const saved = (res.data as { value: string }).value;
-			if (saved === "dark" || saved === "light") {
-				theme.value = saved;
-				return;
-			}
-		}
-	} catch {
-		// Server unavailable — keep cached value
-	}
+  if (status !== "connected" || themeLoaded) return;
+  themeLoaded = true;
+  try {
+    const res = await sendCommand({ type: "get_plugin_state", key: "theme" });
+    if (res.success && (res.data as { value?: unknown }).value) {
+      const saved = (res.data as { value: string }).value;
+      if (saved === "dark" || saved === "light") {
+        theme.value = saved;
+        return;
+      }
+    }
+  } catch {
+    // Server unavailable — keep cached value
+  }
 });
 
 // On change: persist to server and update localStorage cache.
 watch(theme, (value) => {
-	if (typeof window !== "undefined") window.localStorage.setItem(THEME_CACHE_KEY, value);
-	sendCommand({ type: "set_plugin_state", key: "theme", value }).catch(() => {});
+  if (typeof window !== "undefined")
+    window.localStorage.setItem(THEME_CACHE_KEY, value);
+  sendCommand({ type: "set_plugin_state", key: "theme", value }).catch(
+    () => {},
+  );
 });
 
 watch(connectionStatus, (status) => {
-	if (status === "disconnected" && chatTranscriptRef.value) {
-		chatTranscriptRef.value.preserveScroll();
-	}
+  if (status === "disconnected" && chatTranscriptRef.value) {
+    chatTranscriptRef.value.preserveScroll();
+  }
 });
 
 const compatWarningVisible = ref(false);
 
 function toggleTheme() {
-	theme.value = theme.value === "dark" ? "light" : "dark";
+  theme.value = theme.value === "dark" ? "light" : "dark";
 }
 
 function handleSessionSelect(sessionPath: string) {
-	sendCommand({ type: "switch_session", sessionPath }).catch(() => {});
+  sendCommand({ type: "switch_session", sessionPath }).catch(() => {});
 }
 
 function handleTreeNavigate(entryId: string) {
-	if (isHistoricalView.value) return;
-	treePanelOpen.value = false;
-	sendCommand({ type: "navigate_tree", entryId }).catch(() => {});
+  if (isHistoricalView.value) return;
+  treePanelOpen.value = false;
+  sendCommand({ type: "navigate_tree", entryId }).catch(() => {});
 }
 
 function handlePrompt(message: string) {
-	sendPrompt(message);
+  sendPrompt(message);
 }
 
 function handleModelSelect(model: RpcModelInfo) {
-	if (
-		currentModel.value &&
-		currentModel.value.provider === model.provider &&
-		currentModel.value.id === model.id
-	) {
-		return;
-	}
+  if (
+    currentModel.value &&
+    currentModel.value.provider === model.provider &&
+    currentModel.value.id === model.id
+  ) {
+    return;
+  }
 
-	sendCommand({ type: "set_model", provider: model.provider, modelId: model.id }).catch(() => {});
+  sendCommand({
+    type: "set_model",
+    provider: model.provider,
+    modelId: model.id,
+  }).catch(() => {});
+}
+
+function handleThinkingLevelSelect(level: string) {
+  if (currentThinkingLevel.value === level) {
+    return;
+  }
+
+  setThinkingLevel(level).catch(() => {});
 }
 
 async function openTreePanel() {
-	sidebarOpen.value = false;
-	if (connectionStatus.value === "connected") {
-		try {
-			await sendCommand({ type: "list_tree_entries", sessionPath: sessionState.value?.sessionFile });
-		} catch {
-			// Keep the panel reachable even if the refresh fails.
-		}
-	}
-	treePanelOpen.value = true;
+  sidebarOpen.value = false;
+  if (connectionStatus.value === "connected") {
+    try {
+      await sendCommand({
+        type: "list_tree_entries",
+        sessionPath: sessionState.value?.sessionFile,
+      });
+    } catch {
+      // Keep the panel reachable even if the refresh fails.
+    }
+  }
+  treePanelOpen.value = true;
 }
 
 function handleUIRespond(payload: Parameters<typeof respondToUIRequest>[0]) {
-	respondToUIRequest(payload);
+  respondToUIRequest(payload);
 }
 
 function handleDismissNotification(id: string) {
-	dismissNotification(id);
+  dismissNotification(id);
 }
 
 watch(
-	notifications,
-	(current) => {
-		for (const n of current) {
-			if (!(n as Record<string, unknown>)._timerSet) {
-				(n as Record<string, unknown>)._timerSet = true;
-				setTimeout(() => dismissNotification(n.id), 5000);
-			}
-		}
-	},
-	{ deep: true },
+  notifications,
+  (current) => {
+    for (const n of current) {
+      if (!(n as Record<string, unknown>)._timerSet) {
+        (n as Record<string, unknown>)._timerSet = true;
+        setTimeout(() => dismissNotification(n.id), 5000);
+      }
+    }
+  },
+  { deep: true },
 );
 </script>
 
 <template>
-	<div class="app-shell" :data-theme="theme">
-		<header class="app-header">
-			<button
-				class="hamburger"
-				aria-label="Toggle sidebar"
-				@click="sidebarOpen = !sidebarOpen"
-			>
-				<Menu class="hamburger-icon" aria-hidden="true" />
-			</button>
-			<div class="header-brand">
-				<h1 class="app-title">Pi</h1>
-			</div>
-			<div class="header-session">
-				<span class="session-kicker">session</span>
-				<span class="session-name">{{ activeSessionLabel }}</span>
-			</div>
-			<div class="header-status">
-				<span v-if="networkUrl" class="network-url">{{ networkUrl }}</span>
-				<button
-					class="theme-toggle"
-					type="button"
-					:aria-label="`Switch to ${nextThemeLabel} theme`"
-					:title="`Switch to ${nextThemeLabel} theme`"
-					@click="toggleTheme"
-				>
-					<Sun v-if="theme === 'dark'" class="theme-icon" aria-hidden="true" />
-					<Moon v-else class="theme-icon" aria-hidden="true" />
-				</button>
-				<span
-					class="connection-indicator"
-					:class="connectionStatus"
-					:title="`Connection: ${connectionStatus}`"
-				>
-					<span class="indicator-dot"></span>
-					{{ connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'connecting' ? 'Syncing...' : 'Offline' }}
-				</span>
-			</div>
-		</header>
+  <div class="app-shell" :data-theme="theme">
+    <header class="app-header">
+      <button
+        class="hamburger"
+        aria-label="Toggle sidebar"
+        @click="sidebarOpen = !sidebarOpen"
+      >
+        <Menu class="hamburger-icon" aria-hidden="true" />
+      </button>
+      <div class="header-brand">
+        <h1 class="app-title">Pi</h1>
+      </div>
+      <div class="header-session">
+        <span class="session-kicker">session</span>
+        <span class="session-name">{{ activeSessionLabel }}</span>
+      </div>
+      <div class="header-status">
+        <span v-if="networkUrl" class="network-url">{{ networkUrl }}</span>
+        <button
+          class="theme-toggle"
+          type="button"
+          :aria-label="`Switch to ${nextThemeLabel} theme`"
+          :title="`Switch to ${nextThemeLabel} theme`"
+          @click="toggleTheme"
+        >
+          <Sun v-if="theme === 'dark'" class="theme-icon" aria-hidden="true" />
+          <Moon v-else class="theme-icon" aria-hidden="true" />
+        </button>
+        <span
+          class="connection-indicator"
+          :class="connectionStatus"
+          :title="`Connection: ${connectionStatus}`"
+        >
+          <span class="indicator-dot"></span>
+          {{
+            connectionStatus === "connected"
+              ? "Connected"
+              : connectionStatus === "connecting"
+                ? "Syncing..."
+                : "Offline"
+          }}
+        </span>
+      </div>
+    </header>
 
-		<ReconnectBanner
-			:visible="isReconnecting"
-			:reason="lastDisconnectReason"
-			:reconnect-count="reconnectCount"
-		/>
+    <ReconnectBanner
+      :visible="isReconnecting"
+      :reason="lastDisconnectReason"
+      :reconnect-count="reconnectCount"
+    />
 
-		<div class="app-body">
-			<aside class="left-rail" :class="{ open: sidebarOpen }">
-				<SessionRail
-					:sessions="sessions"
-					:active-session-id="activeSessionId"
-					@select="handleSessionSelect"
-				>
-					<template #header-action>
-						<button
-							class="tree-rail-button"
-							:class="{ active: treePanelOpen }"
-							type="button"
-							:aria-label="isHistoricalView ? 'Browse tree' : 'Open tree'"
-							:title="isHistoricalView ? 'Browse tree' : 'Open tree'"
-							@click="openTreePanel"
-						>
-							<ListTree aria-hidden="true" />
-						</button>
-					</template>
-				</SessionRail>
-			</aside>
-			<div class="rail-backdrop" @click="sidebarOpen = false"></div>
+    <div class="app-body">
+      <aside class="left-rail" :class="{ open: sidebarOpen }">
+        <SessionRail
+          :sessions="sessions"
+          :active-session-id="activeSessionId"
+          @select="handleSessionSelect"
+        >
+          <template #header-action>
+            <button
+              class="tree-rail-button"
+              :class="{ active: treePanelOpen }"
+              type="button"
+              :aria-label="isHistoricalView ? 'Browse tree' : 'Open tree'"
+              :title="isHistoricalView ? 'Browse tree' : 'Open tree'"
+              @click="openTreePanel"
+            >
+              <ListTree aria-hidden="true" />
+            </button>
+          </template>
+        </SessionRail>
+      </aside>
+      <div class="rail-backdrop" @click="sidebarOpen = false"></div>
 
-			<main class="center-column">
-				<CompatWarning :visible="compatWarningVisible" />
+      <main class="center-column">
+        <CompatWarning :visible="compatWarningVisible" />
 
-				<div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
-					<span
-						v-for="(text, key) in statusEntries"
-						:key="key"
-						class="status-entry"
-					>
-						{{ text }}
-					</span>
-				</div>
+        <div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
+          <span
+            v-for="(text, key) in statusEntries"
+            :key="key"
+            class="status-entry"
+          >
+            {{ text }}
+          </span>
+        </div>
 
-				<ChatTranscript ref="chatTranscriptRef" :messages="transcript" :is-streaming="isStreaming" />
-				<ComposerBar
-					:connection-status="connectionStatus"
-					:commands="commands"
-					:models="availableModels"
-					:selected-model="currentModel"
-					@submit="handlePrompt"
-					@select-model="handleModelSelect"
-				/>
-			</main>
-		</div>
+        <ChatTranscript
+          ref="chatTranscriptRef"
+          :messages="transcript"
+          :is-streaming="isStreaming"
+        />
+        <ComposerBar
+          :connection-status="connectionStatus"
+          :commands="commands"
+          :models="availableModels"
+          :selected-model="currentModel"
+          :thinking-level="currentThinkingLevel"
+          @submit="handlePrompt"
+          @select-model="handleModelSelect"
+          @select-thinking-level="handleThinkingLevelSelect"
+        />
+      </main>
+    </div>
 
-		<div v-if="connectionError || notifications.length > 0" class="toast-container">
-			<div v-if="connectionError" class="toast-item error" role="alert">
-				<div class="toast-copy">
-					<span class="toast-type">error</span>
-					<span class="toast-message">{{ connectionError }}</span>
-				</div>
-			</div>
-			<div
-				v-for="notif in notifications"
-				:key="notif.id"
-				class="toast-item"
-				:class="notif.notifyType ?? 'info'"
-			>
-				<div class="toast-copy">
-					<span class="toast-type">{{ notif.notifyType ?? 'info' }}</span>
-					<span class="toast-message">{{ notif.message }}</span>
-				</div>
-				<button
-					class="toast-dismiss"
-					aria-label="Dismiss notification"
-					@click="handleDismissNotification(notif.id)"
-				>
-					<X aria-hidden="true" />
-				</button>
-			</div>
-		</div>
+    <div
+      v-if="connectionError || notifications.length > 0"
+      class="toast-container"
+    >
+      <div v-if="connectionError" class="toast-item error" role="alert">
+        <div class="toast-copy">
+          <span class="toast-type">error</span>
+          <span class="toast-message">{{ connectionError }}</span>
+        </div>
+      </div>
+      <div
+        v-for="notif in notifications"
+        :key="notif.id"
+        class="toast-item"
+        :class="notif.notifyType ?? 'info'"
+      >
+        <div class="toast-copy">
+          <span class="toast-type">{{ notif.notifyType ?? "info" }}</span>
+          <span class="toast-message">{{ notif.message }}</span>
+        </div>
+        <button
+          class="toast-dismiss"
+          aria-label="Dismiss notification"
+          @click="handleDismissNotification(notif.id)"
+        >
+          <X aria-hidden="true" />
+        </button>
+      </div>
+    </div>
 
-		<TreePanel
-			:open="treePanelOpen"
-			:entries="treeEntries"
-			:session-label="activeSessionLabel"
-			:is-historical-view="isHistoricalView"
-			@close="treePanelOpen = false"
-			@navigate="handleTreeNavigate"
-		/>
+    <TreePanel
+      :open="treePanelOpen"
+      :entries="treeEntries"
+      :session-label="activeSessionLabel"
+      :is-historical-view="isHistoricalView"
+      @close="treePanelOpen = false"
+      @navigate="handleTreeNavigate"
+    />
 
-		<ExtensionDialog
-			:request="pendingExtensionRequest"
-			@respond="handleUIRespond"
-		/>
-	</div>
+    <ExtensionDialog
+      :request="pendingExtensionRequest"
+      @respond="handleUIRespond"
+    />
+  </div>
 </template>
 
 <style scoped>
 .app-shell {
-	--bg: #0a0a0a;
-	--bg-elevated: #0f0f0f;
-	--panel: #101010;
-	--panel-2: #141414;
-	--panel-3: #181818;
-	--tool-card-bg: #151515;
-	--tool-card-bg-strong: #1b1b1b;
-	--diff-added-bg: rgba(34, 197, 94, 0.16);
-	--diff-added-text: #dcfce7;
-	--diff-added-accent: #22c55e;
-	--diff-removed-bg: rgba(248, 113, 113, 0.15);
-	--diff-removed-text: #fecaca;
-	--diff-removed-accent: #f87171;
-	--diff-header-bg: #242424;
-	--diff-hunk-bg: #2b2b2b;
-	--rail-bg: #111111;
-	--border: #242424;
-	--border-strong: #323232;
-	--text: #f5f5f5;
-	--text-muted: #b0b0b0;
-	--text-subtle: #737373;
-	--button-bg: #191919;
-	--button-hover: #212121;
-	--shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-	--overlay: rgba(0, 0, 0, 0.72);
-	--backdrop: rgba(0, 0, 0, 0.45);
-	--composer-fade: rgba(10, 10, 10, 0.96);
-	--error-bg: rgba(127, 29, 29, 0.28);
-	--error-border: rgba(248, 113, 113, 0.42);
-	--error-text: #fecaca;
-	display: flex;
-	flex-direction: column;
-	height: 100vh;
-	height: 100dvh;
-	width: 100vw;
-	overflow: hidden;
-	background: var(--bg);
-	color: var(--text);
-	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-	color-scheme: dark;
+  --bg: #0a0a0a;
+  --bg-elevated: #0f0f0f;
+  --panel: #101010;
+  --panel-2: #141414;
+  --panel-3: #181818;
+  --tool-card-bg: #151515;
+  --tool-card-bg-strong: #1b1b1b;
+  --diff-added-bg: rgba(34, 197, 94, 0.16);
+  --diff-added-text: #dcfce7;
+  --diff-added-accent: #22c55e;
+  --diff-removed-bg: rgba(248, 113, 113, 0.15);
+  --diff-removed-text: #fecaca;
+  --diff-removed-accent: #f87171;
+  --diff-header-bg: #242424;
+  --diff-hunk-bg: #2b2b2b;
+  --rail-bg: #111111;
+  --border: #242424;
+  --border-strong: #323232;
+  --text: #f5f5f5;
+  --text-muted: #b0b0b0;
+  --text-subtle: #737373;
+  --button-bg: #191919;
+  --button-hover: #212121;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  --overlay: rgba(0, 0, 0, 0.72);
+  --backdrop: rgba(0, 0, 0, 0.45);
+  --composer-fade: rgba(10, 10, 10, 0.96);
+  --error-bg: rgba(127, 29, 29, 0.28);
+  --error-border: rgba(248, 113, 113, 0.42);
+  --error-text: #fecaca;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: dark;
 }
 
 .app-shell[data-theme="light"] {
-	--bg: #fafafa;
-	--bg-elevated: #ffffff;
-	--panel: #ffffff;
-	--panel-2: #f5f5f5;
-	--panel-3: #efefef;
-	--tool-card-bg: #f3f3f3;
-	--tool-card-bg-strong: #ececec;
-	--diff-added-bg: #dcfce7;
-	--diff-added-text: #14532d;
-	--diff-added-accent: #16a34a;
-	--diff-removed-bg: #fee2e2;
-	--diff-removed-text: #7f1d1d;
-	--diff-removed-accent: #dc2626;
-	--diff-header-bg: #dddddd;
-	--diff-hunk-bg: #d1d1d1;
-	--rail-bg: #f6f6f6;
-	--border: #dddddd;
-	--border-strong: #c9c9c9;
-	--text: #111111;
-	--text-muted: #454545;
-	--text-subtle: #7a7a7a;
-	--button-bg: #efefef;
-	--button-hover: #e6e6e6;
-	--shadow: 0 18px 48px rgba(20, 20, 20, 0.08);
-	--overlay: rgba(0, 0, 0, 0.22);
-	--backdrop: rgba(0, 0, 0, 0.12);
-	--composer-fade: rgba(250, 250, 250, 0.96);
-	--error-bg: #fff1f2;
-	--error-border: #fecdd3;
-	--error-text: #9f1239;
-	color-scheme: light;
+  --bg: #fafafa;
+  --bg-elevated: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f5f5f5;
+  --panel-3: #efefef;
+  --tool-card-bg: #f3f3f3;
+  --tool-card-bg-strong: #ececec;
+  --diff-added-bg: #dcfce7;
+  --diff-added-text: #14532d;
+  --diff-added-accent: #16a34a;
+  --diff-removed-bg: #fee2e2;
+  --diff-removed-text: #7f1d1d;
+  --diff-removed-accent: #dc2626;
+  --diff-header-bg: #dddddd;
+  --diff-hunk-bg: #d1d1d1;
+  --rail-bg: #f6f6f6;
+  --border: #dddddd;
+  --border-strong: #c9c9c9;
+  --text: #111111;
+  --text-muted: #454545;
+  --text-subtle: #7a7a7a;
+  --button-bg: #efefef;
+  --button-hover: #e6e6e6;
+  --shadow: 0 18px 48px rgba(20, 20, 20, 0.08);
+  --overlay: rgba(0, 0, 0, 0.22);
+  --backdrop: rgba(0, 0, 0, 0.12);
+  --composer-fade: rgba(250, 250, 250, 0.96);
+  --error-bg: #fff1f2;
+  --error-border: #fecdd3;
+  --error-text: #9f1239;
+  color-scheme: light;
 }
 
 .app-header {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr) auto;
-	align-items: center;
-	gap: 16px;
-	height: 48px;
-	padding: 0 16px;
-	border-bottom: 1px solid var(--border);
-	background: var(--bg-elevated);
-	flex-shrink: 0;
-	z-index: 20;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  flex-shrink: 0;
+  z-index: 20;
 }
 
 .hamburger {
-	display: none;
-	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
-	margin-left: -6px;
-	background: none;
-	border: none;
-	color: var(--text-muted);
-	cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-left: -6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
 }
 
 .hamburger-icon {
-	width: 18px;
-	height: 18px;
+  width: 18px;
+  height: 18px;
 }
 
 .header-brand {
-	display: flex;
-	align-items: center;
-	gap: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .app-title {
-	margin: 0;
-	font-size: 0.95rem;
-	line-height: 1;
-	font-weight: 600;
-	letter-spacing: 0.01em;
-	color: var(--text);
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 
 .header-session {
-	display: flex;
-	align-items: baseline;
-	gap: 10px;
-	min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .session-kicker {
-	font-size: 0.68rem;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	color: var(--text-subtle);
-	white-space: nowrap;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+  white-space: nowrap;
 }
 
 .session-name {
-	min-width: 0;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-	font-size: 0.82rem;
-	color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text-muted);
 }
 
 .header-status {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
 }
 
 .network-url,
 .connection-indicator,
 .theme-toggle {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-	height: 26px;
-	padding: 0 10px;
-	border-radius: 999px;
-	border: 1px solid var(--border);
-	background: var(--panel);
-	font-size: 0.72rem;
-	color: var(--text-subtle);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 0.72rem;
+  color: var(--text-subtle);
 }
 
-
 .theme-toggle {
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
-	border-radius: 999px;
-	cursor: pointer;
-	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .theme-toggle:hover {
-	background: var(--panel-2);
-	border-color: var(--border-strong);
-	color: var(--text-muted);
-	transform: translateY(-1px);
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  color: var(--text-muted);
+  transform: translateY(-1px);
 }
 
 .theme-icon {
-	width: 16px;
-	height: 16px;
+  width: 16px;
+  height: 16px;
 }
 
 .connection-indicator.connected,
 .connection-indicator.connecting,
 .connection-indicator.disconnected {
-	color: var(--text-muted);
+  color: var(--text-muted);
 }
 
 .indicator-dot {
-	width: 7px;
-	height: 7px;
-	border-radius: 50%;
-	background: currentColor;
-	flex-shrink: 0;
-	opacity: 0.9;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  opacity: 0.9;
 }
 
 .connection-indicator.disconnected .indicator-dot {
-	opacity: 0.45;
+  opacity: 0.45;
 }
 
 .connection-indicator.connecting .indicator-dot {
-	animation: sync-pulse 1.2s ease-in-out infinite;
+  animation: sync-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes sync-pulse {
-	0%,
-	100% {
-		transform: scale(0.85);
-		opacity: 0.45;
-	}
-	50% {
-		transform: scale(1);
-		opacity: 1;
-	}
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .app-body {
-	display: grid;
-	grid-template-columns: 272px minmax(0, 1fr);
-	flex: 1;
-	min-height: 0;
-	overflow: hidden;
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .left-rail {
-	grid-column: 1;
-	display: flex;
-	flex-direction: column;
-	background: var(--rail-bg);
-	border-right: 1px solid var(--border);
-	overflow: hidden;
+  grid-column: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--rail-bg);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .tree-rail-button {
-	width: 28px;
-	height: 28px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	padding: 0;
-	border: 1px solid var(--border);
-	border-radius: 8px;
-	background: transparent;
-	color: var(--text-subtle);
-	cursor: pointer;
-	flex-shrink: 0;
-	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .tree-rail-button:hover {
-	background: var(--panel-2);
-	border-color: var(--border-strong);
-	color: var(--text-muted);
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  color: var(--text-muted);
 }
 
 .tree-rail-button.active {
-	background: var(--panel-3);
-	border-color: var(--border-strong);
-	color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+  color: var(--text);
 }
 
 .tree-rail-button svg {
-	width: 16px;
-	height: 16px;
+  width: 16px;
+  height: 16px;
 }
 
 .rail-backdrop {
-	display: none;
+  display: none;
 }
 
 .center-column {
-	grid-column: 2;
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-	min-height: 0;
-	overflow: hidden;
-	background: var(--bg);
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
 }
 
 .status-bar {
-	display: flex;
-	gap: 8px;
-	flex-wrap: wrap;
-	padding: 12px 24px 0;
-	flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 24px 0;
+  flex-shrink: 0;
 }
 
 .status-entry {
-	display: inline-flex;
-	align-items: center;
-	height: 24px;
-	padding: 0 10px;
-	border-radius: 999px;
-	border: 1px solid var(--border);
-	background: var(--panel);
-	font-size: 0.68rem;
-	color: var(--text-subtle);
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 0.68rem;
+  color: var(--text-subtle);
 }
 
 .toast-container {
-	position: fixed;
-	top: 56px;
-	right: 16px;
-	z-index: 900;
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	max-width: 340px;
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 340px;
 }
 
 .toast-item {
-	display: flex;
-	align-items: flex-start;
-	gap: 10px;
-	padding: 12px 14px;
-	border-radius: 12px;
-	background: var(--panel);
-	border: 1px solid var(--border-strong);
-	box-shadow: var(--shadow);
-	animation: toast-in 0.16s ease;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  animation: toast-in 0.16s ease;
 }
 
 .toast-item.error {
-	background: var(--error-bg);
-	border-color: var(--error-border);
+  background: var(--error-bg);
+  border-color: var(--error-border);
 }
 
 .toast-item.error .toast-type,
 .toast-item.error .toast-message {
-	color: var(--error-text);
+  color: var(--error-text);
 }
 
 .toast-copy {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	min-width: 0;
-	flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .toast-type {
-	font-size: 0.66rem;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	color: var(--text-subtle);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
 }
 
 .toast-message {
-	font-size: 0.82rem;
-	line-height: 1.45;
-	color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-muted);
 }
 
 .toast-dismiss {
-	flex-shrink: 0;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	background: none;
-	border: none;
-	color: var(--text-subtle);
-	cursor: pointer;
-	padding: 0;
-	line-height: 1;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-subtle);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
 }
 
 .toast-dismiss svg {
-	width: 14px;
-	height: 14px;
+  width: 14px;
+  height: 14px;
 }
 
 .toast-dismiss:hover {
-	color: var(--text);
+  color: var(--text);
 }
 
 @keyframes toast-in {
-	from {
-		opacity: 0;
-		transform: translateY(-4px);
-	}
-	to {
-		opacity: 1;
-		transform: translateY(0);
-	}
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 900px) {
-	.hamburger {
-		display: flex;
-	}
+  .hamburger {
+    display: flex;
+  }
 
-	.app-header {
-		grid-template-columns: auto minmax(0, 1fr) auto;
-		gap: 12px;
-		padding-top: env(safe-area-inset-top);
-		height: calc(48px + env(safe-area-inset-top));
-	}
+  .app-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    padding-top: env(safe-area-inset-top);
+    height: calc(48px + env(safe-area-inset-top));
+  }
 
-	.session-kicker,
-	.network-url {
-		display: none;
-	}
+  .session-kicker,
+  .network-url {
+    display: none;
+  }
 
-	.app-body {
-		grid-template-columns: 1fr;
-		position: relative;
-	}
+  .app-body {
+    grid-template-columns: 1fr;
+    position: relative;
+  }
 
-	.left-rail {
-		position: absolute;
-		top: 0;
-		left: 0;
-		bottom: 0;
-		width: min(82vw, 300px);
-		transform: translateX(-100%);
-		transition: transform 0.2s ease;
-		z-index: 15;
-	}
+  .left-rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(82vw, 300px);
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 15;
+  }
 
-	.left-rail.open {
-		transform: translateX(0);
-		box-shadow: var(--shadow);
-	}
+  .left-rail.open {
+    transform: translateX(0);
+    box-shadow: var(--shadow);
+  }
 
-	.rail-backdrop {
-		display: block;
-		position: absolute;
-		inset: 0;
-		background: var(--backdrop);
-		z-index: 14;
-		pointer-events: none;
-		opacity: 0;
-		transition: opacity 0.2s;
-	}
+  .rail-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    background: var(--backdrop);
+    z-index: 14;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
 
-	.left-rail.open ~ .rail-backdrop {
-		pointer-events: auto;
-		opacity: 1;
-	}
+  .left-rail.open ~ .rail-backdrop {
+    pointer-events: auto;
+    opacity: 1;
+  }
 
-	.center-column {
-		grid-column: 1;
-	}
+  .center-column {
+    grid-column: 1;
+  }
 
-	.status-bar {
-		padding: 12px 16px 0;
-	}
+  .status-bar {
+    padding: 12px 16px 0;
+  }
 
-	.toast-container {
-		left: 16px;
-		right: 16px;
-		max-width: none;
-	}
+  .toast-container {
+    left: 16px;
+    right: 16px;
+    max-width: none;
+  }
 }
 </style>

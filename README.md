@@ -55,10 +55,10 @@ Press `Ctrl+C` in the terminal to stop the bridge and return to the normal Pi TU
 
 Pi Web reads its runtime settings from environment variables before the extension starts.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PI_BRIDGE_HOST` | `0.0.0.0` | Host/interface to bind the HTTP and WebSocket server to |
-| `PI_BRIDGE_PORT` | `0` | Preferred port. `0` means let the OS choose an available port |
+| Variable         | Default   | Description                                                   |
+| ---------------- | --------- | ------------------------------------------------------------- |
+| `PI_BRIDGE_HOST` | `0.0.0.0` | Host/interface to bind the HTTP and WebSocket server to       |
+| `PI_BRIDGE_PORT` | `0`       | Preferred port. `0` means let the OS choose an available port |
 
 Notes:
 

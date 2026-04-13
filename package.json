@@ -1,39 +1,44 @@
 {
-	"name": "pi-web-bridge",
-	"version": "0.1.0",
-	"description": "Pi extension: WebSocket bridge for browser-based interaction",
-	"type": "module",
-	"scripts": {
-		"build": "tsc -p tsconfig.json",
-		"build:web": "vite build packages/web/",
-		"dev:web": "vite packages/web/",
-		"test": "vitest run --reporter=verbose",
-		"test:watch": "vitest --reporter=verbose"
-	},
-	"dependencies": {
-		"@mariozechner/pi-coding-agent": "^0.65.0",
-		"dompurify": "^3.3.3",
-		"lucide-vue-next": "^1.0.0",
-		"marked": "^18.0.0",
-		"shiki": "^4.0.2",
-		"ws": "^8.18.0"
-	},
-	"devDependencies": {
-		"@types/dompurify": "^3.2.0",
-		"@types/node": "^24.3.0",
-		"@types/ws": "^8.18.0",
-		"@vitejs/plugin-vue": "^6.0.5",
-		"typescript": "^5.7.3",
-		"vite": "^7.3.2",
-		"vitest": "^3.2.4",
-		"vue": "^3.5.32"
-	},
-	"engines": {
-		"node": ">=20.6.0"
-	},
-	"pi": {
-		"extensions": [
-			"./packages/bin/index.ts"
-		]
-	}
+  "name": "pi-web-bridge",
+  "version": "0.1.0",
+  "description": "Pi extension: WebSocket bridge for browser-based interaction",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:web": "vite build packages/web/",
+    "dev:web": "vite packages/web/",
+    "test": "vitest run --reporter=verbose",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "test:watch": "vitest --reporter=verbose"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.65.0",
+    "dompurify": "^3.3.3",
+    "lucide-vue-next": "^1.0.0",
+    "marked": "^18.0.0",
+    "shiki": "^4.0.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.0",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "oxfmt": "^0.45.0",
+    "oxlint": "^1.60.0",
+    "typescript": "^5.7.3",
+    "vite": "^7.3.2",
+    "vitest": "^3.2.4",
+    "vue": "^3.5.32"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "pi": {
+    "extensions": [
+      "./packages/bin/index.ts"
+    ]
+  }
 }

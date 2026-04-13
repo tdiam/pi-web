@@ -9,7 +9,11 @@ import type {
   ClientMessage,
   ServerMessage,
 } from "../shared-types";
-import { normalizeRpcModel, upsertModel, type RpcModelInfo } from "../utils/models";
+import {
+  normalizeRpcModel,
+  upsertModel,
+  type RpcModelInfo,
+} from "../utils/models";
 import { normalizeTranscript } from "../utils/transcript";
 
 // ---------------------------------------------------------------------------
@@ -63,6 +67,7 @@ const liveSessionPath = ref<string | null>(null);
 const commands = ref<RpcSlashCommand[]>([]);
 const availableModels = ref<RpcModelInfo[]>([]);
 const currentModel = ref<RpcModelInfo | null>(null);
+const currentThinkingLevel = ref<string | null>(null);
 const isStreaming = ref(false);
 
 // Reconnect diagnostics
@@ -145,7 +150,10 @@ function scheduleReconnect() {
 function updateCurrentModel(value: unknown) {
   currentModel.value = normalizeRpcModel(value);
   if (currentModel.value) {
-    availableModels.value = upsertModel(availableModels.value, currentModel.value);
+    availableModels.value = upsertModel(
+      availableModels.value,
+      currentModel.value,
+    );
   }
 }
 
@@ -155,8 +163,15 @@ function updateAvailableModels(values: unknown[]) {
     .filter((model): model is RpcModelInfo => model !== null);
 
   if (currentModel.value) {
-    availableModels.value = upsertModel(availableModels.value, currentModel.value);
+    availableModels.value = upsertModel(
+      availableModels.value,
+      currentModel.value,
+    );
   }
+}
+
+function normalizeThinkingLevel(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function sendEnvelope(msg: ClientMessage) {
@@ -200,6 +215,15 @@ function sendPrompt(message: string) {
     type: "command",
     payload: { type: "prompt", message, streamingBehavior: "steer" },
   });
+}
+
+async function setThinkingLevel(level: string) {
+  const response = await sendCommand({ type: "set_thinking_level", level });
+  if (response.success) {
+    currentThinkingLevel.value = normalizeThinkingLevel(level);
+    sendCommand({ type: "get_state" }).catch(() => {});
+  }
+  return response;
 }
 
 /** Send a response back to the server resolving a pending extension UI request. */
@@ -260,17 +284,23 @@ function handleResponse(payload: RpcResponse) {
         if (data) {
           liveSessionPath.value = data.sessionFile ?? null;
           const isBrowsingDifferentSession = Boolean(
-            activeTreeSessionPath.value && data.sessionFile && activeTreeSessionPath.value !== data.sessionFile,
+            activeTreeSessionPath.value &&
+            data.sessionFile &&
+            activeTreeSessionPath.value !== data.sessionFile,
           );
           sessionState.value = isBrowsingDifferentSession
             ? {
                 ...data,
                 sessionId: sessionState.value?.sessionId ?? data.sessionId,
-                sessionName: sessionState.value?.sessionName ?? data.sessionName,
+                sessionName:
+                  sessionState.value?.sessionName ?? data.sessionName,
                 sessionFile: activeTreeSessionPath.value ?? data.sessionFile,
               }
             : data;
           updateCurrentModel(data.model);
+          currentThinkingLevel.value = normalizeThinkingLevel(
+            data.thinkingLevel,
+          );
           isStreaming.value = data.isStreaming;
           if (!activeTreeSessionPath.value && data.sessionFile) {
             activeTreeSessionPath.value = data.sessionFile;
@@ -315,10 +345,15 @@ function handleResponse(payload: RpcResponse) {
         break;
       }
       case "list_tree_entries": {
-        const data = payload.data as { entries: TreeEntry[]; sessionPath?: string } | undefined;
+        const data = payload.data as
+          | { entries: TreeEntry[]; sessionPath?: string }
+          | undefined;
         if (data) {
           const responseSessionPath = data.sessionPath ?? null;
-          if (!activeTreeSessionPath.value || activeTreeSessionPath.value === responseSessionPath) {
+          if (
+            !activeTreeSessionPath.value ||
+            activeTreeSessionPath.value === responseSessionPath
+          ) {
             treeEntries.value = data.entries;
             activeTreeSessionPath.value = responseSessionPath;
           }
@@ -335,7 +370,10 @@ function handleResponse(payload: RpcResponse) {
       case "set_model": {
         updateCurrentModel(payload.data);
         if (currentModel.value) {
-          availableModels.value = upsertModel(availableModels.value, currentModel.value);
+          availableModels.value = upsertModel(
+            availableModels.value,
+            currentModel.value,
+          );
         }
         break;
       }
@@ -344,6 +382,8 @@ function handleResponse(payload: RpcResponse) {
         if (data) updateAvailableModels(data.models);
         break;
       }
+      case "set_thinking_level":
+        break;
     }
   }
 }
@@ -398,7 +438,9 @@ function handleEvent(payload: Record<string, unknown>) {
       break;
     }
     case "model_select": {
-      const model = normalizeRpcModel((payload as { model?: unknown }).model ?? payload);
+      const model = normalizeRpcModel(
+        (payload as { model?: unknown }).model ?? payload,
+      );
       if (model) {
         currentModel.value = model;
         availableModels.value = upsertModel(availableModels.value, model);
@@ -566,13 +608,12 @@ export function useBridgeClient() {
       !disposed &&
       !connectionError.value,
   );
-  const isHistoricalView = computed(
-    () =>
-      Boolean(
-        activeTreeSessionPath.value &&
-        liveSessionPath.value &&
-        activeTreeSessionPath.value !== liveSessionPath.value,
-      ),
+  const isHistoricalView = computed(() =>
+    Boolean(
+      activeTreeSessionPath.value &&
+      liveSessionPath.value &&
+      activeTreeSessionPath.value !== liveSessionPath.value,
+    ),
   );
 
   return {
@@ -587,6 +628,7 @@ export function useBridgeClient() {
     commands: readonly(commands),
     availableModels: readonly(availableModels),
     currentModel: readonly(currentModel),
+    currentThinkingLevel: readonly(currentThinkingLevel),
     isStreaming: readonly(isStreaming),
     // Reconnect diagnostics
     isReconnecting,
@@ -603,6 +645,7 @@ export function useBridgeClient() {
     dismissNotification,
     sendCommand,
     sendPrompt,
+    setThinkingLevel,
     connect,
     disconnect,
   };

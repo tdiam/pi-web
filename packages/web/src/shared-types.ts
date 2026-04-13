@@ -7,12 +7,12 @@
  * production bundle.
  */
 export type {
-	RpcCommand,
-	RpcResponse,
-	RpcSessionState,
-	RpcSlashCommand,
-	RpcExtensionUIRequest,
-	RpcExtensionUIResponse,
-	ClientMessage,
-	ServerMessage,
+  RpcCommand,
+  RpcResponse,
+  RpcSessionState,
+  RpcSlashCommand,
+  RpcExtensionUIRequest,
+  RpcExtensionUIResponse,
+  ClientMessage,
+  ServerMessage,
 } from "../../bridge/types";

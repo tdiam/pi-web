@@ -10,52 +10,64 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock global WebSocket before importing the composable
 const mockWsInstances: Array<{
-	send: ReturnType<typeof vi.fn>;
-	close: ReturnType<typeof vi.fn>;
-	addEventListener: ReturnType<typeof vi.fn>;
-	readyState: number;
+  send: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  addEventListener: ReturnType<typeof vi.fn>;
+  readyState: number;
 }> = [];
 
 class MockWebSocket {
-	readyState = WebSocket.OPEN;
-	send = vi.fn();
-	close = vi.fn();
-	addEventListener = vi.fn();
+  readyState = WebSocket.OPEN;
+  send = vi.fn();
+  close = vi.fn();
+  addEventListener = vi.fn();
 
-	constructor() {
-		mockWsInstances.push(this as (typeof mockWsInstances)[number]);
-	}
+  constructor() {
+    mockWsInstances.push(this as (typeof mockWsInstances)[number]);
+  }
 }
 
 // Mock location for connect()
-vi.stubGlobal("location", { protocol: "http:", host: "localhost:8080", search: "?token=test-token" });
+vi.stubGlobal("location", {
+  protocol: "http:",
+  host: "localhost:8080",
+  search: "?token=test-token",
+});
 
 // Provide a minimal document mock so Vue's runtime-dom can initialize.
 // Vue's runtime-dom calls doc.createElement("div") at module load time.
 vi.stubGlobal("document", {
-	title: "",
-	createElement: () => ({ style: {}, setAttribute: vi.fn(), addEventListener: vi.fn() }),
-	createTextNode: () => ({}),
-	createComment: () => ({}),
-	querySelector: () => null,
-	querySelectorAll: () => [],
-	appendChild: vi.fn(),
-	removeChild: vi.fn(),
-	insertBefore: vi.fn(),
+  title: "",
+  createElement: () => ({
+    style: {},
+    setAttribute: vi.fn(),
+    addEventListener: vi.fn(),
+  }),
+  createTextNode: () => ({}),
+  createComment: () => ({}),
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  appendChild: vi.fn(),
+  removeChild: vi.fn(),
+  insertBefore: vi.fn(),
 });
 
 let originalWebSocket: typeof WebSocket;
 
 beforeEach(() => {
-	originalWebSocket = globalThis.WebSocket;
-	// @ts-expect-error mock
-	globalThis.WebSocket = MockWebSocket;
-	vi.stubGlobal("location", { protocol: "http:", host: "localhost:8080", search: "?token=test-token" });
-	mockWsInstances.length = 0;
+  originalWebSocket = globalThis.WebSocket;
+  // @ts-expect-error mock
+  globalThis.WebSocket = MockWebSocket;
+  vi.stubGlobal("location", {
+    protocol: "http:",
+    host: "localhost:8080",
+    search: "?token=test-token",
+  });
+  mockWsInstances.length = 0;
 });
 
 afterEach(() => {
-	globalThis.WebSocket = originalWebSocket;
+  globalThis.WebSocket = originalWebSocket;
 });
 
 /**
@@ -64,602 +76,719 @@ afterEach(() => {
  * so we use vi.resetModules() between tests.
  */
 async function importComposable() {
-	const mod = await import("../composables/useBridgeClient");
-	return mod.useBridgeClient();
+  const mod = await import("../composables/useBridgeClient");
+  return mod.useBridgeClient();
 }
 
 function getLastMockWs() {
-	return mockWsInstances[mockWsInstances.length - 1];
+  return mockWsInstances[mockWsInstances.length - 1];
 }
 
 /** Simulate an incoming WebSocket message. */
 function simulateMessage(ws: MockWebSocket, data: unknown) {
-	const handler = ws.addEventListener.mock.calls.find(
-		(c: unknown[]) => c[0] === "message",
-	)?.[1] as ((ev: { data: string }) => void) | undefined;
-	if (!handler) throw new Error("No message listener registered");
-	handler({ data: JSON.stringify(data) });
+  const handler = ws.addEventListener.mock.calls.find(
+    (c: unknown[]) => c[0] === "message",
+  )?.[1] as ((ev: { data: string }) => void) | undefined;
+  if (!handler) throw new Error("No message listener registered");
+  handler({ data: JSON.stringify(data) });
 }
 
 /** Simulate WebSocket open event. */
 function simulateOpen(ws: MockWebSocket) {
-	const handler = ws.addEventListener.mock.calls.find(
-		(c: unknown[]) => c[0] === "open",
-	)?.[1] as (() => void) | undefined;
-	if (handler) handler();
+  const handler = ws.addEventListener.mock.calls.find(
+    (c: unknown[]) => c[0] === "open",
+  )?.[1] as (() => void) | undefined;
+  if (handler) handler();
 }
 
 describe("extension_ui_request handling", () => {
-	beforeEach(() => {
-		vi.resetModules();
-	});
-
-	it("shows an auth error and skips reconnect when token is missing", async () => {
-		vi.stubGlobal("location", { protocol: "http:", host: "localhost:8080", search: "" });
-
-		const client = await importComposable();
-
-		expect(mockWsInstances).toHaveLength(0);
-		expect(client.connectionError.value).toContain("Missing authentication token");
-		expect(client.isReconnecting.value).toBe(false);
-	});
-
-	it("does not request tree entries during initial connect", async () => {
-		await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
-			const payload = JSON.parse(message) as { payload?: { type?: string } };
-			return payload.payload?.type;
-		});
-
-		expect(sentCommandTypes).toEqual(
-			expect.arrayContaining([
-				"get_state",
-				"get_messages",
-				"list_sessions",
-				"get_commands",
-				"get_available_models",
-			]),
-		);
-		
-		// Tree data is loaded lazily when the panel is opened.
-		const treeRequests = sentCommandTypes.filter((type) => type === "list_tree_entries");
-		expect(treeRequests).toHaveLength(0);
-	});
-
-	it("updates tree entries from switch_session responses", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "switch_session",
-				success: true,
-				data: {
-					messages: [],
-					treeEntries: [
-						{ id: "node-1", label: "user: Hello", type: "message", depth: 0, isActive: true },
-					],
-					sessionId: "session-2",
-					sessionName: "Session 2",
-					sessionPath: "/tmp/session-2.jsonl",
-					cancelled: false,
-				},
-			},
-		});
-
-		expect(client.treeEntries.value).toEqual([
-			{ id: "node-1", label: "user: Hello", type: "message", depth: 0, isActive: true },
-		]);
-	});
-
-	it("ignores stale live tree responses after switch_session", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "get_state",
-				success: true,
-				data: {
-					sessionId: "live-session",
-					sessionFile: "/tmp/live.jsonl",
-					sessionName: "Live",
-					thinkingLevel: "normal",
-					isStreaming: false,
-					isCompacting: false,
-					steeringMode: "all",
-					followUpMode: "all",
-					autoCompactionEnabled: false,
-					messageCount: 0,
-					pendingMessageCount: 0,
-				},
-			},
-		});
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "switch_session",
-				success: true,
-				data: {
-					messages: [],
-					treeEntries: [
-						{ id: "session-node", label: "user: Switched", type: "message", depth: 0, isActive: true },
-					],
-					sessionId: "session-2",
-					sessionName: "Session 2",
-					sessionPath: "/tmp/session-2.jsonl",
-					cancelled: false,
-				},
-			},
-		});
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "list_tree_entries",
-				success: true,
-				data: {
-					entries: [{ id: "live-node", label: "user: Live", type: "message", depth: 0 }],
-					sessionPath: "/tmp/live.jsonl",
-				},
-			},
-		});
-
-		expect(client.treeEntries.value).toEqual([
-			{ id: "session-node", label: "user: Switched", type: "message", depth: 0, isActive: true },
-		]);
-	});
-
-	it("tracks currentModel from state and model_select events", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "get_state",
-				success: true,
-				data: {
-					sessionId: "session-1",
-					sessionFile: "/tmp/session-1.jsonl",
-					sessionName: "Session 1",
-					model: { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
-					thinkingLevel: "normal",
-					isStreaming: false,
-					isCompacting: false,
-					steeringMode: "all",
-					followUpMode: "all",
-					autoCompactionEnabled: false,
-					messageCount: 0,
-					pendingMessageCount: 0,
-				},
-			},
-		});
-
-		expect(client.currentModel.value).toEqual({
-			provider: "openai",
-			id: "gpt-4.1",
-			name: "GPT-4.1",
-		});
-
-		simulateMessage(ws, {
-			type: "event",
-			payload: {
-				type: "model_select",
-				model: { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-				source: "set",
-			},
-		});
-
-		expect(client.currentModel.value).toEqual({
-			provider: "anthropic",
-			id: "claude-sonnet-4",
-			name: "Claude Sonnet 4",
-		});
-	});
-
-	it("stores available models and upserts new selections", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "get_available_models",
-				success: true,
-				data: {
-					models: [
-						{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
-						{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-					],
-				},
-			},
-		});
-
-		expect(client.availableModels.value).toEqual([
-			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
-			{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-		]);
-
-		simulateMessage(ws, {
-			type: "response",
-			payload: {
-				type: "response",
-				command: "set_model",
-				success: true,
-				data: { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-			},
-		});
-
-		expect(client.currentModel.value).toEqual({
-			provider: "google",
-			id: "gemini-2.5-pro",
-			name: "Gemini 2.5 Pro",
-		});
-		expect(client.availableModels.value).toEqual([
-			{ provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
-			{ provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
-			{ provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-		]);
-	});
-
-	it("handles select method by setting pendingExtensionRequest", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const request = {
-			type: "extension_ui_request",
-			id: "req-1",
-			method: "select" as const,
-			title: "Pick an option",
-			options: ["A", "B", "C"],
-		};
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: request,
-		});
-
-		expect(client.pendingExtensionRequest.value).toEqual(request);
-	});
-
-	it("handles confirm method by setting pendingExtensionRequest", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const request = {
-			type: "extension_ui_request",
-			id: "req-2",
-			method: "confirm" as const,
-			title: "Are you sure?",
-			message: "This cannot be undone.",
-		};
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: request,
-		});
-
-		expect(client.pendingExtensionRequest.value).toEqual(request);
-	});
-
-	it("handles input method by setting pendingExtensionRequest", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const request = {
-			type: "extension_ui_request",
-			id: "req-3",
-			method: "input" as const,
-			title: "Enter a value",
-			placeholder: "Type here...",
-		};
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: request,
-		});
-
-		expect(client.pendingExtensionRequest.value).toEqual(request);
-	});
-
-	it("handles editor method by setting pendingExtensionRequest", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const request = {
-			type: "extension_ui_request",
-			id: "req-4",
-			method: "editor" as const,
-			title: "Edit content",
-			prefill: "Hello world",
-		};
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: request,
-		});
-
-		expect(client.pendingExtensionRequest.value).toEqual(request);
-	});
-
-	it("handles notify method by pushing to notifications array", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "notif-1",
-				method: "notify",
-				message: "Something happened",
-				notifyType: "info",
-			},
-		});
-
-		expect(client.notifications.value).toHaveLength(1);
-		expect(client.notifications.value[0]).toEqual({
-			message: "Something happened",
-			notifyType: "info",
-			id: "notif-1",
-		});
-	});
-
-	it("handles setTitle method by updating document.title", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		const originalTitle = document.title;
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "title-1",
-				method: "setTitle",
-				title: "New Page Title",
-			},
-		});
-
-		expect(document.title).toBe("New Page Title");
-		document.title = originalTitle;
-	});
-
-	it("handles set_editor_text by setting prefillText ref", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "prefill-1",
-				method: "set_editor_text",
-				text: "Hello from extension",
-			},
-		});
-
-		expect(client.prefillText.value).toBe("Hello from extension");
-	});
-
-	it("handles setStatus by updating statusEntries map", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "status-1",
-				method: "setStatus",
-				statusKey: "git",
-				statusText: "main ✓",
-			},
-		});
-
-		expect(client.statusEntries.value).toEqual({ git: "main ✓" });
-	});
-
-	it("handles setStatus with undefined statusText as empty string", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "status-2",
-				method: "setStatus",
-				statusKey: "git",
-				statusText: undefined,
-			},
-		});
-
-		expect(client.statusEntries.value).toEqual({ git: "" });
-	});
-
-	it("handles setWidget by updating widgetEntries map", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "widget-1",
-				method: "setWidget",
-				widgetKey: "todos",
-				widgetLines: ["Buy milk", "Write code"],
-				widgetPlacement: "aboveEditor",
-			},
-		});
-
-		expect(client.widgetEntries.value).toEqual({
-			todos: { lines: ["Buy milk", "Write code"], placement: "aboveEditor" },
-		});
-	});
-
-	it("handles setWidget with undefined widgetLines by removing entry", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		// First add a widget
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "widget-2",
-				method: "setWidget",
-				widgetKey: "todos",
-				widgetLines: ["Buy milk"],
-			},
-		});
-		expect(client.widgetEntries.value).toHaveProperty("todos");
-
-		// Then remove it
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "widget-3",
-				method: "setWidget",
-				widgetKey: "todos",
-				widgetLines: undefined,
-			},
-		});
-		expect(client.widgetEntries.value).not.toHaveProperty("todos");
-	});
-
-	it("respondToUIRequest sends extension_ui_response and clears pending", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		// Set a pending request
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "req-resp",
-				method: "select",
-				title: "Choose",
-				options: ["X", "Y"],
-			},
-		});
-		expect(client.pendingExtensionRequest.value).toBeTruthy();
-
-		// Respond
-		client.respondToUIRequest({
-			type: "extension_ui_response",
-			id: "req-resp",
-			value: "X",
-		});
-
-		// Should have cleared pending and sent response
-		expect(client.pendingExtensionRequest.value).toBeNull();
-		expect(ws.send).toHaveBeenCalledWith(
-			JSON.stringify({
-				type: "extension_ui_response",
-				payload: { type: "extension_ui_response", id: "req-resp", value: "X" },
-			}),
-		);
-	});
-
-	it("dismissNotification removes the notification by id", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		// Add two notifications
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "n1",
-				method: "notify",
-				message: "First",
-			},
-		});
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "n2",
-				method: "notify",
-				message: "Second",
-			},
-		});
-		expect(client.notifications.value).toHaveLength(2);
-
-		// Dismiss first
-		client.dismissNotification("n1");
-		expect(client.notifications.value).toHaveLength(1);
-		expect(client.notifications.value[0].id).toBe("n2");
-	});
-
-	it("clears pendingExtensionRequest and notifications on WS close", async () => {
-		const client = await importComposable();
-		const ws = getLastMockWs();
-		simulateOpen(ws);
-
-		// Set up some state
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "req-close",
-				method: "select",
-				title: "Choose",
-				options: ["A"],
-			},
-		});
-		simulateMessage(ws, {
-			type: "extension_ui_request",
-			payload: {
-				type: "extension_ui_request",
-				id: "n-close",
-				method: "notify",
-				message: "Hello",
-			},
-		});
-		expect(client.pendingExtensionRequest.value).toBeTruthy();
-		expect(client.notifications.value).toHaveLength(1);
-
-		// Simulate close
-		const closeHandler = ws.addEventListener.mock.calls.find(
-			(c: unknown[]) => c[0] === "close",
-		)?.[1] as (() => void) | undefined;
-		expect(closeHandler).toBeDefined();
-		closeHandler!();
-
-		expect(client.pendingExtensionRequest.value).toBeNull();
-		expect(client.notifications.value).toHaveLength(0);
-	});
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("shows an auth error and skips reconnect when token is missing", async () => {
+    vi.stubGlobal("location", {
+      protocol: "http:",
+      host: "localhost:8080",
+      search: "",
+    });
+
+    const client = await importComposable();
+
+    expect(mockWsInstances).toHaveLength(0);
+    expect(client.connectionError.value).toContain(
+      "Missing authentication token",
+    );
+    expect(client.isReconnecting.value).toBe(false);
+  });
+
+  it("does not request tree entries during initial connect", async () => {
+    await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
+      const payload = JSON.parse(message) as { payload?: { type?: string } };
+      return payload.payload?.type;
+    });
+
+    expect(sentCommandTypes).toEqual(
+      expect.arrayContaining([
+        "get_state",
+        "get_messages",
+        "list_sessions",
+        "get_commands",
+        "get_available_models",
+      ]),
+    );
+
+    // Tree data is loaded lazily when the panel is opened.
+    const treeRequests = sentCommandTypes.filter(
+      (type) => type === "list_tree_entries",
+    );
+    expect(treeRequests).toHaveLength(0);
+  });
+
+  it("updates tree entries from switch_session responses", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "switch_session",
+        success: true,
+        data: {
+          messages: [],
+          treeEntries: [
+            {
+              id: "node-1",
+              label: "user: Hello",
+              type: "message",
+              depth: 0,
+              isActive: true,
+            },
+          ],
+          sessionId: "session-2",
+          sessionName: "Session 2",
+          sessionPath: "/tmp/session-2.jsonl",
+          cancelled: false,
+        },
+      },
+    });
+
+    expect(client.treeEntries.value).toEqual([
+      {
+        id: "node-1",
+        label: "user: Hello",
+        type: "message",
+        depth: 0,
+        isActive: true,
+      },
+    ]);
+  });
+
+  it("ignores stale live tree responses after switch_session", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "live-session",
+          sessionFile: "/tmp/live.jsonl",
+          sessionName: "Live",
+          thinkingLevel: "normal",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "switch_session",
+        success: true,
+        data: {
+          messages: [],
+          treeEntries: [
+            {
+              id: "session-node",
+              label: "user: Switched",
+              type: "message",
+              depth: 0,
+              isActive: true,
+            },
+          ],
+          sessionId: "session-2",
+          sessionName: "Session 2",
+          sessionPath: "/tmp/session-2.jsonl",
+          cancelled: false,
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "list_tree_entries",
+        success: true,
+        data: {
+          entries: [
+            { id: "live-node", label: "user: Live", type: "message", depth: 0 },
+          ],
+          sessionPath: "/tmp/live.jsonl",
+        },
+      },
+    });
+
+    expect(client.treeEntries.value).toEqual([
+      {
+        id: "session-node",
+        label: "user: Switched",
+        type: "message",
+        depth: 0,
+        isActive: true,
+      },
+    ]);
+  });
+
+  it("tracks currentModel from state and model_select events", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/session-1.jsonl",
+          sessionName: "Session 1",
+          model: { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+          thinkingLevel: "normal",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    expect(client.currentModel.value).toEqual({
+      provider: "openai",
+      id: "gpt-4.1",
+      name: "GPT-4.1",
+    });
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "model_select",
+        model: {
+          provider: "anthropic",
+          id: "claude-sonnet-4",
+          name: "Claude Sonnet 4",
+        },
+        source: "set",
+      },
+    });
+
+    expect(client.currentModel.value).toEqual({
+      provider: "anthropic",
+      id: "claude-sonnet-4",
+      name: "Claude Sonnet 4",
+    });
+  });
+
+  it("stores available models and upserts new selections", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_available_models",
+        success: true,
+        data: {
+          models: [
+            { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+            {
+              provider: "anthropic",
+              id: "claude-sonnet-4",
+              name: "Claude Sonnet 4",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(client.availableModels.value).toEqual([
+      { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+      { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+    ]);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "set_model",
+        success: true,
+        data: {
+          provider: "google",
+          id: "gemini-2.5-pro",
+          name: "Gemini 2.5 Pro",
+        },
+      },
+    });
+
+    expect(client.currentModel.value).toEqual({
+      provider: "google",
+      id: "gemini-2.5-pro",
+      name: "Gemini 2.5 Pro",
+    });
+    expect(client.availableModels.value).toEqual([
+      { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+      { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
+      { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    ]);
+  });
+
+  it("tracks thinking level from state responses", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/session-1.jsonl",
+          sessionName: "Session 1",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    expect(client.currentThinkingLevel.value).toBe("medium");
+  });
+
+  it("setThinkingLevel sends the command and updates local state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const initialGetStateCount = ws.send.mock.calls.filter(
+      ([message]: [string]) => message.includes('"type":"get_state"'),
+    ).length;
+
+    const pendingSet = client.setThinkingLevel("high");
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"set_thinking_level"'),
+    );
+
+    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"set_thinking_level"'),
+    );
+    expect(setCommandCall).toBeDefined();
+    const setCommand = JSON.parse(setCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: setCommand.payload.id,
+        type: "response",
+        command: "set_thinking_level",
+        success: true,
+      },
+    });
+
+    await pendingSet;
+    expect(client.currentThinkingLevel.value).toBe("high");
+    expect(
+      ws.send.mock.calls.filter(([message]: [string]) =>
+        message.includes('"type":"get_state"'),
+      ).length,
+    ).toBe(initialGetStateCount + 1);
+  });
+
+  it("handles select method by setting pendingExtensionRequest", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const request = {
+      type: "extension_ui_request",
+      id: "req-1",
+      method: "select" as const,
+      title: "Pick an option",
+      options: ["A", "B", "C"],
+    };
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: request,
+    });
+
+    expect(client.pendingExtensionRequest.value).toEqual(request);
+  });
+
+  it("handles confirm method by setting pendingExtensionRequest", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const request = {
+      type: "extension_ui_request",
+      id: "req-2",
+      method: "confirm" as const,
+      title: "Are you sure?",
+      message: "This cannot be undone.",
+    };
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: request,
+    });
+
+    expect(client.pendingExtensionRequest.value).toEqual(request);
+  });
+
+  it("handles input method by setting pendingExtensionRequest", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const request = {
+      type: "extension_ui_request",
+      id: "req-3",
+      method: "input" as const,
+      title: "Enter a value",
+      placeholder: "Type here...",
+    };
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: request,
+    });
+
+    expect(client.pendingExtensionRequest.value).toEqual(request);
+  });
+
+  it("handles editor method by setting pendingExtensionRequest", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const request = {
+      type: "extension_ui_request",
+      id: "req-4",
+      method: "editor" as const,
+      title: "Edit content",
+      prefill: "Hello world",
+    };
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: request,
+    });
+
+    expect(client.pendingExtensionRequest.value).toEqual(request);
+  });
+
+  it("handles notify method by pushing to notifications array", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "notif-1",
+        method: "notify",
+        message: "Something happened",
+        notifyType: "info",
+      },
+    });
+
+    expect(client.notifications.value).toHaveLength(1);
+    expect(client.notifications.value[0]).toEqual({
+      message: "Something happened",
+      notifyType: "info",
+      id: "notif-1",
+    });
+  });
+
+  it("handles setTitle method by updating document.title", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const originalTitle = document.title;
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "title-1",
+        method: "setTitle",
+        title: "New Page Title",
+      },
+    });
+
+    expect(document.title).toBe("New Page Title");
+    document.title = originalTitle;
+  });
+
+  it("handles set_editor_text by setting prefillText ref", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "prefill-1",
+        method: "set_editor_text",
+        text: "Hello from extension",
+      },
+    });
+
+    expect(client.prefillText.value).toBe("Hello from extension");
+  });
+
+  it("handles setStatus by updating statusEntries map", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "status-1",
+        method: "setStatus",
+        statusKey: "git",
+        statusText: "main ✓",
+      },
+    });
+
+    expect(client.statusEntries.value).toEqual({ git: "main ✓" });
+  });
+
+  it("handles setStatus with undefined statusText as empty string", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "status-2",
+        method: "setStatus",
+        statusKey: "git",
+        statusText: undefined,
+      },
+    });
+
+    expect(client.statusEntries.value).toEqual({ git: "" });
+  });
+
+  it("handles setWidget by updating widgetEntries map", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "widget-1",
+        method: "setWidget",
+        widgetKey: "todos",
+        widgetLines: ["Buy milk", "Write code"],
+        widgetPlacement: "aboveEditor",
+      },
+    });
+
+    expect(client.widgetEntries.value).toEqual({
+      todos: { lines: ["Buy milk", "Write code"], placement: "aboveEditor" },
+    });
+  });
+
+  it("handles setWidget with undefined widgetLines by removing entry", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    // First add a widget
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "widget-2",
+        method: "setWidget",
+        widgetKey: "todos",
+        widgetLines: ["Buy milk"],
+      },
+    });
+    expect(client.widgetEntries.value).toHaveProperty("todos");
+
+    // Then remove it
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "widget-3",
+        method: "setWidget",
+        widgetKey: "todos",
+        widgetLines: undefined,
+      },
+    });
+    expect(client.widgetEntries.value).not.toHaveProperty("todos");
+  });
+
+  it("respondToUIRequest sends extension_ui_response and clears pending", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    // Set a pending request
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "req-resp",
+        method: "select",
+        title: "Choose",
+        options: ["X", "Y"],
+      },
+    });
+    expect(client.pendingExtensionRequest.value).toBeTruthy();
+
+    // Respond
+    client.respondToUIRequest({
+      type: "extension_ui_response",
+      id: "req-resp",
+      value: "X",
+    });
+
+    // Should have cleared pending and sent response
+    expect(client.pendingExtensionRequest.value).toBeNull();
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({
+        type: "extension_ui_response",
+        payload: { type: "extension_ui_response", id: "req-resp", value: "X" },
+      }),
+    );
+  });
+
+  it("dismissNotification removes the notification by id", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    // Add two notifications
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "n1",
+        method: "notify",
+        message: "First",
+      },
+    });
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "n2",
+        method: "notify",
+        message: "Second",
+      },
+    });
+    expect(client.notifications.value).toHaveLength(2);
+
+    // Dismiss first
+    client.dismissNotification("n1");
+    expect(client.notifications.value).toHaveLength(1);
+    expect(client.notifications.value[0].id).toBe("n2");
+  });
+
+  it("clears pendingExtensionRequest and notifications on WS close", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    // Set up some state
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "req-close",
+        method: "select",
+        title: "Choose",
+        options: ["A"],
+      },
+    });
+    simulateMessage(ws, {
+      type: "extension_ui_request",
+      payload: {
+        type: "extension_ui_request",
+        id: "n-close",
+        method: "notify",
+        message: "Hello",
+      },
+    });
+    expect(client.pendingExtensionRequest.value).toBeTruthy();
+    expect(client.notifications.value).toHaveLength(1);
+
+    // Simulate close
+    const closeHandler = ws.addEventListener.mock.calls.find(
+      (c: unknown[]) => c[0] === "close",
+    )?.[1] as (() => void) | undefined;
+    expect(closeHandler).toBeDefined();
+    closeHandler!();
+
+    expect(client.pendingExtensionRequest.value).toBeNull();
+    expect(client.notifications.value).toHaveLength(0);
+  });
 });

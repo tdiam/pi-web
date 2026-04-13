@@ -8,7 +8,12 @@
  */
 
 import * as crypto from "node:crypto";
-import type { BridgeConfig, BridgeEvent, BridgeState, WsClient } from "./types.js";
+import type {
+  BridgeConfig,
+  BridgeEvent,
+  BridgeState,
+  WsClient,
+} from "./types.js";
 import { BridgeEventBus } from "./bridge-event-bus.js";
 import { BridgeServer } from "./server.js";
 import type { WsRpcAdapterContext } from "./ws-rpc-adapter.js";
@@ -22,18 +27,18 @@ export type BridgeDoneCallback = () => void;
  * Bridge controller managing the full lifecycle
  */
 export interface BridgeController {
-	/** Get current bridge state */
-	getState(): BridgeState;
-	/** Get the bridge URL for display */
-	getBridgeUrl(): string | undefined;
-	/** Get the ephemeral authentication token */
-	getToken(): string;
-	/** Get list of connected clients */
-	getClients(): WsClient[];
-	/** Stop the bridge gracefully */
-	stop(): Promise<void>;
-	/** Subscribe to bridge events */
-	subscribe(handler: (event: BridgeEvent) => void): () => void;
+  /** Get current bridge state */
+  getState(): BridgeState;
+  /** Get the bridge URL for display */
+  getBridgeUrl(): string | undefined;
+  /** Get the ephemeral authentication token */
+  getToken(): string;
+  /** Get list of connected clients */
+  getClients(): WsClient[];
+  /** Stop the bridge gracefully */
+  stop(): Promise<void>;
+  /** Subscribe to bridge events */
+  subscribe(handler: (event: BridgeEvent) => void): () => void;
 }
 
 /**
@@ -45,133 +50,133 @@ export interface BridgeController {
  * @returns Bridge controller
  */
 export async function startBridge(
-	config: BridgeConfig,
-	context: WsRpcAdapterContext,
-	done: BridgeDoneCallback
+  config: BridgeConfig,
+  context: WsRpcAdapterContext,
+  done: BridgeDoneCallback,
 ): Promise<BridgeController> {
-	// Create event bus for internal communication
-	const eventBus = new BridgeEventBus(config);
+  // Create event bus for internal communication
+  const eventBus = new BridgeEventBus(config);
 
-	// Event handlers for terminal log view
-	const eventHandlers: Array<(event: BridgeEvent) => void> = [];
+  // Event handlers for terminal log view
+  const eventHandlers: Array<(event: BridgeEvent) => void> = [];
 
-	// Emit events to all handlers
-	const emitEvent = (event: BridgeEvent): void => {
-		// Emit to internal handlers (terminal log view)
-		for (const handler of eventHandlers) {
-			try {
-				handler(event);
-			} catch (err) {
-				console.error("Bridge lifecycle: event handler error:", err);
-			}
-		}
-		// Also emit to event bus for any subscribers
-		eventBus.emit(event);
-	};
+  // Emit events to all handlers
+  const emitEvent = (event: BridgeEvent): void => {
+    // Emit to internal handlers (terminal log view)
+    for (const handler of eventHandlers) {
+      try {
+        handler(event);
+      } catch (err) {
+        console.error("Bridge lifecycle: event handler error:", err);
+      }
+    }
+    // Also emit to event bus for any subscribers
+    eventBus.emit(event);
+  };
 
-	// Generate ephemeral authentication token
-	const token = crypto.randomBytes(16).toString("hex");
+  // Generate ephemeral authentication token
+  const token = crypto.randomBytes(16).toString("hex");
 
-	// Create server
-	const server = new BridgeServer(config, context, eventBus, emitEvent, token);
+  // Create server
+  const server = new BridgeServer(config, context, eventBus, emitEvent, token);
 
-	// State tracking
-	let state: BridgeState = { status: "starting", port: config.port };
+  // State tracking
+  let state: BridgeState = { status: "starting", port: config.port };
 
-	// Start the server
-	try {
-		const address = await server.start();
-		state = { status: "running", host: address.host, port: address.port };
-	} catch (err) {
-		state = { status: "stopped" };
-		throw err;
-	}
+  // Start the server
+  try {
+    const address = await server.start();
+    state = { status: "running", host: address.host, port: address.port };
+  } catch (err) {
+    state = { status: "stopped" };
+    throw err;
+  }
 
-	// SIGINT handler
-	let sigintHandler: (() => void) | undefined;
+  // SIGINT handler
+  let sigintHandler: (() => void) | undefined;
 
-	// Track if we're already shutting down
-	let isShuttingDown = false;
+  // Track if we're already shutting down
+  let isShuttingDown = false;
 
-	/**
-	 * Graceful shutdown
-	 */
-	const shutdown = async (): Promise<void> => {
-		if (isShuttingDown) {
-			return;
-		}
-		isShuttingDown = true;
-		state = { status: "stopping" };
+  /**
+   * Graceful shutdown
+   */
+  const shutdown = async (): Promise<void> => {
+    if (isShuttingDown) {
+      return;
+    }
+    isShuttingDown = true;
+    state = { status: "stopping" };
 
-		// Emit SIGINT event
-		emitEvent({ type: "sigint_received" });
+    // Emit SIGINT event
+    emitEvent({ type: "sigint_received" });
 
-		// Remove SIGINT handler
-		if (sigintHandler) {
-			process.off("SIGINT", sigintHandler);
-		}
+    // Remove SIGINT handler
+    if (sigintHandler) {
+      process.off("SIGINT", sigintHandler);
+    }
 
-		try {
-			// Stop server
-			await server.stop();
+    try {
+      // Stop server
+      await server.stop();
 
-			// Dispose event bus
-			eventBus.dispose();
+      // Dispose event bus
+      eventBus.dispose();
 
-			state = { status: "stopped" };
+      state = { status: "stopped" };
 
-			// Emit shutdown complete
-			emitEvent({ type: "shutdown_complete" });
-		} catch (err) {
-			console.error("Bridge shutdown error:", err);
-			state = { status: "stopped" };
-			throw err;
-		} finally {
-			// Notify that we're done
-			done();
-		}
-	};
+      // Emit shutdown complete
+      emitEvent({ type: "shutdown_complete" });
+    } catch (err) {
+      console.error("Bridge shutdown error:", err);
+      state = { status: "stopped" };
+      throw err;
+    } finally {
+      // Notify that we're done
+      done();
+    }
+  };
 
-	// Register SIGINT handler
-	sigintHandler = () => {
-		console.log("\n[Bridge] SIGINT received, shutting down...");
-		void shutdown();
-	};
-	process.on("SIGINT", sigintHandler);
+  // Register SIGINT handler
+  sigintHandler = () => {
+    console.log("\n[Bridge] SIGINT received, shutting down...");
+    void shutdown();
+  };
+  process.on("SIGINT", sigintHandler);
 
-	// Return controller
-	return {
-		getState() {
-			return state;
-		},
+  // Return controller
+  return {
+    getState() {
+      return state;
+    },
 
-		getBridgeUrl() {
-			if (state.status === "running") {
-				return `http://${state.host}:${state.port}`;
-			}
-			return undefined;
-		},
+    getBridgeUrl() {
+      if (state.status === "running") {
+        return `http://${state.host}:${state.port}`;
+      }
+      return undefined;
+    },
 
-		getToken() {
-			return token;
-		},
+    getToken() {
+      return token;
+    },
 
-		getClients() {
-			return server.getClients();
-		},
+    getClients() {
+      return server.getClients();
+    },
 
-		stop() {
-			return shutdown();
-		},
+    stop() {
+      return shutdown();
+    },
 
-		subscribe(handler) {
-			eventHandlers.push(handler);
-			return () => {
-				const idx = eventHandlers.indexOf(handler);
-				if (idx !== -1) {
-					eventHandlers.splice(idx, 1);
-				}
-			};
-		},
-	};
+    subscribe(handler) {
+      eventHandlers.push(handler);
+      return () => {
+        const idx = eventHandlers.indexOf(handler);
+        if (idx !== -1) {
+          eventHandlers.splice(idx, 1);
+        }
+      };
+    },
+  };
 }
