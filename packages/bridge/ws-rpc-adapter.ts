@@ -1209,28 +1209,13 @@ export class WsRpcAdapter {
           }
         }
 
-        return new Promise((resolve) => {
-          ctx.compact({
-            onComplete: (result) => {
-              resolve({
-                id: correlationId,
-                type: "response",
-                command: "compact",
-                success: true,
-                data: result,
-              });
-            },
-            onError: (error) => {
-              resolve({
-                id: correlationId,
-                type: "response",
-                command: "compact",
-                success: false,
-                error: error.message,
-              });
-            },
-          });
-        });
+        return {
+          id: correlationId,
+          type: "response",
+          command: "compact",
+          success: false,
+          error: "Compaction requires an active session",
+        };
       }
 
       case "set_auto_compaction": {
@@ -1568,13 +1553,46 @@ export class WsRpcAdapter {
       }
 
       case "fork": {
-        const result = await ctx.fork(command.entryId);
+        const currentSessionFile =
+          this.selectedSessionPath ?? ctx.sessionManager.getSessionFile();
+        if (!currentSessionFile || !fs.existsSync(currentSessionFile)) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "fork",
+            success: false,
+            error: "No session file available to fork from",
+          };
+        }
+
+        const sourceSm = openSessionManager(currentSessionFile);
+        const newSessionPath = sourceSm.createBranchedSession(command.entryId);
+        if (!newSessionPath) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "fork",
+            success: false,
+            error: "Failed to create forked session",
+          };
+        }
+
+        this.disposeSelectedSession();
+        this.selectedSessionPath = newSessionPath;
+
+        const forkedSm = openSessionManager(newSessionPath);
+        const entry = forkedSm.getEntry(command.entryId);
+        const text =
+          entry && "message" in entry
+            ? (entry.message as { content?: string }).content ?? ""
+            : "";
+
         return {
           id: correlationId,
           type: "response",
           command: "fork",
           success: true,
-          data: { text: "", ...result },
+          data: { text, cancelled: false },
         };
       }
 
@@ -1728,28 +1746,44 @@ export class WsRpcAdapter {
       // =================================================================
 
       case "navigate_tree": {
-        const result = this.selectedSessionPath
-          ? await (await this.ensureSelectedSession()).navigateTree(
-              command.entryId,
-              {
-                summarize: command.summarize,
-                customInstructions: command.customInstructions,
-                replaceInstructions: command.replaceInstructions,
-                label: command.label,
-              },
-            )
-          : await ctx.navigateTree(command.entryId, {
-              summarize: command.summarize,
-              customInstructions: command.customInstructions,
-              replaceInstructions: command.replaceInstructions,
-              label: command.label,
-            });
+        if (this.selectedSessionPath) {
+          const result = await (
+            await this.ensureSelectedSession()
+          ).navigateTree(command.entryId, {
+            summarize: command.summarize,
+            customInstructions: command.customInstructions,
+            replaceInstructions: command.replaceInstructions,
+            label: command.label,
+          });
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "navigate_tree" as const,
+            success: true as const,
+            data: result,
+          };
+        }
+
+        // No selected session — branch the live session file locally.
+        const liveSessionFile = ctx.sessionManager.getSessionFile();
+        if (!liveSessionFile || !fs.existsSync(liveSessionFile)) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "navigate_tree" as const,
+            success: false as const,
+            error: "No session file available",
+          };
+        }
+
+        const sm = openSessionManager(liveSessionFile);
+        sm.branch(command.entryId);
         return {
           id: correlationId,
           type: "response" as const,
           command: "navigate_tree" as const,
           success: true as const,
-          data: result,
+          data: { cancelled: false },
         };
       }
 

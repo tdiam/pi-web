@@ -1241,10 +1241,28 @@ describe("WsRpcAdapter", () => {
     });
 
     it("should handle fork command", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-test-"));
+      const sm = SessionManager.create(tmpDir, tmpDir);
+      sm.appendModelChange("openai", "gpt-4.1");
+      sm.appendThinkingLevelChange("high");
+      sm.appendMessage({
+        role: "user",
+        content: "Hello",
+        timestamp: Date.now(),
+      } as any);
+      sm.appendMessage({
+        role: "assistant",
+        content: [{ type: "text", text: "Hi" }],
+        timestamp: Date.now(),
+      } as any);
+      const leafId = sm.getLeafId() as string;
+      const existingFile = sm.getSessionFile() as string;
+      (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(existingFile);
+
       const command: RpcCommand = {
         id: "cmd-1",
         type: "fork",
-        entryId: "entry-123",
+        entryId: leafId,
       };
       (
         ws as unknown as { trigger: (event: string, data: Buffer) => void }
@@ -1255,11 +1273,15 @@ describe("WsRpcAdapter", () => {
 
       await new Promise((r) => setTimeout(r, 10));
 
-      expect(context.ctx.fork).toHaveBeenCalledWith("entry-123");
+      // ctx.fork should NOT be called (bridge creates fork locally)
+      expect(context.ctx.fork).not.toHaveBeenCalled();
 
       const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
       const lastCall = JSON.parse(sendCalls[sendCalls.length - 1][0] as string);
       expect(lastCall.payload.success).toBe(true);
+      expect(lastCall.payload.data.cancelled).toBe(false);
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
     it("should handle switch_session command", async () => {
