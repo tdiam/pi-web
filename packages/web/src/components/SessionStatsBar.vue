@@ -40,6 +40,10 @@ const costLabel = computed(() => {
   return `$${c.toFixed(2)}`;
 });
 
+const hasVisibleContent = computed(
+  () => contextPercent.value != null || costLabel.value != null,
+);
+
 const barColor = computed(() => {
   if (contextPercent.value == null) return "var(--text-subtle)";
   if (contextPercent.value < 50) return "var(--text-subtle)";
@@ -49,7 +53,7 @@ const barColor = computed(() => {
 </script>
 
 <template>
-  <div v-if="stats" class="stats-bar">
+  <div v-if="stats && hasVisibleContent" class="stats-bar">
     <div class="stats-inner">
       <div v-if="contextPercent != null" class="stat-chip context-chip">
         <div class="context-bar-track">

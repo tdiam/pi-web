@@ -49,7 +49,7 @@ defineExpose({ preserveTranscriptScroll });
   <main class="center-column">
     <CompatWarning :visible="compatWarningVisible" />
 
-    <div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
+    <!-- <div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
       <span
         v-for="(text, key) in statusEntries"
         :key="key"
@@ -57,7 +57,7 @@ defineExpose({ preserveTranscriptScroll });
       >
         {{ text }}
       </span>
-    </div>
+    </div> -->
 
     <ChatTranscript
       ref="chatTranscriptRef"

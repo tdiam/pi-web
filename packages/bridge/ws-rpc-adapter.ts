@@ -1304,9 +1304,11 @@ export class WsRpcAdapter {
       case "get_session_stats": {
         const requestedPath = command.sessionPath as string | undefined;
         const selectedSessionPath = this.selectedSessionPath;
-        const liveSessionPath =
-          selectedSessionPath ?? ctx.sessionManager.getSessionFile();
-        const targetPath = requestedPath ?? liveSessionPath;
+        // Always use the actual live Pi session file, not the web-selected one.
+        // selectedSessionPath is for detached prompt routing, not for stats lookup.
+        const liveSessionPath = ctx.sessionManager.getSessionFile();
+        const targetPath =
+          requestedPath ?? selectedSessionPath ?? liveSessionPath;
 
         if (
           this.selectedSession &&
@@ -1328,7 +1330,7 @@ export class WsRpcAdapter {
           };
         }
 
-        // If targeting a stored session, read from disk.
+        // If targeting a stored session different from the live session, read from disk.
         if (targetPath && targetPath !== liveSessionPath && fs.existsSync(targetPath)) {
           try {
             const diskSession = openSessionManager(targetPath);
@@ -1422,35 +1424,95 @@ export class WsRpcAdapter {
           }
         }
 
-        // Live session: use context API
+        // Live session: use context API, with fallback to branch reconstruction
         const usage = ctx.getContextUsage();
         const branch = ctx.sessionManager.getBranch();
         let totalCost = 0;
+        let lastAssistantUsage: {
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+        } | null = null;
+        let lastModel: { provider?: string; modelId?: string } | null = null;
         for (const entry of branch) {
           const e = entry as {
             type?: string;
+            provider?: string;
+            modelId?: string;
             message?: {
               role?: string;
-              usage?: { cost?: { total?: number } };
+              usage?: {
+                cost?: { total?: number };
+                input?: number;
+                output?: number;
+                cacheRead?: number;
+                cacheWrite?: number;
+              };
             };
           };
+          if (e.type === "model_change") {
+            lastModel = { provider: e.provider, modelId: e.modelId };
+          }
           if (
             e.type === "message" &&
             e.message?.role === "assistant" &&
             e.message?.usage?.cost
           ) {
             totalCost += e.message.usage.cost.total ?? 0;
+            if ((e.message.usage.input ?? 0) > 0) {
+              lastAssistantUsage = e.message.usage;
+            }
           }
         }
+
+        let tokens: number | null = usage?.tokens ?? null;
+        let contextWindow: number = usage?.contextWindow ?? 0;
+        let percent: number | null = usage?.percent ?? null;
+
+        // Fallback: reconstruct from branch entries when getContextUsage() is empty
+        if (tokens == null && lastAssistantUsage) {
+          tokens =
+            (lastAssistantUsage.input ?? 0) +
+            (lastAssistantUsage.cacheRead ?? 0) +
+            (lastAssistantUsage.cacheWrite ?? 0);
+        }
+        if (
+          contextWindow === 0 &&
+          lastModel?.provider &&
+          lastModel?.modelId &&
+          tokens != null
+        ) {
+          try {
+            const models = await ctx.modelRegistry.getAvailable();
+            const matched = models.find(
+              (m: unknown) =>
+                (m as { provider: string; id: string }).provider ===
+                  lastModel!.provider &&
+                (m as { provider: string; id: string }).id ===
+                  lastModel!.modelId,
+            );
+            if (matched) {
+              contextWindow =
+                (matched as { contextWindow?: number }).contextWindow ?? 0;
+            }
+          } catch {
+            // Model registry unavailable; skip context window lookup
+          }
+        }
+        if (percent == null && tokens != null && contextWindow > 0) {
+          percent = Math.round((tokens / contextWindow) * 100 * 10) / 10;
+        }
+
         return {
           id: correlationId,
           type: "response",
           command: "get_session_stats",
           success: true,
           data: {
-            tokens: usage?.tokens ?? null,
-            contextWindow: usage?.contextWindow ?? 0,
-            percent: usage?.percent ?? null,
+            tokens,
+            contextWindow,
+            percent,
             messageCount: ctx.sessionManager.getEntries()?.length ?? 0,
             cost: totalCost,
           },
