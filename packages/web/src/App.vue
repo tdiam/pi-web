@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { ListTree, Menu, Moon, Sun, X } from "lucide-vue-next";
-import { ref, computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
-import ChatTranscript from "./components/ChatTranscript.vue";
-import SessionRail from "./components/SessionRail.vue";
-import TreePanel from "./components/TreePanel.vue";
-import ComposerBar from "./components/ComposerBar.vue";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
-import CompatWarning from "./components/CompatWarning.vue";
 import ReconnectBanner from "./components/ReconnectBanner.vue";
+import TreePanel from "./components/TreePanel.vue";
+import AppHeader from "./layout/AppHeader.vue";
+import AppMainContent from "./layout/AppMainContent.vue";
+import AppNotifications from "./layout/AppNotifications.vue";
+import AppSidebar from "./layout/AppSidebar.vue";
 import type { RpcModelInfo } from "./utils/models";
 
 type ThemeMode = "dark" | "light";
@@ -59,9 +58,8 @@ const networkUrl = computed(() => {
 });
 const sidebarOpen = ref(false);
 const treePanelOpen = ref(false);
-const chatTranscriptRef = ref<InstanceType<typeof ChatTranscript> | null>(null);
+const mainContentRef = ref<InstanceType<typeof AppMainContent> | null>(null);
 
-// localStorage as instant cache to avoid flash; server as authoritative source.
 const THEME_CACHE_KEY = "pi-web-theme";
 function readCachedTheme(): ThemeMode {
   if (typeof window === "undefined") return "dark";
@@ -72,11 +70,10 @@ function readCachedTheme(): ThemeMode {
     : "dark";
 }
 const theme = ref<ThemeMode>(readCachedTheme());
-const nextThemeLabel = computed(() =>
+const nextThemeLabel = computed<ThemeMode>(() =>
   theme.value === "dark" ? "light" : "dark",
 );
 
-// Once connected, sync the authoritative server state.
 let themeLoaded = false;
 watch(connectionStatus, async (status) => {
   if (status !== "connected" || themeLoaded) return;
@@ -91,22 +88,22 @@ watch(connectionStatus, async (status) => {
       }
     }
   } catch {
-    // Server unavailable — keep cached value
+    // Server unavailable, keep cached value.
   }
 });
 
-// On change: persist to server and update localStorage cache.
 watch(theme, (value) => {
-  if (typeof window !== "undefined")
+  if (typeof window !== "undefined") {
     window.localStorage.setItem(THEME_CACHE_KEY, value);
+  }
   sendCommand({ type: "set_plugin_state", key: "theme", value }).catch(
     () => {},
   );
 });
 
 watch(connectionStatus, (status) => {
-  if (status === "disconnected" && chatTranscriptRef.value) {
-    chatTranscriptRef.value.preserveScroll();
+  if (status === "disconnected") {
+    mainContentRef.value?.preserveTranscriptScroll();
   }
 });
 
@@ -118,6 +115,7 @@ function toggleTheme() {
 
 function handleSessionSelect(sessionPath: string) {
   sendCommand({ type: "switch_session", sessionPath }).catch(() => {});
+  sidebarOpen.value = false;
 }
 
 function handleTreeNavigate(entryId: string) {
@@ -163,7 +161,7 @@ async function openTreePanel() {
         sessionPath: sessionState.value?.sessionFile,
       });
     } catch {
-      // Keep the panel reachable even if the refresh fails.
+      // Keep the panel reachable even if refresh fails.
     }
   }
   treePanelOpen.value = true;
@@ -193,49 +191,15 @@ watch(
 
 <template>
   <div class="app-shell" :data-theme="theme">
-    <header class="app-header">
-      <button
-        class="hamburger"
-        aria-label="Toggle sidebar"
-        @click="sidebarOpen = !sidebarOpen"
-      >
-        <Menu class="hamburger-icon" aria-hidden="true" />
-      </button>
-      <div class="header-brand">
-        <h1 class="app-title">Pi</h1>
-      </div>
-      <div class="header-session">
-        <span class="session-kicker">session</span>
-        <span class="session-name">{{ activeSessionLabel }}</span>
-      </div>
-      <div class="header-status">
-        <span v-if="networkUrl" class="network-url">{{ networkUrl }}</span>
-        <button
-          class="theme-toggle"
-          type="button"
-          :aria-label="`Switch to ${nextThemeLabel} theme`"
-          :title="`Switch to ${nextThemeLabel} theme`"
-          @click="toggleTheme"
-        >
-          <Sun v-if="theme === 'dark'" class="theme-icon" aria-hidden="true" />
-          <Moon v-else class="theme-icon" aria-hidden="true" />
-        </button>
-        <span
-          class="connection-indicator"
-          :class="connectionStatus"
-          :title="`Connection: ${connectionStatus}`"
-        >
-          <span class="indicator-dot"></span>
-          {{
-            connectionStatus === "connected"
-              ? "Connected"
-              : connectionStatus === "connecting"
-                ? "Syncing..."
-                : "Offline"
-          }}
-        </span>
-      </div>
-    </header>
+    <AppHeader
+      :theme="theme"
+      :next-theme-label="nextThemeLabel"
+      :active-session-label="activeSessionLabel"
+      :network-url="networkUrl"
+      :connection-status="connectionStatus"
+      @toggle-sidebar="sidebarOpen = !sidebarOpen"
+      @toggle-theme="toggleTheme"
+    />
 
     <ReconnectBanner
       :visible="isReconnecting"
@@ -244,88 +208,39 @@ watch(
     />
 
     <div class="app-body">
-      <aside class="left-rail" :class="{ open: sidebarOpen }">
-        <SessionRail
-          :sessions="sessions"
-          :active-session-id="activeSessionId"
-          @select="handleSessionSelect"
-        >
-          <template #header-action>
-            <button
-              class="tree-rail-button"
-              :class="{ active: treePanelOpen }"
-              type="button"
-              :aria-label="isHistoricalView ? 'Browse tree' : 'Open tree'"
-              :title="isHistoricalView ? 'Browse tree' : 'Open tree'"
-              @click="openTreePanel"
-            >
-              <ListTree aria-hidden="true" />
-            </button>
-          </template>
-        </SessionRail>
-      </aside>
-      <div class="rail-backdrop" @click="sidebarOpen = false"></div>
+      <AppSidebar
+        :sessions="sessions"
+        :active-session-id="activeSessionId"
+        :sidebar-open="sidebarOpen"
+        :tree-panel-open="treePanelOpen"
+        :is-historical-view="isHistoricalView"
+        @close-sidebar="sidebarOpen = false"
+        @open-tree-panel="openTreePanel"
+        @select-session="handleSessionSelect"
+      />
 
-      <main class="center-column">
-        <CompatWarning :visible="compatWarningVisible" />
-
-        <div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
-          <span
-            v-for="(text, key) in statusEntries"
-            :key="key"
-            class="status-entry"
-          >
-            {{ text }}
-          </span>
-        </div>
-
-        <ChatTranscript
-          ref="chatTranscriptRef"
-          :messages="transcript"
-          :is-streaming="isStreaming"
-        />
-        <ComposerBar
-          :connection-status="connectionStatus"
-          :commands="commands"
-          :models="availableModels"
-          :selected-model="currentModel"
-          :thinking-level="currentThinkingLevel"
-          @submit="handlePrompt"
-          @select-model="handleModelSelect"
-          @select-thinking-level="handleThinkingLevelSelect"
-        />
-      </main>
+      <AppMainContent
+        ref="mainContentRef"
+        :compat-warning-visible="compatWarningVisible"
+        :status-entries="statusEntries"
+        :transcript="transcript"
+        :is-streaming="isStreaming"
+        :connection-status="connectionStatus"
+        :commands="commands"
+        :available-models="availableModels"
+        :current-model="currentModel"
+        :current-thinking-level="currentThinkingLevel"
+        @submit="handlePrompt"
+        @select-model="handleModelSelect"
+        @select-thinking-level="handleThinkingLevelSelect"
+      />
     </div>
 
-    <div
-      v-if="connectionError || notifications.length > 0"
-      class="toast-container"
-    >
-      <div v-if="connectionError" class="toast-item error" role="alert">
-        <div class="toast-copy">
-          <span class="toast-type">error</span>
-          <span class="toast-message">{{ connectionError }}</span>
-        </div>
-      </div>
-      <div
-        v-for="notif in notifications"
-        :key="notif.id"
-        class="toast-item"
-        :class="notif.notifyType ?? 'info'"
-      >
-        <div class="toast-copy">
-          <span class="toast-type">{{ notif.notifyType ?? "info" }}</span>
-          <span class="toast-message">{{ notif.message }}</span>
-        </div>
-        <button
-          class="toast-dismiss"
-          aria-label="Dismiss notification"
-          @click="handleDismissNotification(notif.id)"
-        >
-          <X aria-hidden="true" />
-        </button>
-      </div>
-    </div>
+    <AppNotifications
+      :connection-error="connectionError"
+      :notifications="notifications"
+      @dismiss="handleDismissNotification"
+    />
 
     <TreePanel
       :open="treePanelOpen"
@@ -421,160 +336,6 @@ watch(
   color-scheme: light;
 }
 
-.app-header {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  height: 48px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
-  flex-shrink: 0;
-  z-index: 20;
-}
-
-.hamburger {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  margin-left: -6px;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.hamburger-icon {
-  width: 18px;
-  height: 18px;
-}
-
-.header-brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.app-title {
-  margin: 0;
-  font-size: 0.95rem;
-  line-height: 1;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--text);
-}
-
-.header-session {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  min-width: 0;
-}
-
-.session-kicker {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-subtle);
-  white-space: nowrap;
-}
-
-.session-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-self: end;
-}
-
-.network-url,
-.connection-indicator,
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 0.72rem;
-  color: var(--text-subtle);
-}
-
-.theme-toggle {
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border-radius: 999px;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease,
-    transform 0.15s ease;
-}
-
-.theme-toggle:hover {
-  background: var(--panel-2);
-  border-color: var(--border-strong);
-  color: var(--text-muted);
-  transform: translateY(-1px);
-}
-
-.theme-icon {
-  width: 16px;
-  height: 16px;
-}
-
-.connection-indicator.connected,
-.connection-indicator.connecting,
-.connection-indicator.disconnected {
-  color: var(--text-muted);
-}
-
-.indicator-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-.connection-indicator.disconnected .indicator-dot {
-  opacity: 0.45;
-}
-
-.connection-indicator.connecting .indicator-dot {
-  animation: sync-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes sync-pulse {
-  0%,
-  100% {
-    transform: scale(0.85);
-    opacity: 0.45;
-  }
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
 .app-body {
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
@@ -583,238 +344,10 @@ watch(
   overflow: hidden;
 }
 
-.left-rail {
-  grid-column: 1;
-  display: flex;
-  flex-direction: column;
-  background: var(--rail-bg);
-  border-right: 1px solid var(--border);
-  overflow: hidden;
-}
-
-.tree-rail-button {
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-subtle);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.tree-rail-button:hover {
-  background: var(--panel-2);
-  border-color: var(--border-strong);
-  color: var(--text-muted);
-}
-
-.tree-rail-button.active {
-  background: var(--panel-3);
-  border-color: var(--border-strong);
-  color: var(--text);
-}
-
-.tree-rail-button svg {
-  width: 16px;
-  height: 16px;
-}
-
-.rail-backdrop {
-  display: none;
-}
-
-.center-column {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--bg);
-}
-
-.status-bar {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 12px 24px 0;
-  flex-shrink: 0;
-}
-
-.status-entry {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 0.68rem;
-  color: var(--text-subtle);
-}
-
-.toast-container {
-  position: fixed;
-  top: 56px;
-  right: 16px;
-  z-index: 900;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 340px;
-}
-
-.toast-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow);
-  animation: toast-in 0.16s ease;
-}
-
-.toast-item.error {
-  background: var(--error-bg);
-  border-color: var(--error-border);
-}
-
-.toast-item.error .toast-type,
-.toast-item.error .toast-message {
-  color: var(--error-text);
-}
-
-.toast-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1;
-}
-
-.toast-type {
-  font-size: 0.66rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-subtle);
-}
-
-.toast-message {
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.toast-dismiss {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--text-subtle);
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.toast-dismiss svg {
-  width: 14px;
-  height: 14px;
-}
-
-.toast-dismiss:hover {
-  color: var(--text);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (max-width: 900px) {
-  .hamburger {
-    display: flex;
-  }
-
-  .app-header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 12px;
-    padding-top: env(safe-area-inset-top);
-    height: calc(48px + env(safe-area-inset-top));
-  }
-
-  .session-kicker,
-  .network-url {
-    display: none;
-  }
-
   .app-body {
     grid-template-columns: 1fr;
     position: relative;
-  }
-
-  .left-rail {
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: min(82vw, 300px);
-    transform: translateX(-100%);
-    transition: transform 0.2s ease;
-    z-index: 15;
-  }
-
-  .left-rail.open {
-    transform: translateX(0);
-    box-shadow: var(--shadow);
-  }
-
-  .rail-backdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    background: var(--backdrop);
-    z-index: 14;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.2s;
-  }
-
-  .left-rail.open ~ .rail-backdrop {
-    pointer-events: auto;
-    opacity: 1;
-  }
-
-  .center-column {
-    grid-column: 1;
-  }
-
-  .status-bar {
-    padding: 12px 16px 0;
-  }
-
-  .toast-container {
-    left: 16px;
-    right: 16px;
-    max-width: none;
   }
 }
 </style>
