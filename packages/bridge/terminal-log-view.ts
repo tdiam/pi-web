@@ -40,7 +40,7 @@ export function createTerminalLogView(
   const logs: LogEntry[] = [];
   let exitRequested = false;
 
-  const addLog = (message: string, type: LogEntry["type"] = "info"): void => {
+  const _addLog = (message: string, type: LogEntry["type"] = "info"): void => {
     logs.push({ timestamp: new Date(), message, type });
     if (logs.length > maxLines) {
       logs.shift();

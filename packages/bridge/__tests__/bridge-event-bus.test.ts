@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BridgeEventBus } from "../bridge-event-bus.js";
-import {
-  DEFAULT_BRIDGE_CONFIG,
-  type BridgeEvent,
-  type WsClient,
-} from "../types.js";
+import { DEFAULT_BRIDGE_CONFIG, type WsClient } from "../types.js";
 
 describe("BridgeEventBus", () => {
   const createClient = (id: string, seq: number): WsClient => ({

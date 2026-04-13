@@ -2,6 +2,7 @@ export interface BridgeExitKeybindings {
   matches?: (input: string, action: string) => boolean;
 }
 
+const ESCAPE_CHAR = String.fromCharCode(0x1b);
 const LOCK_MODIFIER_MASK = 64 + 128;
 const CTRL_MODIFIER = 4;
 const CTRL_C_CODEPOINT = 99;
@@ -17,21 +18,29 @@ function isCtrlCInput(input: string): boolean {
   }
 
   // Kitty keyboard protocol CSI-u: ESC [ <codepoint>[...];<modifier>[:event] u
-  const kittyMatch = input.match(
-    /^\x1b\[(\d+)(?::\d*)?(?::\d+)?(?:;(\d+))?(?::\d+)?u$/,
-  );
-  if (kittyMatch) {
-    const codepoint = Number(kittyMatch[1]);
-    const modifierValue = Number(kittyMatch[2] ?? "1");
-    return codepoint === CTRL_C_CODEPOINT && hasOnlyCtrlModifier(modifierValue);
+  if (input.startsWith(`${ESCAPE_CHAR}[`) && input.endsWith("u")) {
+    const kittyMatch = input
+      .slice(2)
+      .match(/^(\d+)(?::\d*)?(?::\d+)?(?:;(\d+))?(?::\d+)?u$/);
+    if (kittyMatch) {
+      const codepoint = Number(kittyMatch[1]);
+      const modifierValue = Number(kittyMatch[2] ?? "1");
+      return (
+        codepoint === CTRL_C_CODEPOINT && hasOnlyCtrlModifier(modifierValue)
+      );
+    }
   }
 
   // xterm modifyOtherKeys: ESC [ 27 ; <modifier> ; <codepoint> ~
-  const modifyOtherKeysMatch = input.match(/^\x1b\[27;(\d+);(\d+)~$/);
-  if (modifyOtherKeysMatch) {
-    const modifierValue = Number(modifyOtherKeysMatch[1]);
-    const codepoint = Number(modifyOtherKeysMatch[2]);
-    return codepoint === CTRL_C_CODEPOINT && hasOnlyCtrlModifier(modifierValue);
+  if (input.startsWith(`${ESCAPE_CHAR}[27;`) && input.endsWith("~")) {
+    const modifyOtherKeysMatch = input.slice(2).match(/^27;(\d+);(\d+)~$/);
+    if (modifyOtherKeysMatch) {
+      const modifierValue = Number(modifyOtherKeysMatch[1]);
+      const codepoint = Number(modifyOtherKeysMatch[2]);
+      return (
+        codepoint === CTRL_C_CODEPOINT && hasOnlyCtrlModifier(modifierValue)
+      );
+    }
   }
 
   return false;

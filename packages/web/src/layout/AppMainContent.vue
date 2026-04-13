@@ -42,7 +42,11 @@ defineExpose({ preserveTranscriptScroll });
     <CompatWarning :visible="compatWarningVisible" />
 
     <div v-if="Object.keys(statusEntries).length > 0" class="status-bar">
-      <span v-for="(text, key) in statusEntries" :key="key" class="status-entry">
+      <span
+        v-for="(text, key) in statusEntries"
+        :key="key"
+        class="status-entry"
+      >
         {{ text }}
       </span>
     </div>

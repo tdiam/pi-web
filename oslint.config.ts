@@ -1,5 +1,3 @@
-import {defineConfig } from "oxlint";
+import { defineConfig } from "oxlint";
 
-export default defineConfig({
-
-})
+export default defineConfig({});

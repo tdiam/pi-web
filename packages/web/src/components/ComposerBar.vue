@@ -397,7 +397,6 @@ resizeTextarea();
   cursor: not-allowed;
 }
 
-
 @media (max-width: 900px) {
   .composer-bar {
     position: sticky;
@@ -443,7 +442,6 @@ resizeTextarea();
     gap: 10px;
     padding-top: 8px;
   }
-
 }
 
 .sr-only {

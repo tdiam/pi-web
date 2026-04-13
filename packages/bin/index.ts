@@ -130,7 +130,7 @@ async function webBridgeHandler(
   }
 }
 
-export default function registerWebBridge(pi: any, state: any): void {
+export default function registerWebBridge(pi: any, _state: any): void {
   pi.registerCommand("web", {
     description: "Start web bridge server for browser-based interaction",
     handler: async (args: string, ctx: any) => {

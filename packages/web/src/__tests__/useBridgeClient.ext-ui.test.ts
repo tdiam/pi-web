@@ -557,7 +557,7 @@ describe("extension_ui_request handling", () => {
   });
 
   it("handles setTitle method by updating document.title", async () => {
-    const client = await importComposable();
+    await importComposable();
     const ws = getLastMockWs();
     simulateOpen(ws);
 

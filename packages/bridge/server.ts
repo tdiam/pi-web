@@ -188,7 +188,7 @@ export class BridgeServer {
     }
 
     // Close all WebSocket connections
-    for (const [clientId, adapter] of this.adapters) {
+    for (const [_clientId, adapter] of this.adapters) {
       adapter.dispose();
     }
     this.adapters.clear();
@@ -365,7 +365,7 @@ export class BridgeServer {
   /**
    * Handle WebSocket connection
    */
-  private handleWsConnection(ws: WebSocket, req: http.IncomingMessage): void {
+  private handleWsConnection(ws: WebSocket, _req: http.IncomingMessage): void {
     clientSeqCounter++;
 
     const client: WsClient = {
@@ -467,7 +467,6 @@ function parseCookies(header: string | undefined): Record<string, string> {
 function getPlaceholderHtml(host: string, port: number, token: string): string {
   const lanIps = getLanIps();
   const tokenParam = token ? `?token=${token}` : "";
-  const wsUrl = (ip: string) => `ws://${ip}:${port}/ws`;
   const httpUrl = (ip: string) => `http://${ip}:${port}${tokenParam}`;
   const lanUrlLines =
     lanIps.length > 0

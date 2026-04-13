@@ -807,7 +807,6 @@ export class WsRpcAdapter {
       // =================================================================
 
       case "get_state": {
-        const usage = ctx.getContextUsage();
         const state: RpcSessionState = {
           model: ctx.model,
           thinkingLevel: pi.getThinkingLevel(),

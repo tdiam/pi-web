@@ -16,7 +16,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div v-if="connectionError || notifications.length > 0" class="toast-container">
+  <div
+    v-if="connectionError || notifications.length > 0"
+    class="toast-container"
+  >
     <div v-if="connectionError" class="toast-item error" role="alert">
       <div class="toast-copy">
         <span class="toast-type">error</span>

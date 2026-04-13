@@ -1,11 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBridgeTerminalView } from "../terminal-log-view.js";
-import {
-  DEFAULT_BRIDGE_CONFIG,
-  type BridgeEvent,
-  type BridgeState,
-  type WsClient,
-} from "../types.js";
+import { DEFAULT_BRIDGE_CONFIG, type BridgeEvent } from "../types.js";
 
 describe("createBridgeTerminalView", () => {
   it("requests exit when Ctrl+C input is received", () => {
