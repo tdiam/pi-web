@@ -332,15 +332,14 @@ function handleResponse(payload: RpcResponse) {
             }
           | undefined;
         if (data && Array.isArray(data.messages)) {
-          // Force a completely new array reference for Vue reactivity.
           rawTranscript.value = [...data.messages];
           if (data.sessionPath) {
             activeTreeSessionPath.value = data.sessionPath;
+            liveSessionPath.value = data.sessionPath;
           }
           if (Array.isArray(data.treeEntries)) {
             treeEntries.value = data.treeEntries;
           }
-          // Update the displayed active session metadata in the UI.
           if (data.sessionId) {
             sessionState.value = {
               ...sessionState.value,
@@ -349,7 +348,9 @@ function handleResponse(payload: RpcResponse) {
               sessionFile: data.sessionPath ?? sessionState.value?.sessionFile,
             } as RpcSessionState;
           }
-          // Fetch stats for the switched session
+          sendCommand({
+            type: "get_state",
+          }).catch(() => {});
           sendCommand({
             type: "get_session_stats",
             sessionPath: data.sessionPath,

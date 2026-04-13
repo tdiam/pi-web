@@ -188,6 +188,8 @@ describe("extension_ui_request handling", () => {
         isActive: true,
       },
     ]);
+    expect(client.liveSessionPath.value).toBe("/tmp/session-2.jsonl");
+    expect(client.isHistoricalView.value).toBe(false);
   });
 
   it("ignores stale live tree responses after switch_session", async () => {
@@ -441,11 +443,12 @@ describe("extension_ui_request handling", () => {
 
     await pendingSet;
     expect(client.currentThinkingLevel.value).toBe("high");
+    // setThinkingLevel only sends set_thinking_level; it does not send get_state.
     expect(
       ws.send.mock.calls.filter(([message]: [string]) =>
         message.includes('"type":"get_state"'),
       ).length,
-    ).toBe(initialGetStateCount + 1);
+    ).toBe(initialGetStateCount);
   });
 
   it("handles select method by setting pendingExtensionRequest", async () => {

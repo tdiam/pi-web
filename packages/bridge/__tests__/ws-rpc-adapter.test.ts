@@ -3,6 +3,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
+
+const { createAgentSessionMock } = vi.hoisted(() => ({
+  createAgentSessionMock: vi.fn(),
+}));
+
+vi.mock("@mariozechner/pi-coding-agent", async () => {
+  const actual = await vi.importActual<typeof import("@mariozechner/pi-coding-agent")>(
+    "@mariozechner/pi-coding-agent",
+  );
+
+  return {
+    ...actual,
+    createAgentSession: createAgentSessionMock,
+  };
+});
 import type { WebSocket } from "ws";
 import { BridgeEventBus } from "../bridge-event-bus.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
@@ -88,6 +103,7 @@ describe("WsRpcAdapter", () => {
   let client: WsClient;
 
   beforeEach(() => {
+    createAgentSessionMock.mockReset();
     ws = createMockWebSocket();
     context = createMockContext();
     eventBus = new BridgeEventBus(DEFAULT_BRIDGE_CONFIG);
@@ -132,6 +148,92 @@ describe("WsRpcAdapter", () => {
         client,
         commandType: "prompt",
         correlationId: "cmd-1",
+      });
+    });
+
+    it("continues the selected session instead of using pi.sendUserMessage", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-session-"));
+      const sessionManager = SessionManager.create(tmpDir, tmpDir);
+      sessionManager.appendMessage({
+        role: "user",
+        content: [{ type: "text", text: "Selected session" }],
+        timestamp: Date.now(),
+      });
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("session file was not created");
+      }
+
+      // SessionManager.create doesn't immediately flush to disk. Force persist
+      // by re-opening from the in-memory entries.
+      const rawEntries = sessionManager.getEntries();
+      const header = {
+        type: "session",
+        version: 3,
+        id: sessionManager.getSessionId(),
+        timestamp: new Date().toISOString(),
+        cwd: tmpDir,
+      };
+      const lines = [JSON.stringify(header)];
+      for (const entry of rawEntries) {
+        lines.push(JSON.stringify(entry));
+      }
+      fs.writeFileSync(sessionFile, lines.join("\n"));
+
+      const promptSpy = vi.fn().mockResolvedValue(undefined);
+      const subscribeSpy = vi.fn().mockReturnValue(() => {});
+      createAgentSessionMock.mockResolvedValue({
+        session: {
+          sessionFile,
+          sessionId: sessionManager.getSessionId(),
+          isStreaming: false,
+          bindExtensions: vi.fn().mockResolvedValue(undefined),
+          subscribe: subscribeSpy,
+          prompt: promptSpy,
+          sessionManager,
+        },
+      });
+
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({
+            type: "command",
+            payload: {
+              id: "switch-1",
+              type: "switch_session",
+              sessionPath: sessionFile,
+            },
+          }),
+        ),
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({
+            type: "command",
+            payload: {
+              id: "prompt-1",
+              type: "prompt",
+              message: "Continue here",
+            },
+          }),
+        ),
+      );
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(context.pi.sendUserMessage).not.toHaveBeenCalled();
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+      expect(promptSpy).toHaveBeenCalledWith("Continue here", {
+        source: "rpc",
       });
     });
 
