@@ -49,6 +49,24 @@ interface UnknownBlock {
   details?: unknown;
 }
 
+export function isErrorMessage(msg: TranscriptEntryLike): boolean {
+  if (msg.role !== "assistant") return false;
+  const stopReason = (msg as Record<string, unknown>).stopReason as
+    | string
+    | undefined;
+  return stopReason === "error" || stopReason === "aborted";
+}
+
+export function errorMessageText(msg: TranscriptEntryLike): string {
+  return ((msg as Record<string, unknown>).errorMessage as string) ?? "";
+}
+
+export function isAbortedMessage(msg: TranscriptEntryLike): boolean {
+  return (
+    (msg as Record<string, unknown>).stopReason === "aborted"
+  );
+}
+
 export function isToolResultMessage(msg: TranscriptEntryLike): boolean {
   return msg.role === "toolResult" || msg.role === "tool";
 }

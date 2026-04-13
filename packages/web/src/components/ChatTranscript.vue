@@ -4,6 +4,9 @@ import { ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import {
   contentBlocks,
+  isAbortedMessage,
+  isErrorMessage,
+  errorMessageText,
   isToolResultMessage,
   messageContent,
 } from "../utils/transcript";
@@ -172,6 +175,15 @@ defineExpose({ preserveScroll });
               class="tool-result-card-details"
               >{{ messageContent(msg) }}</pre
             >
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="isErrorMessage(msg)" class="message-row" :class="roleClass(msg.role)">
+        <div class="message-content" :class="roleClass(msg.role)">
+          <div class="error-block" :class="{ aborted: isAbortedMessage(msg) }">
+            <span class="error-label">{{ isAbortedMessage(msg) ? "Cancelled" : "Error" }}</span>
+            <span v-if="errorMessageText(msg)" class="error-message">{{ errorMessageText(msg) }}</span>
           </div>
         </div>
       </div>
@@ -373,6 +385,41 @@ defineExpose({ preserveScroll });
   max-height: 400px;
   overflow-y: auto;
   word-break: break-word;
+}
+
+.error-block {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-left: 2px solid #e05050;
+  border-radius: 6px;
+  background: color-mix(in srgb, #e05050 6%, transparent);
+  font-size: 0.8rem;
+}
+
+.error-block.aborted {
+  border-left-color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 6%, transparent);
+}
+
+.error-label {
+  font-weight: 600;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #e05050;
+  flex-shrink: 0;
+}
+
+.error-block.aborted .error-label {
+  color: var(--text-muted);
+}
+
+.error-message {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
 }
 
 .tool-row {
