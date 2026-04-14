@@ -1,7 +1,7 @@
+import { spawnSync } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
 import {
   SessionManager,
   createAgentSession,
@@ -11,6 +11,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { WebSocket } from "ws";
 import type { BridgeEventBus } from "./bridge-event-bus.js";
+import { getPluginState, setPluginState } from "./plugin-state.js";
 import type {
   BridgeConfig,
   BridgeEvent,
@@ -28,7 +29,6 @@ import type {
   ServerMessage,
   WsClient,
 } from "./types.js";
-import { getPluginState, setPluginState } from "./plugin-state.js";
 
 /**
  * Extended context available in Pi extension API
@@ -159,7 +159,9 @@ function normalizeWorkspacePath(filePath: string): string {
   return filePath.split(path.sep).join("/");
 }
 
-function collectWorkspaceEntries(filePaths: readonly string[]): RpcWorkspaceEntry[] {
+function collectWorkspaceEntries(
+  filePaths: readonly string[],
+): RpcWorkspaceEntry[] {
   const files = new Set<string>();
   const directories = new Set<string>();
 
@@ -532,7 +534,9 @@ function findLatestModelInfo(
   return null;
 }
 
-function buildStateFromStoredSession(sessionManager: SessionManager): RpcSessionState {
+function buildStateFromStoredSession(
+  sessionManager: SessionManager,
+): RpcSessionState {
   const branch = sessionManager.getBranch();
   const context = sessionManager.buildSessionContext();
   const model = findLatestModelInfo(branch);
@@ -555,7 +559,9 @@ function buildStateFromStoredSession(sessionManager: SessionManager): RpcSession
   };
 }
 
-function toClientEventPayload(event: AgentSessionEvent): Record<string, unknown> {
+function toClientEventPayload(
+  event: AgentSessionEvent,
+): Record<string, unknown> {
   switch (event.type) {
     case "message_start":
       return { type: event.type, ...event.message };
@@ -988,7 +994,9 @@ export class WsRpcAdapter {
   private buildActiveState(): RpcSessionState {
     if (this.selectedSession) {
       return {
-        model: this.selectedSession.model ?? findLatestModelInfo(this.selectedSession.sessionManager.getBranch()),
+        model:
+          this.selectedSession.model ??
+          findLatestModelInfo(this.selectedSession.sessionManager.getBranch()),
         thinkingLevel: this.selectedSession.thinkingLevel,
         isStreaming: this.selectedSession.isStreaming,
         isCompacting: this.selectedSession.isCompacting,
@@ -1003,7 +1011,8 @@ export class WsRpcAdapter {
             this.selectedSession.sessionFile,
           ),
         autoCompactionEnabled: this.selectedSession.autoCompactionEnabled,
-        messageCount: this.selectedSession.sessionManager.getEntries()?.length ?? 0,
+        messageCount:
+          this.selectedSession.sessionManager.getEntries()?.length ?? 0,
         pendingMessageCount: this.selectedSession.pendingMessageCount,
       };
     }
@@ -1569,7 +1578,11 @@ export class WsRpcAdapter {
         }
 
         // If targeting a stored session different from the live session, read from disk.
-        if (targetPath && targetPath !== liveSessionPath && fs.existsSync(targetPath)) {
+        if (
+          targetPath &&
+          targetPath !== liveSessionPath &&
+          fs.existsSync(targetPath)
+        ) {
           try {
             const diskSession = openSessionManager(targetPath);
             const branch = diskSession.getBranch();
@@ -1837,7 +1850,7 @@ export class WsRpcAdapter {
         const entry = forkedSm.getEntry(command.entryId);
         const text =
           entry && "message" in entry
-            ? (entry.message as { content?: string }).content ?? ""
+            ? ((entry.message as { content?: string }).content ?? "")
             : "";
 
         return {
@@ -1948,7 +1961,10 @@ export class WsRpcAdapter {
           };
         }
 
-        if (this.selectedSessionPath && fs.existsSync(this.selectedSessionPath)) {
+        if (
+          this.selectedSessionPath &&
+          fs.existsSync(this.selectedSessionPath)
+        ) {
           const sessionManager = openSessionManager(this.selectedSessionPath);
           return {
             id: correlationId,
@@ -1956,7 +1972,9 @@ export class WsRpcAdapter {
             command: "get_messages",
             success: true,
             data: {
-              messages: flattenMessagesForTranscript(sessionManager.getBranch()),
+              messages: flattenMessagesForTranscript(
+                sessionManager.getBranch(),
+              ),
             },
           };
         }

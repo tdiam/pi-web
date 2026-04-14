@@ -128,8 +128,6 @@ watch(
   },
 );
 
-
-
 defineExpose({ preserveScroll });
 </script>
 
@@ -232,7 +230,10 @@ defineExpose({ preserveScroll });
               @toggle="toggleToolBlock(msg.id, bIdx)"
             />
 
-            <figure v-else-if="block.kind === 'image'" class="message-image-block">
+            <figure
+              v-else-if="block.kind === 'image'"
+              class="message-image-block"
+            >
               <img
                 class="message-image"
                 :src="block.src"

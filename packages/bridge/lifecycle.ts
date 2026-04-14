@@ -7,14 +7,14 @@
  * - stop() that closes everything and invokes done() callback
  */
 
+import { BridgeEventBus } from "./bridge-event-bus.js";
+import { BridgeServer } from "./server.js";
 import type {
   BridgeConfig,
   BridgeEvent,
   BridgeState,
   WsClient,
 } from "./types.js";
-import { BridgeEventBus } from "./bridge-event-bus.js";
-import { BridgeServer } from "./server.js";
 import type { WsRpcAdapterContext } from "./ws-rpc-adapter.js";
 
 /**
@@ -150,7 +150,6 @@ export async function startBridge(
       }
       return undefined;
     },
-
 
     getClients() {
       return server.getClients();

@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useBridgeClient } from "./composables/useBridgeClient";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
 import ReconnectBanner from "./components/ReconnectBanner.vue";
 import TreePanel from "./components/TreePanel.vue";
+import { useBridgeClient } from "./composables/useBridgeClient";
 import AppHeader from "./layout/AppHeader.vue";
 import AppMainContent from "./layout/AppMainContent.vue";
 import AppNotifications from "./layout/AppNotifications.vue";
 import AppSidebar from "./layout/AppSidebar.vue";
-import { readInitialDebugMode } from "./utils/debugMode";
 import type { RpcImageContent } from "./shared-types";
+import { readInitialDebugMode } from "./utils/debugMode";
 import type { RpcModelInfo } from "./utils/models";
 
 type ThemeMode = "dark" | "light";

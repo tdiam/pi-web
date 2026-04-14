@@ -5,11 +5,11 @@
  * connects a WS client, sends commands, and verifies responses.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { WebSocket } from "ws";
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
@@ -17,10 +17,9 @@ const { createAgentSessionMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@mariozechner/pi-coding-agent", async () => {
-  const actual =
-    await vi.importActual<typeof import("@mariozechner/pi-coding-agent")>(
-      "@mariozechner/pi-coding-agent",
-    );
+  const actual = await vi.importActual<
+    typeof import("@mariozechner/pi-coding-agent")
+  >("@mariozechner/pi-coding-agent");
   return {
     ...actual,
     createAgentSession: createAgentSessionMock,
@@ -364,7 +363,9 @@ describe("Bridge Integration", () => {
       "should handle prompt command via auto-created session",
       async () => {
         // Set up a real temp directory so SessionManager.create works
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-int-prompt-"));
+        const tmpDir = fs.mkdtempSync(
+          path.join(os.tmpdir(), "pi-web-int-prompt-"),
+        );
         const sessionFile = path.join(tmpDir, "session.jsonl");
         fs.writeFileSync(
           sessionFile,
@@ -376,7 +377,11 @@ describe("Bridge Integration", () => {
             cwd: tmpDir,
           }),
         );
-        (mockContext.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(sessionFile);
+        (
+          mockContext.ctx.sessionManager.getSessionFile as ReturnType<
+            typeof vi.fn
+          >
+        ).mockReturnValue(sessionFile);
         (mockContext.ctx as unknown as Record<string, unknown>).cwd = tmpDir;
 
         // Mock createAgentSession for the auto-created session
@@ -456,7 +461,9 @@ describe("Bridge Integration", () => {
         expect(response.data).toMatchObject({
           cancelled: false,
         });
-        expect((response.data as Record<string, unknown>).sessionPath).toBeDefined();
+        expect(
+          (response.data as Record<string, unknown>).sessionPath,
+        ).toBeDefined();
 
         // sendUserMessage should NOT be called (that would trigger TUI switch)
         expect(mockContext.pi.sendUserMessage).not.toHaveBeenCalled();

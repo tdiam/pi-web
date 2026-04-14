@@ -84,13 +84,25 @@ function parsePathPrefix(prefix: string): {
   isQuotedPrefix: boolean;
 } {
   if (prefix.startsWith('@"')) {
-    return { rawPrefix: prefix.slice(2), isAtPrefix: true, isQuotedPrefix: true };
+    return {
+      rawPrefix: prefix.slice(2),
+      isAtPrefix: true,
+      isQuotedPrefix: true,
+    };
   }
   if (prefix.startsWith('"')) {
-    return { rawPrefix: prefix.slice(1), isAtPrefix: false, isQuotedPrefix: true };
+    return {
+      rawPrefix: prefix.slice(1),
+      isAtPrefix: false,
+      isQuotedPrefix: true,
+    };
   }
   if (prefix.startsWith("@")) {
-    return { rawPrefix: prefix.slice(1), isAtPrefix: true, isQuotedPrefix: false };
+    return {
+      rawPrefix: prefix.slice(1),
+      isAtPrefix: true,
+      isQuotedPrefix: false,
+    };
   }
   return { rawPrefix: prefix, isAtPrefix: false, isQuotedPrefix: false };
 }
@@ -170,9 +182,9 @@ function getBaseName(path: string): string {
   return slashIndex === -1 ? normalized : normalized.slice(slashIndex + 1);
 }
 
-function getScopedQuery(rawQuery: string):
-  | { displayBase: string; query: string }
-  | null {
+function getScopedQuery(
+  rawQuery: string,
+): { displayBase: string; query: string } | null {
   const slashIndex = rawQuery.lastIndexOf("/");
   if (slashIndex === -1) return null;
 
@@ -182,9 +194,13 @@ function getScopedQuery(rawQuery: string):
   };
 }
 
-function scoreEmptyScopedSuggestion(path: string, kind: RpcWorkspaceEntry["kind"]): number {
+function scoreEmptyScopedSuggestion(
+  path: string,
+  kind: RpcWorkspaceEntry["kind"],
+): number {
   const segments = path.split("/").filter(Boolean).length;
-  const immediateChildBonus = segments <= 1 ? 80 : Math.max(0, 48 - segments * 6);
+  const immediateChildBonus =
+    segments <= 1 ? 80 : Math.max(0, 48 - segments * 6);
   const kindBonus = kind === "directory" ? 10 : 0;
   return immediateChildBonus + kindBonus;
 }

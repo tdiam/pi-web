@@ -6,14 +6,14 @@
  * browser clients to interact with Pi via WebSocket RPC.
  */
 
-import { startBridge, type BridgeController } from "../bridge/lifecycle.js";
-import { isBridgeExitInput } from "../bridge/exit-input.js";
-import { createBridgeTerminalView } from "../bridge/terminal-log-view.js";
-import type { WsRpcAdapterContext } from "../bridge/ws-rpc-adapter.js";
-import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../bridge/types.js";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { isBridgeExitInput } from "../bridge/exit-input.js";
+import { startBridge, type BridgeController } from "../bridge/lifecycle.js";
+import { createBridgeTerminalView } from "../bridge/terminal-log-view.js";
+import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../bridge/types.js";
+import type { WsRpcAdapterContext } from "../bridge/ws-rpc-adapter.js";
 
 async function webBridgeHandler(
   args: string,

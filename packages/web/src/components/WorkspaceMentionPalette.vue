@@ -2,12 +2,14 @@
 import { computed, nextTick, ref, watch } from "vue";
 import type { WorkspaceMentionSuggestion } from "../utils/workspaceMentions";
 
-const props = defineProps<{
-  items: readonly WorkspaceMentionSuggestion[];
-  loading: boolean;
-} & {
-  emptyText?: string;
-}>();
+const props = defineProps<
+  {
+    items: readonly WorkspaceMentionSuggestion[];
+    loading: boolean;
+  } & {
+    emptyText?: string;
+  }
+>();
 
 const emit = defineEmits<{
   select: [item: WorkspaceMentionSuggestion];

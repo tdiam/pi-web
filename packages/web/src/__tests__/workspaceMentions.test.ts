@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
+import type { RpcWorkspaceEntry } from "../shared-types";
 import {
   applyWorkspaceMentionCompletion,
   getWorkspaceMentionContext,
   getWorkspaceMentionSuggestions,
 } from "../utils/workspaceMentions";
-import type { RpcWorkspaceEntry } from "../shared-types";
 
 const entries: RpcWorkspaceEntry[] = [
   { path: "README.md", kind: "file" },

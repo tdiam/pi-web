@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import type { ToolContentBlock } from "../utils/transcript";
 import { buildToolCardModel } from "../utils/toolBlock";
+import type { ToolContentBlock } from "../utils/transcript";
 import DiffView from "./DiffView.vue";
 import HighlightedCode from "./HighlightedCode.vue";
 
@@ -54,7 +54,6 @@ const editDiff = computed(() => {
             <span class="tool-card-stat tool-card-stat-removed"
               >-{{ model.diffStats.removed }}</span
             >
-
           </template>
           <span v-else-if="model.meta" class="tool-card-meta">{{
             model.meta

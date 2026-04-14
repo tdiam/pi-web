@@ -4,14 +4,14 @@
   "description": "Pi extension: WebSocket bridge for browser-based interaction",
   "type": "module",
   "scripts": {
-    "check": "tsgo -p tsconfig.json",
     "build:web": "vite build packages/web/",
+    "check": "tsgo -p tsconfig.json",
     "dev:web": "vite packages/web/",
-    "test": "vitest run --reporter=verbose",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
+    "test": "vitest run --reporter=verbose",
     "test:watch": "vitest --reporter=verbose"
   },
   "dependencies": {

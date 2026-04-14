@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ListTree, RefreshCw, Plus } from "lucide-vue-next";
-import type { SessionEntry } from "../composables/useBridgeClient";
 import SessionRail from "../components/SessionRail.vue";
+import type { SessionEntry } from "../composables/useBridgeClient";
 
 defineProps<{
   sessions: readonly SessionEntry[];

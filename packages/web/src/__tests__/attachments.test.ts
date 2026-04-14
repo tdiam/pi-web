@@ -8,9 +8,13 @@ import {
 
 describe("attachments helpers", () => {
   it("creates composer attachments with inline previews", async () => {
-    const file = new File([Uint8Array.from([104, 101, 108, 108, 111])], "shot.png", {
-      type: "image/png",
-    });
+    const file = new File(
+      [Uint8Array.from([104, 101, 108, 108, 111])],
+      "shot.png",
+      {
+        type: "image/png",
+      },
+    );
 
     const { attachments, rejectedNames } = await createComposerAttachments([
       file,

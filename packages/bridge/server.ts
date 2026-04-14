@@ -7,13 +7,13 @@
  * - Client tracking with monotonic sequence numbers
  */
 
-import * as http from "node:http";
 import * as fs from "node:fs";
+import * as http from "node:http";
 import * as path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
+import { BridgeEventBus } from "./bridge-event-bus.js";
 import { getLanIps, isTailscaleIp } from "./network.js";
 import type { BridgeConfig, BridgeEvent, WsClient } from "./types.js";
-import { BridgeEventBus } from "./bridge-event-bus.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "./ws-rpc-adapter.js";
 
 /**

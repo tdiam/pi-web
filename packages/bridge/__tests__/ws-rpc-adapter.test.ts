@@ -1,17 +1,17 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
   createAgentSessionMock: vi.fn(),
 }));
 
 vi.mock("@mariozechner/pi-coding-agent", async () => {
-  const actual = await vi.importActual<typeof import("@mariozechner/pi-coding-agent")>(
-    "@mariozechner/pi-coding-agent",
-  );
+  const actual = await vi.importActual<
+    typeof import("@mariozechner/pi-coding-agent")
+  >("@mariozechner/pi-coding-agent");
 
   return {
     ...actual,
@@ -20,13 +20,13 @@ vi.mock("@mariozechner/pi-coding-agent", async () => {
 });
 import type { WebSocket } from "ws";
 import { BridgeEventBus } from "../bridge-event-bus.js";
-import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
 import {
   DEFAULT_BRIDGE_CONFIG,
   type RpcCommand,
   type RpcExtensionUIResponse,
   type WsClient,
 } from "../types.js";
+import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
 
 // Mock WebSocket
 const createMockWebSocket = (): WebSocket => {
@@ -138,7 +138,9 @@ describe("WsRpcAdapter", () => {
           cwd: tmpDir,
         }),
       );
-      (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(sessionFile);
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(sessionFile);
 
       const promptSpy = vi.fn().mockResolvedValue(undefined);
       createAgentSessionMock.mockResolvedValue({
@@ -205,7 +207,13 @@ describe("WsRpcAdapter", () => {
         timestamp: new Date().toISOString(),
         cwd: tmpDir,
       };
-      fs.writeFileSync(sessionFile, [JSON.stringify(header), ...rawEntries.map((e) => JSON.stringify(e))].join("\n"));
+      fs.writeFileSync(
+        sessionFile,
+        [
+          JSON.stringify(header),
+          ...rawEntries.map((e) => JSON.stringify(e)),
+        ].join("\n"),
+      );
 
       const promptSpy = vi.fn().mockResolvedValue(undefined);
       createAgentSessionMock.mockResolvedValue({
@@ -221,12 +229,20 @@ describe("WsRpcAdapter", () => {
       });
 
       // Switch to a session first
-      (ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
         "message",
-        Buffer.from(JSON.stringify({
-          type: "command",
-          payload: { id: "switch-1", type: "switch_session", sessionPath: sessionFile },
-        })),
+        Buffer.from(
+          JSON.stringify({
+            type: "command",
+            payload: {
+              id: "switch-1",
+              type: "switch_session",
+              sessionPath: sessionFile,
+            },
+          }),
+        ),
       );
       await new Promise((r) => setTimeout(r, 10));
 
@@ -243,7 +259,9 @@ describe("WsRpcAdapter", () => {
           },
         ],
       };
-      (ws as unknown as { trigger: (event: string, data: Buffer) => void }).trigger(
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
         "message",
         Buffer.from(JSON.stringify({ type: "command", payload: command })),
       );
@@ -654,7 +672,9 @@ describe("WsRpcAdapter", () => {
           cwd: tmpDir,
         }),
       );
-      (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(sessionFile);
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(sessionFile);
 
       createAgentSessionMock.mockRejectedValue(new Error("Dispatch failed"));
 
@@ -1491,7 +1511,9 @@ describe("WsRpcAdapter", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-test-"));
       const sm = SessionManager.create(tmpDir, tmpDir);
       const existingFile = sm.getSessionFile()!;
-      (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(existingFile);
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(existingFile);
 
       const command: RpcCommand = { id: "cmd-1", type: "new_session" };
       (
@@ -1536,7 +1558,9 @@ describe("WsRpcAdapter", () => {
       } as any);
       const leafId = sm.getLeafId() as string;
       const existingFile = sm.getSessionFile() as string;
-      (context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>).mockReturnValue(existingFile);
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(existingFile);
 
       const command: RpcCommand = {
         id: "cmd-1",

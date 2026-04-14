@@ -61,9 +61,9 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isDisabled = computed(() => props.connectionStatus !== "connected");
 const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
-const mentionPaletteRef = ref<InstanceType<typeof WorkspaceMentionPalette> | null>(
-  null,
-);
+const mentionPaletteRef = ref<InstanceType<
+  typeof WorkspaceMentionPalette
+> | null>(null);
 const attachments = ref<ComposerAttachment[]>([]);
 const isDragActive = ref(false);
 const attachmentNotice = ref<string | null>(null);
@@ -152,9 +152,7 @@ function normalizeSubmittedText(value: string): string {
 }
 
 function getMentionKey(
-  mention:
-    | ReturnType<typeof getWorkspaceMentionContext>
-    | null,
+  mention: ReturnType<typeof getWorkspaceMentionContext> | null,
 ): string | null {
   if (!mention) return null;
   return `${mention.start}:${mention.prefix}`;
@@ -233,7 +231,9 @@ async function addAttachmentsFromFiles(
   }
 
   if (rejectedNames.length > 0) {
-    setAttachmentNotice(`Skipped unsupported files: ${rejectedNames.join(", ")}`);
+    setAttachmentNotice(
+      `Skipped unsupported files: ${rejectedNames.join(", ")}`,
+    );
   }
 }
 
@@ -578,7 +578,11 @@ resizeTextarea();
               :aria-label="showStopButton ? 'Stop response' : 'Send message'"
               @click="handlePrimaryAction"
             >
-              <Square v-if="showStopButton" class="send-icon stop-icon" aria-hidden="true" />
+              <Square
+                v-if="showStopButton"
+                class="send-icon stop-icon"
+                aria-hidden="true"
+              />
               <CornerDownLeft v-else class="send-icon" aria-hidden="true" />
             </button>
           </div>
@@ -815,7 +819,11 @@ resizeTextarea();
 
 .send-btn.stop:hover:not(:disabled) {
   background: color-mix(in srgb, var(--error-bg) 92%, var(--button-hover));
-  border-color: color-mix(in srgb, var(--error-border) 100%, var(--border-strong));
+  border-color: color-mix(
+    in srgb,
+    var(--error-border) 100%,
+    var(--border-strong)
+  );
 }
 
 .send-btn:disabled {

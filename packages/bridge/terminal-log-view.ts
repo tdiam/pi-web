@@ -6,13 +6,13 @@
  * Read-only: handleInput handles only bridge-exit shortcuts.
  */
 
+import { getLanIps, isTailscaleIp } from "./network.js";
 import type {
   BridgeConfig,
   BridgeEvent,
   BridgeState,
   WsClient,
 } from "./types.js";
-import { getLanIps, isTailscaleIp } from "./network.js";
 
 interface LogEntry {
   timestamp: Date;
@@ -303,7 +303,10 @@ export function createBridgeTerminalView(
                 })
                 .join(", ")})`
             : "";
-        addLog(`Server started on ${event.host}:${event.port}${lanInfo}`, "info");
+        addLog(
+          `Server started on ${event.host}:${event.port}${lanInfo}`,
+          "info",
+        );
         break;
       }
       case "server_stop":

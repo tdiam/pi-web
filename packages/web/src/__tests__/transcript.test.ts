@@ -169,7 +169,8 @@ describe("normalizeTranscript", () => {
           {
             type: "toolCall",
             name: "edit",
-            arguments: '{"path":"src/app.ts","edits":[{"oldText":"a","newText":"b"}]}',
+            arguments:
+              '{"path":"src/app.ts","edits":[{"oldText":"a","newText":"b"}]}',
           },
         ],
       },

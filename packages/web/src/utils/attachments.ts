@@ -37,9 +37,9 @@ export function formatAttachmentSize(size: number): string {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function getSupportedImageMimeType(file: Pick<File, "name" | "type">):
-  | string
-  | null {
+export function getSupportedImageMimeType(
+  file: Pick<File, "name" | "type">,
+): string | null {
   const mimeType = file.type.trim().toLowerCase();
   if (SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     return mimeType;

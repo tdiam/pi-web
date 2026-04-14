@@ -526,7 +526,9 @@ function handleResponse(payload: RpcResponse) {
         const data = payload.data as
           | { entries?: RpcWorkspaceEntry[] }
           | undefined;
-        workspaceEntries.value = Array.isArray(data?.entries) ? data.entries : [];
+        workspaceEntries.value = Array.isArray(data?.entries)
+          ? data.entries
+          : [];
         workspaceEntriesLoaded.value = true;
         workspaceEntriesLoading.value = false;
         break;
