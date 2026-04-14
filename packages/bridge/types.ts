@@ -422,7 +422,7 @@ export type RpcExtensionUIResponse =
 export interface BridgeConfig {
   /** Host to bind the HTTP/WebSocket server to. Default: "localhost" */
   readonly host: string;
-  /** Preferred port; 0 means OS-assigned. Default: 0 */
+  /** Preferred port; 0 means OS-assigned. Default: 8080 */
   readonly port: number;
   /** Upper bound for port-range fallback when the preferred port is in use. Default: 0 (no fallback) */
   readonly portMax: number;
@@ -437,7 +437,7 @@ export interface BridgeConfig {
 /** Sensible defaults for bridge configuration. */
 export const DEFAULT_BRIDGE_CONFIG: BridgeConfig = {
   host: "0.0.0.0",
-  port: 0,
+  port: 8080,
   portMax: 0,
   uiRequestTimeout: 60_000,
   clientBufferSize: 256,

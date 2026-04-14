@@ -8,7 +8,7 @@ Pi Web exposes a live Pi session through a browser UI. Run `/web` inside Pi, ope
 - Keep the browser connected to the same session state, transcript, model selection, and slash commands
 - Support session switching, tree navigation, extension dialogs, notifications, and reconnect flow
 - Expose LAN and Tailscale-friendly URLs for continuing work from another device
-- Protect access with an ephemeral per-run token that is required for both HTTP and WebSocket traffic
+- Reuse a fixed default port so the browser URL stays stable across `/web` runs
 
 ## Current Capabilities
 
@@ -41,13 +41,13 @@ Then start Pi in this project and run:
 /web
 ```
 
-Pi Web starts an HTTP server on an available port and prints a URL similar to:
+Pi Web starts an HTTP server on port `8080` by default and prints a URL like:
 
 ```text
-http://localhost:51327?token=2d8f3f0a...
+http://localhost:8080
 ```
 
-Open that URL in a browser. On first load, the server validates the token and stores it in an HttpOnly cookie so subsequent requests do not need the query parameter.
+Open that URL in a browser.
 
 Press `Ctrl+C` in the terminal to stop the bridge and return to the normal Pi TUI.
 
@@ -58,13 +58,13 @@ Pi Web reads its runtime settings from environment variables before the extensio
 | Variable         | Default   | Description                                                   |
 | ---------------- | --------- | ------------------------------------------------------------- |
 | `PI_BRIDGE_HOST` | `0.0.0.0` | Host/interface to bind the HTTP and WebSocket server to       |
-| `PI_BRIDGE_PORT` | `0`       | Preferred port. `0` means let the OS choose an available port |
+| `PI_BRIDGE_PORT` | `8080`    | Port to bind. Set `0` only if you explicitly want a random port |
 
 Notes:
 
 - Binding to `0.0.0.0` allows access from other devices on the same network.
 - The terminal log view also prints detected LAN addresses, including Tailscale IPs when available.
-- Authentication still depends on the generated token, even when the bridge is reachable over the network.
+- There is no bridge token anymore. Any client that can reach the bridge port can connect.
 
 ## Development
 
@@ -81,7 +81,7 @@ npm run dev:web     # run the Vite dev server for the web UI
 ### Typical Local Workflow
 
 1. Run `npm run dev:web` while working on the browser UI.
-2. Start Pi with `PI_BRIDGE_PORT=8080` so the Vite `/ws` proxy has a stable bridge target.
+2. Start Pi. The bridge uses port `8080` by default, which matches the Vite `/ws` proxy target.
 3. Run `/web` in Pi.
 4. Open the Vite URL for fast frontend iteration.
 
@@ -90,14 +90,14 @@ npm run dev:web     # run the Vite dev server for the web UI
 Pi Web is split into three parts:
 
 - `packages/bin/` registers the `/web` command and manages the Pi-side lifecycle
-- `packages/bridge/` implements the HTTP server, WebSocket RPC bridge, auth, event fan-out, and terminal log view
+- `packages/bridge/` implements the HTTP server, WebSocket RPC bridge, event fan-out, and terminal log view
 - `packages/web/` contains the Vue client that talks to the bridge over `/ws`
 
 At runtime:
 
 1. `/web` starts the bridge server inside the Pi process.
 2. The server serves static assets from `web-dist/` when available.
-3. Browser clients connect to `/ws` using the same tokenized bridge URL.
+3. Browser clients connect to `/ws` on the same bridge origin.
 4. The bridge maps WebSocket RPC messages onto Pi's extension APIs and forwards events back to the browser.
 
 ## Project Structure
@@ -111,7 +111,7 @@ packages/
     bridge-event-bus.ts   # event fan-out and buffering
     lifecycle.ts          # startup, shutdown, and SIGINT handling
     network.ts            # LAN and Tailscale address detection
-    server.ts             # HTTP server, auth, and WebSocket upgrades
+    server.ts             # HTTP server and WebSocket upgrades
     terminal-log-view.ts  # read-only terminal status view
     ws-rpc-adapter.ts     # bridge between WebSocket RPC and Pi APIs
   web/

@@ -263,8 +263,7 @@ export function createBridgeTerminalView(
   subscribe: (handler: (event: BridgeEvent) => void) => () => void,
   getState: () => BridgeState,
   getClients: () => WsClient[],
-  config: BridgeConfig,
-  getToken: () => string,
+  _config: BridgeConfig,
   onUpdate?: () => void,
 ): TerminalLogView & { dispose: () => void } {
   const maxLines = 100;
@@ -295,8 +294,6 @@ export function createBridgeTerminalView(
     switch (event.type) {
       case "server_start": {
         const lanIps = getLanIps();
-        const token = getToken();
-        const tokenHint = token ? ` (token: ${token.slice(0, 8)}...)` : "";
         const lanInfo =
           lanIps.length > 0
             ? ` (LAN: ${lanIps
@@ -306,10 +303,7 @@ export function createBridgeTerminalView(
                 })
                 .join(", ")})`
             : "";
-        addLog(
-          `Server started on ${event.host}:${event.port}${tokenHint}${lanInfo}`,
-          "info",
-        );
+        addLog(`Server started on ${event.host}:${event.port}${lanInfo}`, "info");
         break;
       }
       case "server_stop":
@@ -396,16 +390,10 @@ export function createBridgeTerminalView(
 
       const statusIndicator = getStatusIndicator(state.status);
       if (state.status === "running") {
-        const token = getToken();
-        const tokenParam = token ? `?token=${token}` : "";
-        lines.push(
-          `${statusIndicator} Bridge: http://localhost:${state.port}${tokenParam}`,
-        );
+        lines.push(`${statusIndicator} Bridge: http://localhost:${state.port}`);
         for (const ip of getLanIps()) {
           const tailscaleLabel = isTailscaleIp(ip) ? " (Tailscale)" : "";
-          lines.push(
-            `  📡 LAN: http://${ip}:${state.port}${tokenParam}${tailscaleLabel}`,
-          );
+          lines.push(`  📡 LAN: http://${ip}:${state.port}${tailscaleLabel}`);
         }
         lines.push(`  WebSocket: ws://localhost:${state.port}/ws`);
       } else if (state.status === "starting") {

@@ -1,8 +1,8 @@
 /**
  * Persistent plugin state stored in ~/.pi/agent/pi-web.json.
  *
- * Survives /web restarts since localStorage is per-origin and the
- * bridge URL changes on every invocation (different port + token).
+ * Survives /web restarts and keeps state on the Pi side instead of
+ * depending on browser storage.
  */
 
 import * as fs from "node:fs";

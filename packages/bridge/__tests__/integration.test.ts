@@ -154,8 +154,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
 
         // Connect WebSocket client
         const ws = new WebSocket(wsUrl);
@@ -187,8 +186,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -224,8 +222,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -293,8 +290,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -355,8 +351,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -425,8 +420,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -489,7 +483,6 @@ describe("Bridge Integration", () => {
           () => controller!.getState(),
           () => controller!.getClients(),
           config,
-          () => controller!.getToken(),
         );
 
         const renderOutput = terminalView.render();
@@ -517,7 +510,6 @@ describe("Bridge Integration", () => {
           () => controller!.getState(),
           () => controller!.getClients(),
           config,
-          () => controller!.getToken(),
         );
         const initialRender = terminalView.render();
         expect(initialRender.some((line) => line.includes("Clients: 0"))).toBe(
@@ -530,8 +522,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -568,8 +559,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -652,8 +642,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -703,8 +692,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -761,8 +749,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -826,8 +813,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -876,8 +862,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -934,8 +919,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
         const ws = new WebSocket(wsUrl);
 
         await new Promise<void>((resolve, reject) => {
@@ -1022,8 +1006,7 @@ describe("Bridge Integration", () => {
           throw new Error("Bridge not running");
         }
 
-        const token = controller.getToken();
-        const wsUrl = `ws://${address.host}:${address.port}/ws?token=${token}`;
+        const wsUrl = `ws://${address.host}:${address.port}/ws`;
 
         // Connect a client
         const ws = new WebSocket(wsUrl);

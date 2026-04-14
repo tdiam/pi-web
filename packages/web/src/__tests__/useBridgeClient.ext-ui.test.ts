@@ -31,7 +31,7 @@ class MockWebSocket {
 vi.stubGlobal("location", {
   protocol: "http:",
   host: "localhost:8080",
-  search: "?token=test-token",
+  search: "",
 });
 
 // Provide a minimal document mock so Vue's runtime-dom can initialize.
@@ -61,7 +61,7 @@ beforeEach(() => {
   vi.stubGlobal("location", {
     protocol: "http:",
     host: "localhost:8080",
-    search: "?token=test-token",
+    search: "",
   });
   mockWsInstances.length = 0;
 });
@@ -104,22 +104,6 @@ function simulateOpen(ws: MockWebSocket) {
 describe("extension_ui_request handling", () => {
   beforeEach(() => {
     vi.resetModules();
-  });
-
-  it("shows an auth error and skips reconnect when token is missing", async () => {
-    vi.stubGlobal("location", {
-      protocol: "http:",
-      host: "localhost:8080",
-      search: "",
-    });
-
-    const client = await importComposable();
-
-    expect(mockWsInstances).toHaveLength(0);
-    expect(client.connectionError.value).toContain(
-      "Missing authentication token",
-    );
-    expect(client.isReconnecting.value).toBe(false);
   });
 
   it("does not request tree entries during initial connect", async () => {

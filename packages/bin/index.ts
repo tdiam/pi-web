@@ -34,7 +34,7 @@ async function webBridgeHandler(
     ...DEFAULT_BRIDGE_CONFIG,
     port: process.env.PI_BRIDGE_PORT
       ? parseInt(process.env.PI_BRIDGE_PORT, 10)
-      : 0,
+      : DEFAULT_BRIDGE_CONFIG.port,
     host: process.env.PI_BRIDGE_HOST || DEFAULT_BRIDGE_CONFIG.host,
     staticDir,
   };
@@ -94,7 +94,6 @@ async function webBridgeHandler(
         () => bridgeController!.getState(),
         () => bridgeController!.getClients(),
         config,
-        () => bridgeController!.getToken(),
         () => tui.requestRender(),
       );
       terminalView = view;

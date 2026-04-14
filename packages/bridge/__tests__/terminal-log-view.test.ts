@@ -9,7 +9,6 @@ describe("createBridgeTerminalView", () => {
       () => ({ status: "running", host: "127.0.0.1", port: 3000 }),
       () => [],
       DEFAULT_BRIDGE_CONFIG,
-      () => "token",
     );
 
     expect(view.shouldExit()).toBe(false);
@@ -30,7 +29,6 @@ describe("createBridgeTerminalView", () => {
       () => ({ status: "running", host: "127.0.0.1", port: 3000 }),
       () => [],
       DEFAULT_BRIDGE_CONFIG,
-      () => "token",
       onUpdate,
     );
 

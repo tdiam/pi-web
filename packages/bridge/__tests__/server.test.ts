@@ -6,8 +6,6 @@ import { BridgeServer } from "../server.js";
 import { DEFAULT_BRIDGE_CONFIG, type BridgeEvent } from "../types.js";
 import type { WsRpcAdapterContext } from "../ws-rpc-adapter.js";
 
-const TOKEN = "test-auth-token-12345";
-
 const waitForAsyncWork = (ms = 100) =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,7 +120,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       const address = await server.start();
@@ -144,7 +141,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       await server.start();
@@ -159,7 +155,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       await server.start();
@@ -176,7 +171,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       const first = await server.start();
@@ -217,7 +211,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       try {
@@ -242,7 +235,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
 
       const address = await server.start();
@@ -256,82 +248,40 @@ describe("BridgeServer", () => {
     });
   });
 
-  describe("HTTP token authentication", () => {
-    it("rejects HTTP GET without token with 401", async () => {
+  describe("HTTP access", () => {
+    it("serves HTTP GET without requiring a token", async () => {
       const server = new BridgeServer(
         { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       const response = await requestText(`http://localhost:${address.port}/`);
-      expect(response.status).toBe(401);
-      expect(response.body).toBe("Unauthorized");
+      expect(response.status).toBe(200);
+      expect(response.body).toContain("Pi Web Bridge");
+      expect(response.headers["set-cookie"]).toBeUndefined();
 
       await server.stop();
     });
 
-    it("allows HTTP GET with valid query param token and sets cookie", async () => {
+    it("ignores legacy token query params and cookies", async () => {
       const server = new BridgeServer(
         { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       const response = await requestText(
-        `http://localhost:${address.port}/?token=${TOKEN}`,
+        `http://localhost:${address.port}/?token=legacy`,
+        { cookies: { pi_token: "wrong-token" } },
       );
       expect(response.status).toBe(200);
       expect(response.body).toContain("Pi Web Bridge");
-      // Verify Set-Cookie header
-      const setCookie = response.headers["set-cookie"];
-      expect(setCookie).toBeDefined();
-      expect(
-        setCookie!.some((c: string) => c.startsWith(`pi_token=${TOKEN}`)),
-      ).toBe(true);
-
-      await server.stop();
-    });
-
-    it("allows HTTP GET with valid cookie token", async () => {
-      const server = new BridgeServer(
-        { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
-        mockContext,
-        eventBus,
-        (event) => events.push(event),
-        TOKEN,
-      );
-      const address = await server.start();
-
-      const response = await requestText(`http://localhost:${address.port}/`, {
-        cookies: { pi_token: TOKEN },
-      });
-      expect(response.status).toBe(200);
-      expect(response.body).toContain("Pi Web Bridge");
-
-      await server.stop();
-    });
-
-    it("rejects HTTP GET with wrong cookie token", async () => {
-      const server = new BridgeServer(
-        { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
-        mockContext,
-        eventBus,
-        (event) => events.push(event),
-        TOKEN,
-      );
-      const address = await server.start();
-
-      const response = await requestText(`http://localhost:${address.port}/`, {
-        cookies: { pi_token: "wrong-token" },
-      });
-      expect(response.status).toBe(401);
+      expect(response.headers["set-cookie"]).toBeUndefined();
 
       await server.stop();
     });
@@ -344,12 +294,11 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       const response = await requestText(
-        `http://localhost:${address.port}/?token=${TOKEN}`,
+        `http://localhost:${address.port}/?token=legacy`,
       );
       expect(response.status).toBe(200);
       expect(response.body).toContain("Pi Web Bridge");
@@ -364,12 +313,11 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       const response = await requestText(
-        `http://localhost:${address.port}/some-file.js?token=${TOKEN}`,
+        `http://localhost:${address.port}/some-file.js`,
       );
       expect(response.status).toBe(404);
       expect(response.body).toContain("Not Found");
@@ -383,12 +331,11 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       const response = await requestText(
-        `http://localhost:${address.port}/?token=${TOKEN}`,
+        `http://localhost:${address.port}/?token=legacy`,
         {
           method: "POST",
         },
@@ -400,72 +347,37 @@ describe("BridgeServer", () => {
     });
   });
 
-  describe("WS token authentication", () => {
-    it("rejects WS connect without token", async () => {
+  describe("WS connections", () => {
+    it("accepts WS connect without a token", async () => {
       const server = new BridgeServer(
         { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
-      let closed = false;
       const ws = new WebSocket(`ws://localhost:${address.port}/ws`);
-      await new Promise<void>((resolve) => {
-        ws.on("close", () => {
-          closed = true;
-          resolve();
-        });
-        ws.on("error", () => {
-          // Connection may error before close
-        });
+      await new Promise<void>((resolve, reject) => {
+        ws.once("open", () => resolve());
+        ws.once("error", reject);
       });
-      expect(closed).toBe(true);
-      expect(server.getClientCount()).toBe(0);
+      expect(ws.readyState).toBe(WebSocket.OPEN);
 
+      ws.close();
       await server.stop();
     });
 
-    it("rejects WS connect with wrong token", async () => {
+    it("accepts WS connect when a legacy token query param is present", async () => {
       const server = new BridgeServer(
         { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
-      let closed = false;
-      const ws = new WebSocket(`ws://localhost:${address.port}/ws?token=wrong`);
-      await new Promise<void>((resolve) => {
-        ws.on("close", () => {
-          closed = true;
-          resolve();
-        });
-        ws.on("error", () => {});
-      });
-      expect(closed).toBe(true);
-      expect(server.getClientCount()).toBe(0);
-
-      await server.stop();
-    });
-
-    it("accepts WS connect with valid token", async () => {
-      const server = new BridgeServer(
-        { ...DEFAULT_BRIDGE_CONFIG, port: 0 },
-        mockContext,
-        eventBus,
-        (event) => events.push(event),
-        TOKEN,
-      );
-      const address = await server.start();
-
-      const ws = new WebSocket(
-        `ws://localhost:${address.port}/ws?token=${TOKEN}`,
-      );
+      const ws = new WebSocket(`ws://localhost:${address.port}/ws?token=legacy`);
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => resolve());
         ws.once("error", reject);
@@ -484,7 +396,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
@@ -492,7 +403,7 @@ describe("BridgeServer", () => {
       expect(server.getClients()).toEqual([]);
 
       const ws = new WebSocket(
-        `ws://localhost:${address.port}/ws?token=${TOKEN}`,
+        `ws://localhost:${address.port}/ws`,
       );
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => resolve());
@@ -533,12 +444,11 @@ describe("BridgeServer", () => {
             connectedClientId = server.getClients()[0]?.id;
           }
         },
-        TOKEN,
       );
       const address = await server.start();
 
       const ws = new WebSocket(
-        `ws://localhost:${address.port}/ws?token=${TOKEN}`,
+        `ws://localhost:${address.port}/ws`,
       );
       await new Promise<void>((resolve, reject) => {
         ws.once("open", () => resolve());
@@ -577,14 +487,13 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
       try {
         // Root should serve the real index.html
         const indexResponse = await requestText(
-          `http://localhost:${address.port}/?token=${TOKEN}`,
+          `http://localhost:${address.port}/?token=legacy`,
         );
         expect(indexResponse.status).toBe(200);
         expect(indexResponse.body).toContain("<h1>Real Bundle</h1>");
@@ -592,14 +501,14 @@ describe("BridgeServer", () => {
 
         // JS asset should be served
         const jsResponse = await requestText(
-          `http://localhost:${address.port}/app.js?token=${TOKEN}`,
+          `http://localhost:${address.port}/app.js`,
         );
         expect(jsResponse.status).toBe(200);
         expect(jsResponse.body).toContain('console.log("app");');
 
         // Unknown path should fall back to index.html (SPA routing)
         const spaResponse = await requestText(
-          `http://localhost:${address.port}/some-route?token=${TOKEN}`,
+          `http://localhost:${address.port}/some-route`,
         );
         expect(spaResponse.status).toBe(200);
         expect(spaResponse.body).toContain("<h1>Real Bundle</h1>");
@@ -626,7 +535,6 @@ describe("BridgeServer", () => {
         mockContext,
         eventBus,
         (event) => events.push(event),
-        TOKEN,
       );
       const address = await server.start();
 
@@ -634,7 +542,7 @@ describe("BridgeServer", () => {
         // The server normalizes paths, so /../../../etc/passwd becomes /etc/passwd
         // which doesn't start with staticDir — that should 404/fallback
         const traversalResponse = await requestText(
-          `http://localhost:${address.port}/../../../etc/passwd?token=${TOKEN}`,
+          `http://localhost:${address.port}/../../../etc/passwd`,
         );
         // Path is normalized and doesn't match staticDir prefix → fallback to index.html (SPA)
         expect(traversalResponse.status).toBe(200);
@@ -644,7 +552,7 @@ describe("BridgeServer", () => {
         // The secret file within staticDir should be accessible (it's a real file)
         // but URLs that resolve outside staticDir should not expose anything
         const insideResponse = await requestText(
-          `http://localhost:${address.port}/secret/key.txt?token=${TOKEN}`,
+          `http://localhost:${address.port}/secret/key.txt`,
         );
         expect(insideResponse.status).toBe(200);
         expect(insideResponse.body).toContain("secret-key");

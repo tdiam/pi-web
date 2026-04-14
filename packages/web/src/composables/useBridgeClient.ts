@@ -118,17 +118,6 @@ const MAX_RECONNECT_DELAY = 30_000;
 let disposed = false;
 let requestIdCounter = 0;
 
-/** Ephemeral auth token extracted from the initial URL query param. */
-let authToken = "";
-
-/** Extract token from the current page URL and store it. */
-function captureToken(): void {
-  if (!authToken) {
-    const params = new URLSearchParams(location.search);
-    authToken = params.get("token") || "";
-  }
-}
-
 /** Pending RPC requests keyed by correlation id. */
 const pendingRequests = new Map<
   string,
@@ -590,21 +579,10 @@ async function fetchInitialState() {
 function connect() {
   if (disposed) return;
 
-  captureToken();
-  if (!authToken) {
-    connectionStatus.value = "disconnected";
-    connectionError.value =
-      "Missing authentication token. Open the bridge URL with its token parameter.";
-    lastDisconnectReason.value = connectionError.value;
-    return;
-  }
-
   connectionError.value = "";
   connectionStatus.value = "connecting";
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = authToken
-    ? `${protocol}//${location.host}/ws?token=${encodeURIComponent(authToken)}`
-    : `${protocol}//${location.host}/ws`;
+  const wsUrl = `${protocol}//${location.host}/ws`;
   ws = new WebSocket(wsUrl);
 
   ws.addEventListener("open", () => {
