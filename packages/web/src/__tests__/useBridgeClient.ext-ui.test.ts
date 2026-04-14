@@ -794,6 +794,58 @@ describe("extension_ui_request handling", () => {
     });
   });
 
+  it("refreshes transcript while message ids are still pending", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "message_start",
+        role: "user",
+        content: "Hello",
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const refreshRequest = ws.send.mock.calls
+      .map(
+        ([message]: [string]) =>
+          JSON.parse(message) as { payload?: { type?: string; id?: string } },
+      )
+      .find((message) => message.payload?.type === "get_messages");
+
+    expect(refreshRequest?.payload?.id).toBeTruthy();
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        id: refreshRequest?.payload?.id,
+        command: "get_messages",
+        success: true,
+        data: {
+          messages: [{ id: "user-1", role: "user", content: "Hello" }],
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(client.transcript.value).toEqual([
+      { id: "user-1", role: "user", content: "Hello" },
+    ]);
+    expect(
+      ws.send.mock.calls.filter(([message]: [string]) => {
+        const parsed = JSON.parse(message) as { payload?: { type?: string } };
+        return parsed.payload?.type === "get_messages";
+      }),
+    ).toHaveLength(1);
+  });
+
   it("abortGeneration sends abort only while streaming", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

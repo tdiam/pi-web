@@ -113,8 +113,11 @@ const prefillText = ref<string | null>(null);
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let transcriptRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let transcriptRefreshInFlight = false;
 let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30_000;
+const TRANSCRIPT_REFRESH_DELAY_MS = 50;
 let disposed = false;
 let requestIdCounter = 0;
 
@@ -206,6 +209,39 @@ function sendCommand(payload: RpcCommand): Promise<RpcResponse> {
     pendingRequests.set(id, { resolve, reject, timer });
     sendEnvelope({ type: "command", payload: command });
   });
+}
+
+function hasPendingMessageIds(): boolean {
+  return rawTranscript.value.some(
+    (entry) => typeof entry.role === "string" && !entry.id,
+  );
+}
+
+function requestTranscriptRefresh(
+  delayMs: number = TRANSCRIPT_REFRESH_DELAY_MS,
+) {
+  if (transcriptRefreshTimer || transcriptRefreshInFlight) return;
+  if (connectionStatus.value !== "connected") return;
+  if (!hasPendingMessageIds()) return;
+
+  transcriptRefreshTimer = setTimeout(async () => {
+    transcriptRefreshTimer = null;
+    if (transcriptRefreshInFlight) return;
+    if (connectionStatus.value !== "connected") return;
+    if (!hasPendingMessageIds()) return;
+
+    transcriptRefreshInFlight = true;
+    try {
+      await sendCommand({ type: "get_messages" });
+    } catch {
+      // Keep the best-effort polling local to debug metadata hydration.
+    } finally {
+      transcriptRefreshInFlight = false;
+      if (hasPendingMessageIds()) {
+        requestTranscriptRefresh();
+      }
+    }
+  }, delayMs);
 }
 
 function sendPrompt(message: string) {
@@ -486,16 +522,19 @@ function handleEvent(payload: Record<string, unknown>) {
       if (msg.role) {
         rawTranscript.value = [...rawTranscript.value, msg];
       }
+      requestTranscriptRefresh();
       break;
     }
     case "message_update": {
       const msg = payload as unknown as TranscriptEntry;
       mergeTranscriptMessage(msg);
+      requestTranscriptRefresh();
       break;
     }
     case "message_end": {
       const msg = payload as unknown as TranscriptEntry;
       mergeTranscriptMessage(msg);
+      requestTranscriptRefresh();
       break;
     }
     case "agent_start": {
@@ -621,6 +660,11 @@ function connect() {
     // Clear extension UI state
     pendingExtensionRequest.value = null;
     notifications.value = [];
+    if (transcriptRefreshTimer) {
+      clearTimeout(transcriptRefreshTimer);
+      transcriptRefreshTimer = null;
+    }
+    transcriptRefreshInFlight = false;
     // Clear pending requests
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timer);
@@ -644,6 +688,11 @@ function disconnect() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  if (transcriptRefreshTimer) {
+    clearTimeout(transcriptRefreshTimer);
+    transcriptRefreshTimer = null;
+  }
+  transcriptRefreshInFlight = false;
   if (ws) {
     ws.close();
     ws = null;

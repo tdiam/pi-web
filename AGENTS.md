@@ -20,3 +20,7 @@ When working on the browser UI, set `PI_BRIDGE_PORT=8080` before starting Pi so 
 - `packages/bin/` — Pi extension entry point, registers `/web` command
 - `packages/bridge/` — HTTP server, WebSocket RPC bridge, auth, terminal log view
 - `packages/web/` — Vue 3 client (Vite + vitest)
+
+## important tips
+
+- You should read the source code of @mariozechner/pi-coding-agent, @mariozechner/pi-ai carefuilly, especially the wire protocol of pi
