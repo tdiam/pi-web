@@ -263,4 +263,36 @@ const editDiff = computed(() => {
   flex-direction: column;
   gap: 6px;
 }
+
+@media (max-width: 640px) {
+  .tool-card {
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+
+  .tool-card-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .tool-card-toggle {
+    align-self: flex-start;
+  }
+
+  .tool-card-title {
+    font-size: 0.74rem;
+  }
+
+  .tool-card-preview,
+  .tool-card-section-text {
+    font-size: 0.68rem;
+    line-height: 1.55;
+  }
+
+  .tool-card-code-panel {
+    max-height: 280px;
+  }
+}
 </style>

@@ -252,13 +252,43 @@ const emit = defineEmits<{
 @media (max-width: 900px) {
   .hamburger {
     display: flex;
+    grid-area: hamburger;
+    margin-left: 0;
   }
 
   .app-header {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    gap: 12px;
-    padding-top: env(safe-area-inset-top);
-    height: calc(48px + env(safe-area-inset-top));
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "hamburger session"
+      "status status";
+    gap: 8px 12px;
+    height: auto;
+    padding: calc(env(safe-area-inset-top) + 8px) 12px 10px;
+  }
+
+  .header-brand {
+    display: none;
+  }
+
+  .header-session {
+    grid-area: session;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .header-status {
+    grid-area: status;
+    width: 100%;
+    justify-self: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .header-status::-webkit-scrollbar {
+    display: none;
   }
 
   .session-kicker,
@@ -267,8 +297,38 @@ const emit = defineEmits<{
     display: none;
   }
 
+  .debug-toggle,
+  .theme-toggle,
+  .connection-indicator {
+    flex-shrink: 0;
+  }
+
   .debug-toggle {
     padding-right: 10px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    padding-inline: 10px;
+    gap: 8px 10px;
+  }
+
+  .hamburger,
+  .theme-toggle {
+    width: 30px;
+    height: 30px;
+  }
+
+  .session-name {
+    font-size: 0.78rem;
+  }
+
+  .debug-toggle,
+  .connection-indicator {
+    height: 28px;
+    padding: 0 9px;
+    font-size: 0.68rem;
   }
 }
 </style>

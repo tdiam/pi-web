@@ -905,7 +905,7 @@ resizeTextarea();
     position: sticky;
     bottom: 0;
     z-index: 10;
-    padding: 12px 16px;
+    padding: 10px 16px 12px;
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
 
@@ -918,46 +918,81 @@ resizeTextarea();
   }
 
   .composer-footer-row {
-    flex-wrap: wrap;
-    align-items: flex-start;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
   }
 
-  .composer-status-cluster,
+  .composer-status-cluster {
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .composer-status-cluster::-webkit-scrollbar {
+    display: none;
+  }
+
   .composer-action-cluster {
-    width: 100%;
+    flex-shrink: 0;
+    justify-content: flex-end;
   }
 
-  .composer-action-cluster {
-    justify-content: space-between;
-  }
-
-  .thinking-select {
-    width: 100%;
+  .attachment-summary {
+    display: none;
   }
 }
 
 @media (max-width: 640px) {
+  .composer-bar {
+    padding: 8px 12px 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
   .composer-dock {
     gap: 8px;
-    padding: 10px;
+    padding: 8px 10px;
+    border-radius: 16px;
   }
 
   .attachment-chip {
-    min-width: 220px;
+    min-width: 200px;
   }
 
   .composer-main-row {
     gap: 8px;
+    align-items: flex-end;
   }
 
   .attach-btn {
     width: 30px;
     height: 30px;
+    margin-top: 0;
+    border-radius: 10px;
+  }
+
+  .prompt-input {
+    padding: 6px 0 4px;
+    line-height: 1.45;
   }
 
   .composer-footer-row {
-    gap: 10px;
+    gap: 8px;
     padding-top: 8px;
+  }
+
+  .send-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .thinking-select {
+    width: var(--thinking-select-width, auto);
+    max-width: 132px;
   }
 }
 

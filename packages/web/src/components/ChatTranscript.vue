@@ -614,12 +614,21 @@ defineExpose({ preserveScroll });
     gap: 8px;
   }
 
+  .message-meta {
+    display: none;
+  }
+
   .message-content.assistant,
   .message-content.tool,
   .message-content.user,
   .tool-row {
     margin-left: 0;
     max-width: 100%;
+    padding-left: 0;
+  }
+
+  .thinking-block {
+    padding-left: 0;
   }
 
   .tool-result-card-header {
@@ -633,6 +642,45 @@ defineExpose({ preserveScroll });
 
   .streaming-indicator {
     width: calc(100% - 32px);
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-transcript {
+    padding: 12px 12px 8px;
+    gap: 12px;
+  }
+
+  .message-content {
+    font-size: 0.86rem;
+    line-height: 1.65;
+  }
+
+  .message-content.user {
+    padding: 10px 12px;
+    border-radius: 16px 16px 6px 16px;
+  }
+
+  .tool-result-card {
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+
+  .tool-result-card-preview,
+  .tool-result-card-details,
+  .thinking-content {
+    font-size: 0.68rem;
+  }
+
+  .message-image {
+    max-width: 100%;
+    max-height: 240px;
+  }
+
+  .streaming-indicator {
+    width: calc(100% - 24px);
   }
 }
 </style>

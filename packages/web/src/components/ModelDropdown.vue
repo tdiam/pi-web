@@ -427,6 +427,16 @@ onBeforeUnmount(() => {
   background: color-mix(in srgb, var(--panel-2) 60%, transparent);
 }
 
+@media (max-width: 640px) {
+  .model-trigger {
+    max-width: min(58vw, 220px);
+  }
+
+  .model-menu {
+    width: min(320px, calc(100vw - 24px));
+  }
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

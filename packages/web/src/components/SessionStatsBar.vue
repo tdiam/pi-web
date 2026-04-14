@@ -147,5 +147,36 @@ const barColor = computed(() => {
   .stats-bar {
     padding: 6px 16px 0;
   }
+
+  .stats-inner {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+@media (max-width: 640px) {
+  .stats-bar {
+    padding: 4px 12px 0;
+  }
+
+  .stat-chip {
+    max-width: 100%;
+  }
+
+  .context-chip {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .context-bar-track {
+    width: 40px;
+  }
+
+  .stat-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>
