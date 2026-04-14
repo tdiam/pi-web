@@ -931,6 +931,62 @@ describe("WsRpcAdapter", () => {
       expect(response.payload.data.sessions).toEqual([]);
     });
 
+    it("should handle list_workspace_entries command", async () => {
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-workspace-test-"),
+      );
+      fs.mkdirSync(path.join(tmpDir, "src", "components"), {
+        recursive: true,
+      });
+      fs.writeFileSync(path.join(tmpDir, ".gitignore"), "ignored.log\n");
+      fs.writeFileSync(path.join(tmpDir, ".env"), "SECRET=1\n");
+      fs.writeFileSync(path.join(tmpDir, "README.md"), "# test\n");
+      fs.writeFileSync(path.join(tmpDir, "ignored.log"), "skip\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "index.ts"), "export {};\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "components", "ComposerBar.vue"),
+        "<template />\n",
+      );
+      context.ctx.cwd = tmpDir;
+
+      const command: RpcCommand = {
+        id: "cmd-workspace",
+        type: "list_workspace_entries",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+
+      expect(response.payload.command).toBe("list_workspace_entries");
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data.entries).toEqual(
+        expect.arrayContaining([
+          { path: ".env", kind: "file" },
+          { path: ".gitignore", kind: "file" },
+          { path: "README.md", kind: "file" },
+          { path: "src", kind: "directory" },
+          { path: "src/components", kind: "directory" },
+          { path: "src/index.ts", kind: "file" },
+          { path: "src/components/ComposerBar.vue", kind: "file" },
+        ]),
+      );
+      expect(response.payload.data.entries).not.toContainEqual({
+        path: "ignored.log",
+        kind: "file",
+      });
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
     it("should handle list_tree_entries command", async () => {
       (
         context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>

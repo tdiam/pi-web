@@ -1,6 +1,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   SessionManager,
   createAgentSession,
@@ -22,6 +23,7 @@ import type {
   RpcSessionState,
   RpcSlashCommand,
   RpcTreeEntry,
+  RpcWorkspaceEntry,
   RpcTreeTrackColumn,
   ServerMessage,
   WsClient,
@@ -151,6 +153,139 @@ const HIDDEN_TREE_ENTRY_TYPES = new Set([
 
 function openSessionManager(sessionPath: string): SessionManager {
   return SessionManager.open(sessionPath, path.dirname(sessionPath));
+}
+
+function normalizeWorkspacePath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
+}
+
+function collectWorkspaceEntries(filePaths: readonly string[]): RpcWorkspaceEntry[] {
+  const files = new Set<string>();
+  const directories = new Set<string>();
+
+  for (const rawFilePath of filePaths) {
+    const filePath = normalizeWorkspacePath(rawFilePath.trim());
+    if (!filePath) continue;
+
+    files.add(filePath);
+
+    let currentDir = path.posix.dirname(filePath);
+    while (currentDir && currentDir !== ".") {
+      if (directories.has(currentDir)) break;
+      directories.add(currentDir);
+      currentDir = path.posix.dirname(currentDir);
+    }
+  }
+
+  return [
+    ...Array.from(directories)
+      .sort((a, b) => a.localeCompare(b))
+      .map((entryPath) => ({ path: entryPath, kind: "directory" as const })),
+    ...Array.from(files)
+      .sort((a, b) => a.localeCompare(b))
+      .map((entryPath) => ({ path: entryPath, kind: "file" as const })),
+  ];
+}
+
+function listWorkspaceFilesWithRipgrep(cwd: string): string[] | null {
+  const args = ["--files", "--hidden", "-g", "!.git"];
+  const rootIgnoreFile = path.join(cwd, ".gitignore");
+  if (fs.existsSync(rootIgnoreFile)) {
+    args.push("--ignore-file", rootIgnoreFile);
+  }
+
+  const result = spawnSync("rg", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
+  });
+
+  if (result.error || result.status !== 0) {
+    return null;
+  }
+
+  return result.stdout.split(/\r?\n/).filter(Boolean);
+}
+
+function listWorkspaceFilesFallback(cwd: string): string[] {
+  const files: string[] = [];
+  const stack = [""];
+  const rootIgnoreFile = path.join(cwd, ".gitignore");
+  const ignoredPatterns = fs.existsSync(rootIgnoreFile)
+    ? new Set(
+        fs
+          .readFileSync(rootIgnoreFile, "utf8")
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0 && !line.startsWith("#")),
+      )
+    : new Set<string>();
+
+  while (stack.length > 0) {
+    const currentRelativeDir = stack.pop();
+    if (currentRelativeDir === undefined) continue;
+
+    const absoluteDir = currentRelativeDir
+      ? path.join(cwd, currentRelativeDir)
+      : cwd;
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(absoluteDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.name === ".git") {
+        continue;
+      }
+
+      const relativePath = currentRelativeDir
+        ? path.join(currentRelativeDir, entry.name)
+        : entry.name;
+      const absolutePath = path.join(absoluteDir, entry.name);
+      const normalizedRelativePath = normalizeWorkspacePath(relativePath);
+      if (
+        ignoredPatterns.has(entry.name) ||
+        ignoredPatterns.has(normalizedRelativePath)
+      ) {
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        stack.push(relativePath);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        files.push(relativePath);
+        continue;
+      }
+
+      if (entry.isSymbolicLink()) {
+        try {
+          const stats = fs.statSync(absolutePath);
+          if (stats.isDirectory()) {
+            stack.push(relativePath);
+          } else if (stats.isFile()) {
+            files.push(relativePath);
+          }
+        } catch {
+          // Ignore broken links while building the workspace index.
+        }
+      }
+    }
+  }
+
+  return files;
+}
+
+function listWorkspaceEntries(cwd: string): RpcWorkspaceEntry[] {
+  const filePaths =
+    listWorkspaceFilesWithRipgrep(cwd) ?? listWorkspaceFilesFallback(cwd);
+  return collectWorkspaceEntries(filePaths);
 }
 
 function buildVisibleTree(
@@ -677,6 +812,7 @@ export class WsRpcAdapter {
   private selectedSession: AgentSession | null = null;
   private pendingSessionManager: SessionManager | null = null;
   private selectedSessionUnsubscribe: (() => void) | undefined;
+  private workspaceEntriesCache: RpcWorkspaceEntry[] | null = null;
 
   constructor(
     client: WsClient,
@@ -1948,6 +2084,20 @@ export class WsRpcAdapter {
             },
           };
         }
+      }
+
+      case "list_workspace_entries": {
+        if (!this.workspaceEntriesCache) {
+          this.workspaceEntriesCache = listWorkspaceEntries(ctx.cwd);
+        }
+
+        return {
+          id: correlationId,
+          type: "response" as const,
+          command: "list_workspace_entries" as const,
+          success: true as const,
+          data: { entries: this.workspaceEntriesCache },
+        };
       }
 
       // =================================================================

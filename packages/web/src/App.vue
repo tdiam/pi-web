@@ -23,6 +23,8 @@ const {
   treeEntries,
   isHistoricalView,
   commands,
+  workspaceEntries,
+  workspaceEntriesLoading,
   availableModels,
   currentModel,
   currentThinkingLevel,
@@ -34,6 +36,7 @@ const {
   sendPrompt,
   abortGeneration,
   sendCommand,
+  fetchWorkspaceEntries,
   setThinkingLevel,
   pendingExtensionRequest,
   notifications,
@@ -317,6 +320,9 @@ onBeforeUnmount(() => {
         :is-debug-mode="debugModeAvailable && debugMode"
         :connection-status="connectionStatus"
         :commands="commands"
+        :workspace-entries="workspaceEntries"
+        :workspace-entries-loading="workspaceEntriesLoading"
+        :ensure-workspace-entries="fetchWorkspaceEntries"
         :available-models="availableModels"
         :current-model="currentModel"
         :current-thinking-level="currentThinkingLevel"

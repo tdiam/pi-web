@@ -5,6 +5,7 @@ import type {
   RpcResponse,
   RpcSessionState,
   RpcSlashCommand,
+  RpcWorkspaceEntry,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
   ClientMessage,
@@ -66,6 +67,9 @@ const treeEntries = ref<TreeEntry[]>([]);
 const activeTreeSessionPath = ref<string | null>(null);
 const liveSessionPath = ref<string | null>(null);
 const commands = ref<RpcSlashCommand[]>([]);
+const workspaceEntries = ref<RpcWorkspaceEntry[]>([]);
+const workspaceEntriesLoaded = ref(false);
+const workspaceEntriesLoading = ref(false);
 const availableModels = ref<RpcModelInfo[]>([]);
 const currentModel = ref<RpcModelInfo | null>(null);
 const currentThinkingLevel = ref<string | null>(null);
@@ -121,6 +125,7 @@ const MAX_RECONNECT_DELAY = 30_000;
 const TRANSCRIPT_REFRESH_DELAY_MS = 50;
 let disposed = false;
 let requestIdCounter = 0;
+let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
 
 /** Pending RPC requests keyed by correlation id. */
 const pendingRequests = new Map<
@@ -250,6 +255,44 @@ function sendPrompt(message: string, images?: RpcImageContent[]) {
     type: "command",
     payload: { type: "prompt", message, images, streamingBehavior: "steer" },
   });
+}
+
+async function fetchWorkspaceEntries(
+  force: boolean = false,
+): Promise<RpcWorkspaceEntry[]> {
+  if (workspaceEntriesLoaded.value && !force) {
+    return workspaceEntries.value;
+  }
+
+  if (workspaceEntriesRequest && !force) {
+    return workspaceEntriesRequest;
+  }
+
+  if (connectionStatus.value !== "connected") {
+    return workspaceEntries.value;
+  }
+
+  workspaceEntriesLoading.value = true;
+  workspaceEntriesRequest = sendCommand({ type: "list_workspace_entries" })
+    .then((response) => {
+      if (response.success) {
+        const data = response.data as
+          | { entries?: RpcWorkspaceEntry[] }
+          | undefined;
+        workspaceEntries.value = Array.isArray(data?.entries)
+          ? data.entries
+          : [];
+        workspaceEntriesLoaded.value = true;
+      }
+      return workspaceEntries.value;
+    })
+    .catch(() => workspaceEntries.value)
+    .finally(() => {
+      workspaceEntriesLoading.value = false;
+      workspaceEntriesRequest = null;
+    });
+
+  return workspaceEntriesRequest;
 }
 
 function abortGeneration() {
@@ -477,6 +520,15 @@ function handleResponse(payload: RpcResponse) {
           | { commands: RpcSlashCommand[] }
           | undefined;
         if (data) commands.value = data.commands;
+        break;
+      }
+      case "list_workspace_entries": {
+        const data = payload.data as
+          | { entries?: RpcWorkspaceEntry[] }
+          | undefined;
+        workspaceEntries.value = Array.isArray(data?.entries) ? data.entries : [];
+        workspaceEntriesLoaded.value = true;
+        workspaceEntriesLoading.value = false;
         break;
       }
       case "set_model": {
@@ -738,6 +790,8 @@ export function useBridgeClient() {
     liveSessionPath: readonly(liveSessionPath),
     isHistoricalView,
     commands: readonly(commands),
+    workspaceEntries: readonly(workspaceEntries),
+    workspaceEntriesLoading: readonly(workspaceEntriesLoading),
     availableModels: readonly(availableModels),
     currentModel: readonly(currentModel),
     currentThinkingLevel: readonly(currentThinkingLevel),
@@ -758,6 +812,7 @@ export function useBridgeClient() {
     dismissNotification,
     sendCommand,
     sendPrompt,
+    fetchWorkspaceEntries,
     abortGeneration,
     setThinkingLevel,
     connect,

@@ -22,6 +22,11 @@ export interface RpcImageContent {
   mimeType: string;
 }
 
+export interface RpcWorkspaceEntry {
+  path: string;
+  kind: "file" | "directory";
+}
+
 /** All RPC command types that a browser client can send. */
 export type RpcCommand =
   // Prompting
@@ -90,6 +95,7 @@ export type RpcCommand =
   // Discovery
   | { id?: string; type: "list_sessions" }
   | { id?: string; type: "list_tree_entries"; sessionPath?: string }
+  | { id?: string; type: "list_workspace_entries" }
   // Plugin state persistence
   | { id?: string; type: "get_plugin_state"; key: string }
   | { id?: string; type: "set_plugin_state"; key: string; value: unknown };
@@ -328,6 +334,13 @@ export type RpcResponse =
       command: "list_tree_entries";
       success: true;
       data: { entries: RpcTreeEntry[]; sessionPath?: string };
+    }
+  | {
+      id?: string;
+      type: "response";
+      command: "list_workspace_entries";
+      success: true;
+      data: { entries: RpcWorkspaceEntry[] };
     }
   // Plugin state persistence
   | {

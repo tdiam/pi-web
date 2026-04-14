@@ -8,7 +8,11 @@ import type {
   ConnectionStatus,
   TranscriptEntry,
 } from "../composables/useBridgeClient";
-import type { RpcImageContent, RpcSlashCommand } from "../shared-types";
+import type {
+  RpcImageContent,
+  RpcSlashCommand,
+  RpcWorkspaceEntry,
+} from "../shared-types";
 import type { RpcModelInfo } from "../utils/models";
 
 defineProps<{
@@ -19,6 +23,9 @@ defineProps<{
   isDebugMode: boolean;
   connectionStatus: ConnectionStatus;
   commands: readonly RpcSlashCommand[];
+  workspaceEntries: readonly RpcWorkspaceEntry[];
+  workspaceEntriesLoading: boolean;
+  ensureWorkspaceEntries: () => Promise<RpcWorkspaceEntry[]>;
   availableModels: readonly RpcModelInfo[];
   currentModel: RpcModelInfo | null;
   currentThinkingLevel: string | null;
@@ -72,6 +79,9 @@ defineExpose({ preserveTranscriptScroll });
       :connection-status="connectionStatus"
       :is-streaming="isStreaming"
       :commands="commands"
+      :workspace-entries="workspaceEntries"
+      :workspace-entries-loading="workspaceEntriesLoading"
+      :ensure-workspace-entries="ensureWorkspaceEntries"
       :models="availableModels"
       :selected-model="currentModel"
       :thinking-level="currentThinkingLevel"

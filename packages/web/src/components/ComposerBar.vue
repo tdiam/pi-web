@@ -2,7 +2,11 @@
 import { CornerDownLeft, ImagePlus, Square, X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { ConnectionStatus } from "../composables/useBridgeClient";
-import type { RpcImageContent, RpcSlashCommand } from "../shared-types";
+import type {
+  RpcImageContent,
+  RpcSlashCommand,
+  RpcWorkspaceEntry,
+} from "../shared-types";
 import {
   COMPOSER_ATTACHMENT_ACCEPT,
   createComposerAttachments,
@@ -12,8 +16,15 @@ import {
   type ComposerAttachment,
 } from "../utils/attachments";
 import type { RpcModelInfo } from "../utils/models";
+import {
+  applyWorkspaceMentionCompletion,
+  getWorkspaceMentionContext,
+  getWorkspaceMentionSuggestions,
+  type WorkspaceMentionSuggestion,
+} from "../utils/workspaceMentions";
 import CommandPalette from "./CommandPalette.vue";
 import ModelDropdown from "./ModelDropdown.vue";
+import WorkspaceMentionPalette from "./WorkspaceMentionPalette.vue";
 
 const THINKING_LEVEL_OPTIONS = [
   { value: "off", label: "Off" },
@@ -28,6 +39,9 @@ const props = defineProps<{
   connectionStatus: ConnectionStatus;
   isStreaming: boolean;
   commands: RpcSlashCommand[];
+  workspaceEntries: RpcWorkspaceEntry[];
+  workspaceEntriesLoading: boolean;
+  ensureWorkspaceEntries: () => Promise<RpcWorkspaceEntry[]>;
   models: RpcModelInfo[];
   selectedModel: RpcModelInfo | null;
   thinkingLevel: string | null;
@@ -47,14 +61,38 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isDisabled = computed(() => props.connectionStatus !== "connected");
 const paletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
+const mentionPaletteRef = ref<InstanceType<typeof WorkspaceMentionPalette> | null>(
+  null,
+);
 const attachments = ref<ComposerAttachment[]>([]);
 const isDragActive = ref(false);
 const attachmentNotice = ref<string | null>(null);
+const cursorOffset = ref(0);
+const dismissedMentionKey = ref<string | null>(null);
 
 const showPalette = ref(false);
 const filterText = computed(() => {
   if (!showPalette.value) return "";
   return inputText.value.slice(1);
+});
+const mentionContext = computed(() => {
+  if (showPalette.value) return null;
+  return getWorkspaceMentionContext(inputText.value, cursorOffset.value);
+});
+const mentionSuggestions = computed(() => {
+  if (!mentionContext.value) return [];
+  return getWorkspaceMentionSuggestions(
+    props.workspaceEntries,
+    mentionContext.value,
+  );
+});
+const showMentionPalette = computed(() => {
+  if (showPalette.value || !mentionContext.value) return false;
+  if (dismissedMentionKey.value === getMentionKey(mentionContext.value)) {
+    return false;
+  }
+  if (props.workspaceEntriesLoading) return true;
+  return true;
 });
 const currentModelText = computed(() => {
   if (!props.selectedModel)
@@ -113,6 +151,20 @@ function normalizeSubmittedText(value: string): string {
   return lines.join("\n");
 }
 
+function getMentionKey(
+  mention:
+    | ReturnType<typeof getWorkspaceMentionContext>
+    | null,
+): string | null {
+  if (!mention) return null;
+  return `${mention.start}:${mention.prefix}`;
+}
+
+function syncCursorFromTextarea() {
+  const el = textareaRef.value;
+  cursorOffset.value = el?.selectionStart ?? inputText.value.length;
+}
+
 function resizeTextarea() {
   nextTick(() => {
     const el = textareaRef.value;
@@ -126,7 +178,24 @@ function resizeTextarea() {
 
 watch(inputText, (val) => {
   showPalette.value = val.startsWith("/");
+  if (showPalette.value) {
+    dismissedMentionKey.value = null;
+  }
   resizeTextarea();
+  nextTick(() => {
+    syncCursorFromTextarea();
+  });
+});
+
+watch(mentionContext, (mention, previousMention) => {
+  const mentionKey = getMentionKey(mention);
+  if (mentionKey && mentionKey !== getMentionKey(previousMention)) {
+    dismissedMentionKey.value = null;
+  }
+
+  if (mention) {
+    void props.ensureWorkspaceEntries();
+  }
 });
 
 function clearAttachmentNotice() {
@@ -190,6 +259,8 @@ function submitMessage(message: string) {
     images: toRpcImageContent(attachments.value),
   });
   inputText.value = "";
+  cursorOffset.value = 0;
+  dismissedMentionKey.value = null;
   clearAttachments();
   clearAttachmentNotice();
   showPalette.value = false;
@@ -223,6 +294,33 @@ function handlePaletteClose() {
   showPalette.value = false;
 }
 
+function handleMentionSelect(item: WorkspaceMentionSuggestion) {
+  const mention = mentionContext.value;
+  if (!mention) return;
+
+  const nextState = applyWorkspaceMentionCompletion(
+    inputText.value,
+    cursorOffset.value,
+    mention,
+    item,
+  );
+
+  inputText.value = nextState.text;
+  dismissedMentionKey.value = null;
+  nextTick(() => {
+    const el = textareaRef.value;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(nextState.cursor, nextState.cursor);
+    cursorOffset.value = nextState.cursor;
+    resizeTextarea();
+  });
+}
+
+function handleMentionClose() {
+  dismissedMentionKey.value = getMentionKey(mentionContext.value);
+}
+
 function handleModelSelect(model: RpcModelInfo) {
   emit("selectModel", model);
 }
@@ -235,6 +333,11 @@ function handleThinkingLevelChange(event: Event) {
 
 function handleFilePickerOpen() {
   fileInputRef.value?.click();
+}
+
+function handleInputInteraction() {
+  syncCursorFromTextarea();
+  resizeTextarea();
 }
 
 async function handleFileInputChange(event: Event) {
@@ -297,22 +400,35 @@ async function handleDrop(event: DragEvent) {
 }
 
 function handleInputKeydown(e: KeyboardEvent) {
+  if (
+    showPalette.value &&
+    paletteRef.value &&
+    (e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "Escape" ||
+      e.key === "Enter")
+  ) {
+    paletteRef.value.handleKeydown(e);
+    return;
+  }
+
+  if (
+    showMentionPalette.value &&
+    mentionPaletteRef.value &&
+    (e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "Escape" ||
+      ((props.workspaceEntriesLoading || mentionSuggestions.value.length > 0) &&
+        (e.key === "Enter" || e.key === "Tab")))
+  ) {
+    mentionPaletteRef.value.handleKeydown(e);
+    return;
+  }
+
   if (e.key === "Escape" && props.isStreaming) {
     e.preventDefault();
     handleAbort();
     return;
-  }
-
-  if (showPalette.value && paletteRef.value) {
-    if (
-      e.key === "ArrowDown" ||
-      e.key === "ArrowUp" ||
-      e.key === "Escape" ||
-      e.key === "Enter"
-    ) {
-      paletteRef.value.handleKeydown(e);
-      return;
-    }
   }
 
   if (e.key === "Enter" && !e.shiftKey && !showPalette.value) {
@@ -338,6 +454,14 @@ resizeTextarea();
         :filter="filterText"
         @select="handleCommandSelect"
         @close="handlePaletteClose"
+      />
+      <WorkspaceMentionPalette
+        v-else-if="showMentionPalette"
+        ref="mentionPaletteRef"
+        :items="mentionSuggestions"
+        :loading="workspaceEntriesLoading"
+        @select="handleMentionSelect"
+        @close="handleMentionClose"
       />
       <div
         class="composer-dock"
@@ -402,7 +526,11 @@ resizeTextarea();
             :disabled="isDisabled"
             placeholder="Ask anything, or drop an image"
             @keydown="handleInputKeydown"
-            @input="resizeTextarea"
+            @input="handleInputInteraction"
+            @keyup="handleInputInteraction"
+            @click="handleInputInteraction"
+            @select="handleInputInteraction"
+            @focus="handleInputInteraction"
             @paste="handleInputPaste"
           />
         </div>
