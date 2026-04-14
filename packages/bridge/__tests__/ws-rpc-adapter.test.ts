@@ -1018,6 +1018,78 @@ describe("WsRpcAdapter", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    it("should include a pending new session in list_sessions", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-pending-"));
+      const liveSessionFile = path.join(tmpDir, "live-session.jsonl");
+      fs.writeFileSync(
+        liveSessionFile,
+        [
+          JSON.stringify({
+            type: "session",
+            id: "live-id",
+            timestamp: "2025-01-02T00:00:00Z",
+            cwd: tmpDir,
+          }),
+          JSON.stringify({
+            type: "message",
+            id: "live-msg-1",
+            parentId: null,
+            timestamp: new Date().toISOString(),
+            message: {
+              role: "user",
+              content: "Current session",
+              timestamp: Date.now(),
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(liveSessionFile);
+
+      const newSessionCommand: RpcCommand = {
+        id: "cmd-new",
+        type: "new_session",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({ type: "command", payload: newSessionCommand }),
+        ),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const listCommand: RpcCommand = { id: "cmd-list", type: "list_sessions" };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: listCommand })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data.sessions).toHaveLength(2);
+      expect(response.payload.data.sessions[0]).toMatchObject({
+        path: expect.any(String),
+      });
+      expect(response.payload.data.sessions[0].path).not.toBe(liveSessionFile);
+      expect(response.payload.data.sessions[1]).toMatchObject({
+        id: "live-id",
+        path: liveSessionFile,
+      });
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
     it("should handle list_sessions when no session file is available", async () => {
       (
         context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>

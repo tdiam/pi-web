@@ -5,12 +5,12 @@ repository.
 
 ## Commands
 
-- `npm run check` — type-check with `tsgo`
-- `npm run build:web` — build the Vue browser bundle to `web-dist/`
-- `npm run dev:web` — Vite dev server for the web UI
-- `npm test` / `npm run test:watch` — run Vitest test suite
-- `npm fmt` / `npm run fmt:check` — format/check with `oxfmt`
-- `npm lint` / `npm run lint:fix` — lint/fix with `oxlint`
+- `pnpm run check` — type-check with `tsgo`
+- `pnpm run build:web` — build the Vue browser bundle to `web-dist/`
+- `pnpm run dev:web` — Vite dev server for the web UI
+- `pnpm test` / `pnpm run test:watch` — run Vitest test suite
+- `pnpm fmt` / `pnpm run fmt:check` — format/check with `oxfmt`
+- `pnpm lint` / `pnpm run lint:fix` — lint/fix with `oxlint`
 
 ## Dev Workflow
 
@@ -31,3 +31,4 @@ the Vite `/ws` proxy has a stable target. Run `npm run dev:web`, start Pi, run
   @mariozechner/pi-ai carefuilly, especially the wire protocol of pi
 - Do not add thin wrapper functions around existing functions unless the wrapper
   adds real value beyond renaming.
+- use git conventional commits specification when commit

@@ -7,7 +7,7 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
-  select: [sessionId: string];
+  select: [sessionPath: string];
 }>();
 </script>
 

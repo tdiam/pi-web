@@ -2069,11 +2069,36 @@ export class WsRpcAdapter {
             path: string;
             timestamp?: string;
           }> = [];
+          const seenSessionPaths = new Set<string>();
           const currentSessionFile =
             this.selectedSessionPath ?? ctx.sessionManager.getSessionFile();
           const sessionDir = currentSessionFile
             ? path.dirname(currentSessionFile)
             : undefined;
+
+          const appendSession = (
+            sessionManager: SessionManager,
+            sessionPath?: string,
+          ) => {
+            if (!sessionPath || seenSessionPaths.has(sessionPath)) return;
+            const header = sessionManager.getHeader();
+            if (!header) return;
+            seenSessionPaths.add(sessionPath);
+            sessions.push({
+              id: header.id,
+              name: sessionDisplayName(sessionManager, sessionPath),
+              path: sessionPath,
+              timestamp: header.timestamp,
+            });
+          };
+
+          // Include a newly created detached session before it is visible on disk.
+          if (this.pendingSessionManager) {
+            appendSession(
+              this.pendingSessionManager,
+              this.pendingSessionManager.getSessionFile(),
+            );
+          }
 
           if (sessionDir && fs.existsSync(sessionDir)) {
             const files = fs
@@ -2085,15 +2110,7 @@ export class WsRpcAdapter {
             for (const file of files) {
               const filePath = path.join(sessionDir, file);
               try {
-                const sessionManager = openSessionManager(filePath);
-                const header = sessionManager.getHeader();
-                if (!header) continue;
-                sessions.push({
-                  id: header.id,
-                  name: sessionDisplayName(sessionManager, filePath),
-                  path: filePath,
-                  timestamp: header.timestamp,
-                });
+                appendSession(openSessionManager(filePath), filePath);
               } catch {
                 // Skip malformed session files
               }
