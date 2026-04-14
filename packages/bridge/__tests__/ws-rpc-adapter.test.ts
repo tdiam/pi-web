@@ -589,6 +589,84 @@ describe("WsRpcAdapter", () => {
       expect(response.payload.data.commands[0]).toHaveProperty("name", "test");
     });
 
+    it("should handle get_session_stats with token breakdown", async () => {
+      (
+        context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>
+      ).mockReturnValue([
+        {
+          type: "model_change",
+          provider: "openai",
+          modelId: "gpt-4",
+        },
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 97000,
+              output: 27000,
+              cacheRead: 2800000,
+              cacheWrite: 64000,
+              cost: { total: 1.354 },
+            },
+          },
+        },
+      ]);
+      (
+        context.ctx.sessionManager.getEntries as ReturnType<typeof vi.fn>
+      ).mockReturnValue([
+        {
+          type: "message",
+          message: {
+            role: "assistant",
+            usage: {
+              input: 97000,
+              output: 27000,
+              cacheRead: 2800000,
+              cacheWrite: 64000,
+              cost: { total: 1.354 },
+            },
+          },
+        },
+      ]);
+      context.ctx.modelRegistry.getAvailable = vi.fn().mockResolvedValue([
+        { id: "gpt-4", provider: "openai", name: "GPT-4", contextWindow: 8000 },
+      ]);
+      context.ctx.getContextUsage = vi.fn().mockReturnValue({
+        tokens: 1000,
+        contextWindow: 8000,
+        percent: 12.5,
+      });
+
+      const command: RpcCommand = { id: "cmd-1", type: "get_session_stats" };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+
+      expect(response.payload.command).toBe("get_session_stats");
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data).toMatchObject({
+        tokens: 1000,
+        contextWindow: 8000,
+        percent: 12.5,
+        messageCount: 1,
+        cost: 1.354,
+        inputTokens: 97000,
+        outputTokens: 27000,
+        cacheReadTokens: 2800000,
+        cacheWriteTokens: 64000,
+      });
+    });
+
     it("should handle set_model command with valid model", async () => {
       const command: RpcCommand = {
         id: "cmd-1",

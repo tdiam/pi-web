@@ -4,6 +4,7 @@ import type {
   RpcImageContent,
   RpcResponse,
   RpcSessionState,
+  RpcSessionStats,
   RpcSlashCommand,
   RpcWorkspaceEntry,
   RpcExtensionUIRequest,
@@ -54,6 +55,32 @@ export interface TreeEntry {
   isOnActivePath?: boolean;
 }
 
+function readFiniteNumber(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeSessionStats(value: unknown): RpcSessionStats | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Partial<RpcSessionStats>;
+  return {
+    tokens:
+      typeof data.tokens === "number" && Number.isFinite(data.tokens)
+        ? data.tokens
+        : null,
+    contextWindow: readFiniteNumber(data.contextWindow),
+    percent:
+      typeof data.percent === "number" && Number.isFinite(data.percent)
+        ? data.percent
+        : null,
+    messageCount: readFiniteNumber(data.messageCount),
+    cost: readFiniteNumber(data.cost),
+    inputTokens: readFiniteNumber(data.inputTokens),
+    outputTokens: readFiniteNumber(data.outputTokens),
+    cacheReadTokens: readFiniteNumber(data.cacheReadTokens),
+    cacheWriteTokens: readFiniteNumber(data.cacheWriteTokens),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // State refs
 // ---------------------------------------------------------------------------
@@ -76,13 +103,7 @@ const currentThinkingLevel = ref<string | null>(null);
 const isStreaming = ref(false);
 
 // Session stats (context usage + cost)
-const sessionStats = ref<{
-  tokens: number | null;
-  contextWindow: number;
-  percent: number | null;
-  messageCount: number;
-  cost: number;
-} | null>(null);
+const sessionStats = ref<RpcSessionStats | null>(null);
 
 // Reconnect diagnostics
 const reconnectCount = ref(0);
@@ -565,15 +586,7 @@ function handleResponse(payload: RpcResponse) {
       case "set_thinking_level":
         break;
       case "get_session_stats": {
-        const data = payload.data as
-          | {
-              tokens: number | null;
-              contextWindow: number;
-              percent: number | null;
-              messageCount: number;
-              cost: number;
-            }
-          | undefined;
+        const data = normalizeSessionStats(payload.data);
         if (data) sessionStats.value = data;
         break;
       }

@@ -158,6 +158,18 @@ export interface RpcTreeEntry {
   isOnActivePath?: boolean;
 }
 
+export interface RpcSessionStats {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+  messageCount: number;
+  cost: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
 // ============================================================================
 // RPC Responses (server → client)
 // ============================================================================
@@ -190,7 +202,7 @@ export interface RpcResponseMap {
   abort_retry: void;
   bash: unknown;
   abort_bash: void;
-  get_session_stats: unknown;
+  get_session_stats: RpcSessionStats;
   export_html: { path: string };
   switch_session: {
     messages: unknown[];

@@ -363,6 +363,82 @@ describe("extension_ui_request handling", () => {
     ]);
   });
 
+  it("stores expanded session stats from responses", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_session_stats",
+        success: true,
+        data: {
+          tokens: 272000,
+          contextWindow: 272000,
+          percent: 32.1,
+          messageCount: 12,
+          cost: 1.354,
+          inputTokens: 97000,
+          outputTokens: 27000,
+          cacheReadTokens: 2800000,
+          cacheWriteTokens: 64000,
+        },
+      },
+    });
+
+    expect(client.sessionStats.value).toEqual({
+      tokens: 272000,
+      contextWindow: 272000,
+      percent: 32.1,
+      messageCount: 12,
+      cost: 1.354,
+      inputTokens: 97000,
+      outputTokens: 27000,
+      cacheReadTokens: 2800000,
+      cacheWriteTokens: 64000,
+    });
+  });
+
+  it("normalizes invalid session stats values to zero", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_session_stats",
+        success: true,
+        data: {
+          tokens: 272000,
+          contextWindow: 272000,
+          percent: 32.1,
+          messageCount: 12,
+          cost: 1.354,
+          inputTokens: Number.NaN,
+          outputTokens: Number.NaN,
+          cacheReadTokens: Number.NaN,
+          cacheWriteTokens: Number.NaN,
+        },
+      },
+    });
+
+    expect(client.sessionStats.value).toEqual({
+      tokens: 272000,
+      contextWindow: 272000,
+      percent: 32.1,
+      messageCount: 12,
+      cost: 1.354,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    });
+  });
+
   it("tracks thinking level from state responses", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

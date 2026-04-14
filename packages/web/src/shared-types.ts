@@ -11,6 +11,7 @@ export type {
   RpcImageContent,
   RpcResponse,
   RpcSessionState,
+  RpcSessionStats,
   RpcSlashCommand,
   RpcWorkspaceEntry,
   RpcExtensionUIRequest,

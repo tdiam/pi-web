@@ -1,14 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import type { RpcSessionStats } from "../shared-types";
 
 const props = defineProps<{
-  stats: {
-    tokens: number | null;
-    contextWindow: number;
-    percent: number | null;
-    messageCount: number;
-    cost: number;
-  } | null;
+  stats: RpcSessionStats | null;
 }>();
 
 const contextPercent = computed(() => {
@@ -16,32 +11,52 @@ const contextPercent = computed(() => {
   return Math.min(props.stats.percent, 100);
 });
 
-const tokenLabel = computed(() => {
-  if (!props.stats || props.stats.tokens == null) return null;
-  const t = props.stats.tokens;
-  if (t >= 1_000_000) return `${(t / 1_000_000).toFixed(1)}M`;
-  if (t >= 1_000) return `${(t / 1_000).toFixed(1)}k`;
-  return `${t}`;
-});
-
 const windowLabel = computed(() => {
   if (!props.stats) return null;
-  const w = props.stats.contextWindow;
-  if (w >= 1_000_000) return `${(w / 1_000_000).toFixed(0)}M`;
-  if (w >= 1_000) return `${(w / 1_000).toFixed(0)}k`;
-  return `${w}`;
+  return compactTokens(props.stats.contextWindow);
 });
 
 const costLabel = computed(() => {
   if (!props.stats || props.stats.cost <= 0) return null;
-  const c = props.stats.cost;
-  if (c < 0.01) return `$${c.toFixed(4)}`;
-  if (c < 1) return `$${c.toFixed(3)}`;
-  return `$${c.toFixed(2)}`;
+  return `$${props.stats.cost.toFixed(3)}`;
+});
+
+const compactTokens = (count: number) => {
+  if (count < 1_000) return `${count}`;
+  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
+  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
+  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(count / 1_000_000)}M`;
+};
+
+const inputLabel = computed(() => {
+  if (!props.stats || props.stats.inputTokens <= 0) return null;
+  return `↑${compactTokens(props.stats.inputTokens)}`;
+});
+
+const outputLabel = computed(() => {
+  if (!props.stats || props.stats.outputTokens <= 0) return null;
+  return `↓${compactTokens(props.stats.outputTokens)}`;
+});
+
+const cacheReadLabel = computed(() => {
+  if (!props.stats || props.stats.cacheReadTokens <= 0) return null;
+  return `R${compactTokens(props.stats.cacheReadTokens)}`;
+});
+
+const cacheWriteLabel = computed(() => {
+  if (!props.stats || props.stats.cacheWriteTokens <= 0) return null;
+  return `W${compactTokens(props.stats.cacheWriteTokens)}`;
 });
 
 const hasVisibleContent = computed(
-  () => contextPercent.value != null || costLabel.value != null,
+  () =>
+    inputLabel.value != null ||
+    outputLabel.value != null ||
+    cacheReadLabel.value != null ||
+    cacheWriteLabel.value != null ||
+    contextPercent.value != null ||
+    costLabel.value != null,
 );
 
 const barColor = computed(() => {
@@ -55,6 +70,21 @@ const barColor = computed(() => {
 <template>
   <div v-if="stats && hasVisibleContent" class="stats-bar">
     <div class="stats-inner">
+      <div v-if="inputLabel" class="stat-chip token-chip">
+        <span class="stat-label">{{ inputLabel }}</span>
+      </div>
+      <div v-if="outputLabel" class="stat-chip token-chip">
+        <span class="stat-label">{{ outputLabel }}</span>
+      </div>
+      <div v-if="cacheReadLabel" class="stat-chip token-chip">
+        <span class="stat-label">{{ cacheReadLabel }}</span>
+      </div>
+      <div v-if="cacheWriteLabel" class="stat-chip token-chip">
+        <span class="stat-label">{{ cacheWriteLabel }}</span>
+      </div>
+      <div v-if="costLabel" class="stat-chip cost-chip">
+        <span class="stat-label">{{ costLabel }}</span>
+      </div>
       <div v-if="contextPercent != null" class="stat-chip context-chip">
         <div class="context-bar-track">
           <div
@@ -66,12 +96,8 @@ const barColor = computed(() => {
           />
         </div>
         <span class="stat-label">
-          {{ tokenLabel }} / {{ windowLabel }}
-          <span class="stat-dim">({{ contextPercent.toFixed(0) }}%)</span>
+          {{ contextPercent.toFixed(1) }}%/{{ windowLabel }}
         </span>
-      </div>
-      <div v-if="costLabel" class="stat-chip cost-chip">
-        <span class="stat-label">{{ costLabel }}</span>
       </div>
     </div>
   </div>
@@ -111,6 +137,7 @@ const barColor = computed(() => {
   gap: 8px;
 }
 
+.token-chip,
 .cost-chip {
   border-color: color-mix(in srgb, var(--border) 50%, transparent);
 }

@@ -581,6 +581,84 @@ function formatTreeEntryLabel(node: SessionTreeNodeLike): string {
   return `${labelPrefix}${describeSessionEntry(node.entry)}`.trim();
 }
 
+function summarizeTokenUsage(
+  branch: unknown[],
+  entries?: unknown[] | undefined,
+): {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  messageCount: number;
+  totalCost: number;
+  lastAssistantUsage: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  } | null;
+  lastModel: { provider?: string; modelId?: string } | null;
+} {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cacheReadTokens = 0;
+  let cacheWriteTokens = 0;
+  let totalCost = 0;
+  let lastAssistantUsage: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+  } | null = null;
+  let lastModel: { provider?: string; modelId?: string } | null = null;
+
+  for (const entry of branch) {
+    const e = entry as {
+      type?: string;
+      provider?: string;
+      modelId?: string;
+      message?: {
+        role?: string;
+        usage?: {
+          cost?: { total?: number };
+          input?: number;
+          output?: number;
+          cacheRead?: number;
+          cacheWrite?: number;
+        };
+      };
+    };
+
+    if (e.type === "model_change") {
+      lastModel = { provider: e.provider, modelId: e.modelId };
+    }
+
+    if (e.type === "message" && e.message?.role === "assistant") {
+      const usage = e.message.usage;
+      if (!usage) continue;
+      inputTokens += usage.input ?? 0;
+      outputTokens += usage.output ?? 0;
+      cacheReadTokens += usage.cacheRead ?? 0;
+      cacheWriteTokens += usage.cacheWrite ?? 0;
+      totalCost += usage.cost?.total ?? 0;
+      if ((usage.input ?? 0) > 0) {
+        lastAssistantUsage = usage;
+      }
+    }
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    messageCount: entries?.length ?? 0,
+    totalCost,
+    lastAssistantUsage,
+    lastModel,
+  };
+}
+
 function sessionDisplayName(
   sessionManager: {
     getSessionName: () => string | undefined;
@@ -1601,6 +1679,10 @@ export class WsRpcAdapter {
               percent: stats.contextUsage?.percent ?? null,
               messageCount: stats.totalMessages,
               cost: stats.cost,
+              inputTokens: stats.tokens.input,
+              outputTokens: stats.tokens.output,
+              cacheReadTokens: stats.tokens.cacheRead,
+              cacheWriteTokens: stats.tokens.cacheWrite,
             },
           };
         }
@@ -1614,66 +1696,28 @@ export class WsRpcAdapter {
           try {
             const diskSession = openSessionManager(targetPath);
             const branch = diskSession.getBranch();
-            let totalCost = 0;
-            let lastAssistantEntry: {
-              usage?: {
-                input?: number;
-                output?: number;
-                cacheRead?: number;
-                cacheWrite?: number;
-              };
-            } | null = null;
-            let lastModel: { provider?: string; modelId?: string } | null =
-              null;
-            for (const entry of branch) {
-              const e = entry as {
-                type?: string;
-                provider?: string;
-                modelId?: string;
-                message?: {
-                  role?: string;
-                  usage?: {
-                    cost?: { total?: number };
-                    input?: number;
-                    output?: number;
-                    cacheRead?: number;
-                    cacheWrite?: number;
-                  };
-                };
-              };
-              if (e.type === "model_change") {
-                lastModel = { provider: e.provider, modelId: e.modelId };
-              }
-              if (
-                e.type === "message" &&
-                e.message?.role === "assistant" &&
-                e.message?.usage?.cost
-              ) {
-                totalCost += e.message.usage.cost.total ?? 0;
-                // Only use entries with actual input tokens for context estimation
-                if ((e.message.usage.input ?? 0) > 0) {
-                  lastAssistantEntry = e.message;
-                }
-              }
-            }
+            const summary = summarizeTokenUsage(branch, diskSession.getEntries());
 
-            // Reconstruct context info from last assistant usage + model registry
             let tokens: number | null = null;
             let contextWindow = 0;
             let percent: number | null = null;
-            if (lastAssistantEntry?.usage) {
-              const u = lastAssistantEntry.usage;
+            if (summary.lastAssistantUsage) {
+              const u = summary.lastAssistantUsage;
               tokens =
                 (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
             }
-            if (lastModel?.provider && lastModel?.modelId && tokens != null) {
+            if (
+              summary.lastModel?.provider &&
+              summary.lastModel?.modelId &&
+              tokens != null
+            ) {
               const models = await ctx.modelRegistry.getAvailable();
               const matched = models.find(
                 (m: unknown) =>
                   (m as { provider: string; id: string }).provider ===
-                    lastModel!.provider &&
+                    summary.lastModel!.provider &&
                   (m as { provider: string; id: string }).id ===
-                    lastModel!.modelId,
+                    summary.lastModel!.modelId,
               );
               if (matched) {
                 contextWindow =
@@ -1694,8 +1738,12 @@ export class WsRpcAdapter {
                 tokens,
                 contextWindow,
                 percent,
-                messageCount: diskSession.getEntries()?.length ?? 0,
-                cost: totalCost,
+                messageCount: summary.messageCount,
+                cost: summary.totalCost,
+                inputTokens: summary.inputTokens,
+                outputTokens: summary.outputTokens,
+                cacheReadTokens: summary.cacheReadTokens,
+                cacheWriteTokens: summary.cacheWriteTokens,
               },
             };
           } catch {
@@ -1706,60 +1754,23 @@ export class WsRpcAdapter {
         // Live session: use context API, with fallback to branch reconstruction
         const usage = ctx.getContextUsage();
         const branch = ctx.sessionManager.getBranch();
-        let totalCost = 0;
-        let lastAssistantUsage: {
-          input?: number;
-          output?: number;
-          cacheRead?: number;
-          cacheWrite?: number;
-        } | null = null;
-        let lastModel: { provider?: string; modelId?: string } | null = null;
-        for (const entry of branch) {
-          const e = entry as {
-            type?: string;
-            provider?: string;
-            modelId?: string;
-            message?: {
-              role?: string;
-              usage?: {
-                cost?: { total?: number };
-                input?: number;
-                output?: number;
-                cacheRead?: number;
-                cacheWrite?: number;
-              };
-            };
-          };
-          if (e.type === "model_change") {
-            lastModel = { provider: e.provider, modelId: e.modelId };
-          }
-          if (
-            e.type === "message" &&
-            e.message?.role === "assistant" &&
-            e.message?.usage?.cost
-          ) {
-            totalCost += e.message.usage.cost.total ?? 0;
-            if ((e.message.usage.input ?? 0) > 0) {
-              lastAssistantUsage = e.message.usage;
-            }
-          }
-        }
+        const summary = summarizeTokenUsage(branch, ctx.sessionManager.getEntries());
 
         let tokens: number | null = usage?.tokens ?? null;
         let contextWindow: number = usage?.contextWindow ?? 0;
         let percent: number | null = usage?.percent ?? null;
 
         // Fallback: reconstruct from branch entries when getContextUsage() is empty
-        if (tokens == null && lastAssistantUsage) {
+        if (tokens == null && summary.lastAssistantUsage) {
           tokens =
-            (lastAssistantUsage.input ?? 0) +
-            (lastAssistantUsage.cacheRead ?? 0) +
-            (lastAssistantUsage.cacheWrite ?? 0);
+            (summary.lastAssistantUsage.input ?? 0) +
+            (summary.lastAssistantUsage.cacheRead ?? 0) +
+            (summary.lastAssistantUsage.cacheWrite ?? 0);
         }
         if (
           contextWindow === 0 &&
-          lastModel?.provider &&
-          lastModel?.modelId &&
+          summary.lastModel?.provider &&
+          summary.lastModel?.modelId &&
           tokens != null
         ) {
           try {
@@ -1767,9 +1778,9 @@ export class WsRpcAdapter {
             const matched = models.find(
               (m: unknown) =>
                 (m as { provider: string; id: string }).provider ===
-                  lastModel!.provider &&
+                  summary.lastModel!.provider &&
                 (m as { provider: string; id: string }).id ===
-                  lastModel!.modelId,
+                  summary.lastModel!.modelId,
             );
             if (matched) {
               contextWindow =
@@ -1792,8 +1803,12 @@ export class WsRpcAdapter {
             tokens,
             contextWindow,
             percent,
-            messageCount: ctx.sessionManager.getEntries()?.length ?? 0,
-            cost: totalCost,
+            messageCount: summary.messageCount,
+            cost: summary.totalCost,
+            inputTokens: summary.inputTokens,
+            outputTokens: summary.outputTokens,
+            cacheReadTokens: summary.cacheReadTokens,
+            cacheWriteTokens: summary.cacheWriteTokens,
           },
         };
       }

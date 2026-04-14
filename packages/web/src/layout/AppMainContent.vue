@@ -10,6 +10,7 @@ import type {
 } from "../composables/useBridgeClient";
 import type {
   RpcImageContent,
+  RpcSessionStats,
   RpcSlashCommand,
   RpcWorkspaceEntry,
 } from "../shared-types";
@@ -30,13 +31,7 @@ defineProps<{
   currentModel: RpcModelInfo | null;
   currentThinkingLevel: string | null;
   autoCompactionEnabled: boolean;
-  sessionStats: {
-    tokens: number | null;
-    contextWindow: number;
-    percent: number | null;
-    messageCount: number;
-    cost: number;
-  } | null;
+  sessionStats: RpcSessionStats | null;
 }>();
 
 const emit = defineEmits<{
