@@ -105,12 +105,8 @@ describe("buildToolCardModel", () => {
 
     const model = buildToolCardModel(block);
     expect(model.title).toBe("src/app.ts");
-    expect(model.meta).toBe("2 replacements");
-    expect(model.diffStats).toEqual({
-      added: 2,
-      removed: 1,
-      suffix: "2 replacements",
-    });
+    expect(model.meta).toBeUndefined();
+    expect(model.diffStats).toEqual({ added: 2, removed: 1 });
     expect(model.preview).toBe(diff);
     expect(model.details).toEqual([]);
   });
@@ -133,7 +129,7 @@ describe("buildToolCardModel", () => {
     };
 
     const model = buildToolCardModel(block);
-    expect(model.meta).toBe("2 replacements");
+    expect(model.meta).toBeUndefined();
     expect(model.diffStats).toBeUndefined();
     expect(model.preview).toBe(
       "Could not find the exact text to replace in src/app.ts.",

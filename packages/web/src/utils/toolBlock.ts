@@ -12,7 +12,7 @@ export interface ToolCardModel {
   preview?: string;
   status: ToolBlockStatus;
   details: ToolCardSection[];
-  diffStats?: { added: number; removed: number; suffix?: string };
+  diffStats?: { added: number; removed: number };
 }
 
 type ToolArgsRecord = Record<string, unknown>;
@@ -39,7 +39,6 @@ export function buildToolCardModel(block: ToolContentBlock): ToolCardModel {
     block.resultText,
     block.resultDetails,
     block.toolStatus,
-    diffStats,
   );
   const preview = formatToolPreview(
     block.toolName,
@@ -133,7 +132,6 @@ function formatToolMeta(
   resultText: string | undefined,
   resultDetails: unknown,
   status: ToolBlockStatus,
-  diffStats?: { added: number; removed: number; suffix?: string },
 ): string | undefined {
   switch (toolName) {
     case "bash": {
@@ -144,15 +142,8 @@ function formatToolMeta(
       if (timeout !== undefined) parts.push(`timeout ${timeout}s`);
       return parts.join(" · ") || undefined;
     }
-    case "edit": {
-      if (diffStats) {
-        return diffStats.suffix;
-      }
-      const edits = Array.isArray(args?.edits) ? args.edits.length : undefined;
-      return edits !== undefined
-        ? `${edits} replacement${edits === 1 ? "" : "s"}`
-        : undefined;
-    }
+    case "edit":
+      return undefined;
     case "write": {
       const content = stringValue(args, "content");
       if (!content) return undefined;
@@ -208,7 +199,7 @@ function formatToolPreview(
       return previewText(resultText);
     }
     if (edits !== undefined) {
-      return `${edits} replacement block${edits === 1 ? "" : "s"}`;
+      return `${edits} edit${edits === 1 ? "" : "s"}`;
     }
   }
 
@@ -379,16 +370,7 @@ function buildDiffStats(
   args: ToolArgsRecord | undefined,
   resultDetails: unknown,
   status: ToolBlockStatus,
-): { added: number; removed: number; suffix?: string } | undefined {
+): { added: number; removed: number } | undefined {
   if (toolName !== "edit" || status !== "success") return undefined;
-  const stats = editDiffStats(args, blockResultDiff(resultDetails));
-  if (!stats) return undefined;
-  const edits = Array.isArray(args?.edits) ? args.edits.length : undefined;
-  return {
-    ...stats,
-    suffix:
-      edits !== undefined
-        ? `${edits} replacement${edits === 1 ? "" : "s"}`
-        : undefined,
-  };
+  return editDiffStats(args, blockResultDiff(resultDetails));
 }

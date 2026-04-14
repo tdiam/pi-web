@@ -54,9 +54,7 @@ const editDiff = computed(() => {
             <span class="tool-card-stat tool-card-stat-removed"
               >-{{ model.diffStats.removed }}</span
             >
-            <span v-if="model.diffStats.suffix" class="tool-card-meta">{{
-              model.diffStats.suffix
-            }}</span>
+
           </template>
           <span v-else-if="model.meta" class="tool-card-meta">{{
             model.meta
