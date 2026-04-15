@@ -1008,6 +1008,60 @@ describe("extension_ui_request handling", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps newer local messages when get_messages returns a stale prefix", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_messages",
+        success: true,
+        data: {
+          messages: [{ id: "assistant-0", role: "assistant", content: "Old" }],
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "message_end",
+        id: "user-1",
+        role: "user",
+        content: "Continue here",
+      },
+    });
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "message_start",
+        role: "assistant",
+        content: "",
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_messages",
+        success: true,
+        data: {
+          messages: [{ id: "assistant-0", role: "assistant", content: "Old" }],
+        },
+      },
+    });
+
+    expect(client.transcript.value).toEqual([
+      { id: "assistant-0", role: "assistant", content: "Old" },
+      { id: "user-1", role: "user", content: "Continue here" },
+      { role: "assistant", content: "" },
+    ]);
+  });
+
   it("abortGeneration sends abort only while streaming", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

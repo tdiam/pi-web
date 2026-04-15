@@ -17,7 +17,7 @@ import {
   upsertModel,
   type RpcModelInfo,
 } from "../utils/models";
-import { normalizeTranscript } from "../utils/transcript";
+import { messageContent, normalizeTranscript } from "../utils/transcript";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -389,6 +389,87 @@ function mergeTranscriptMessage(msg: TranscriptEntry) {
   rawTranscript.value = [...rawTranscript.value, msg];
 }
 
+function comparableTranscriptText(entry: TranscriptEntry): string {
+  return messageContent(entry).replace(/\s+/g, " ").trim();
+}
+
+function sameTranscriptMessage(
+  current: TranscriptEntry,
+  snapshot: TranscriptEntry,
+): boolean {
+  if (current.id && snapshot.id) {
+    return current.id === snapshot.id;
+  }
+
+  if (current.role !== snapshot.role) {
+    return false;
+  }
+
+  const currentText = comparableTranscriptText(current);
+  const snapshotText = comparableTranscriptText(snapshot);
+  if (currentText || snapshotText) {
+    return (
+      currentText === snapshotText ||
+      currentText.startsWith(snapshotText) ||
+      snapshotText.startsWith(currentText)
+    );
+  }
+
+  const currentContent = JSON.stringify(current.content ?? current.text ?? null);
+  const snapshotContent = JSON.stringify(
+    snapshot.content ?? snapshot.text ?? null,
+  );
+  if (currentContent !== "null" || snapshotContent !== "null") {
+    return currentContent === snapshotContent;
+  }
+
+  // Empty streaming placeholders often arrive before server-side ids hydrate.
+  return !current.id || !snapshot.id;
+}
+
+function mergeTranscriptSnapshot(snapshot: TranscriptEntry[]): TranscriptEntry[] {
+  const current = rawTranscript.value;
+  if (current.length === 0) {
+    return [...snapshot];
+  }
+
+  if (snapshot.length === 0) {
+    return hasPendingMessageIds() ? [...current] : [];
+  }
+
+  const overlapLimit = Math.min(current.length, snapshot.length);
+  let overlapCount = 0;
+  while (
+    overlapCount < overlapLimit &&
+    sameTranscriptMessage(current[overlapCount], snapshot[overlapCount])
+  ) {
+    overlapCount += 1;
+  }
+
+  if (overlapCount === 0) {
+    return [...snapshot];
+  }
+
+  const merged = snapshot.slice(0, overlapCount).map((entry, index) => ({
+    ...current[index],
+    ...entry,
+  }));
+
+  if (overlapCount === current.length && overlapCount === snapshot.length) {
+    return merged;
+  }
+
+  if (overlapCount === snapshot.length && snapshot.length < current.length) {
+    return [...merged, ...current.slice(overlapCount)];
+  }
+
+  if (overlapCount === current.length && current.length < snapshot.length) {
+    return [...merged, ...snapshot.slice(overlapCount)];
+  }
+
+  return [...merged, ...snapshot.slice(overlapCount)];
+}
+
 function handleServerMessage(raw: MessageEvent) {
   let envelope: ServerMessage;
   try {
@@ -424,7 +505,11 @@ function handleResponse(payload: RpcResponse) {
         const data = payload.data as
           | { messages: TranscriptEntry[] }
           | undefined;
-        if (data) rawTranscript.value = data.messages;
+        if (data) {
+          rawTranscript.value = hasPendingMessageIds()
+            ? mergeTranscriptSnapshot(data.messages)
+            : data.messages;
+        }
         break;
       }
       case "get_state": {
@@ -594,13 +679,24 @@ function handleResponse(payload: RpcResponse) {
   }
 }
 
+function eventTranscriptMessage(
+  payload: Record<string, unknown>,
+): TranscriptEntry {
+  const {
+    type: _eventType,
+    assistantMessageEvent: _assistantMessageEvent,
+    ...message
+  } = payload;
+  return message as TranscriptEntry;
+}
+
 function handleEvent(payload: Record<string, unknown>) {
   const eventType = payload.type as string;
 
   switch (eventType) {
     case "message_start": {
       isStreaming.value = true;
-      const msg = payload as unknown as TranscriptEntry;
+      const msg = eventTranscriptMessage(payload);
       if (msg.role) {
         rawTranscript.value = [...rawTranscript.value, msg];
       }
@@ -608,13 +704,13 @@ function handleEvent(payload: Record<string, unknown>) {
       break;
     }
     case "message_update": {
-      const msg = payload as unknown as TranscriptEntry;
+      const msg = eventTranscriptMessage(payload);
       mergeTranscriptMessage(msg);
       requestTranscriptRefresh();
       break;
     }
     case "message_end": {
-      const msg = payload as unknown as TranscriptEntry;
+      const msg = eventTranscriptMessage(payload);
       mergeTranscriptMessage(msg);
       requestTranscriptRefresh();
       break;
