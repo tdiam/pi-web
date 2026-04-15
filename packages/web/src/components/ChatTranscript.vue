@@ -56,38 +56,36 @@ function roleLabel(role: string): string {
 const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
 
-function toolBlockKey(msgId: string | undefined, blockIdx: number): string {
-  return `${msgId ?? ""}-${blockIdx}`;
+function messageStableKey(msg: TranscriptEntry, index: number): string {
+  return msg.transcriptKey ?? msg.id ?? `message:${index}`;
 }
 
-function toggleToolBlock(msgId: string | undefined, blockIdx: number) {
-  const key = toolBlockKey(msgId, blockIdx);
+function toolBlockKey(messageKey: string, blockIdx: number): string {
+  return `${messageKey}-${blockIdx}`;
+}
+
+function toggleToolBlock(messageKey: string, blockIdx: number) {
+  const key = toolBlockKey(messageKey, blockIdx);
   const next = new Set(expandedToolBlocks.value);
   if (next.has(key)) next.delete(key);
   else next.add(key);
   expandedToolBlocks.value = next;
 }
 
-function toggleThinking(msgId: string | undefined, blockIdx: number) {
-  const key = toolBlockKey(msgId, blockIdx);
+function toggleThinking(messageKey: string, blockIdx: number) {
+  const key = toolBlockKey(messageKey, blockIdx);
   const next = new Set(expandedThinking.value);
   if (next.has(key)) next.delete(key);
   else next.add(key);
   expandedThinking.value = next;
 }
 
-function isToolBlockExpanded(
-  msgId: string | undefined,
-  blockIdx: number,
-): boolean {
-  return expandedToolBlocks.value.has(toolBlockKey(msgId, blockIdx));
+function isToolBlockExpanded(messageKey: string, blockIdx: number): boolean {
+  return expandedToolBlocks.value.has(toolBlockKey(messageKey, blockIdx));
 }
 
-function isThinkingExpanded(
-  msgId: string | undefined,
-  blockIdx: number,
-): boolean {
-  return expandedThinking.value.has(toolBlockKey(msgId, blockIdx));
+function isThinkingExpanded(messageKey: string, blockIdx: number): boolean {
+  return expandedThinking.value.has(toolBlockKey(messageKey, blockIdx));
 }
 
 function previewText(text: string, maxLines: number = 8): string {
@@ -208,7 +206,7 @@ defineExpose({ preserveScroll });
         <span class="hint-chip">Drop or paste images</span>
       </div>
     </div>
-    <template v-for="(msg, index) in messages" :key="msg.id ?? index">
+    <template v-for="(msg, index) in messages" :key="messageStableKey(msg, index)">
       <div v-if="isToolResultMessage(msg)" class="message-row tool">
         <div class="message-meta">
           <span class="message-role">{{ roleLabel(msg.role) }}</span>
@@ -227,17 +225,25 @@ defineExpose({ preserveScroll });
               <button
                 type="button"
                 class="tool-result-card-toggle"
-                @click="toggleToolBlock(msg.id, -1)"
-                :title="isToolBlockExpanded(msg.id, -1) ? 'Collapse' : 'Expand'"
+                @click="toggleToolBlock(messageStableKey(msg, index), -1)"
+                :title="
+                  isToolBlockExpanded(messageStableKey(msg, index), -1)
+                    ? 'Collapse'
+                    : 'Expand'
+                "
               >
-                {{ isToolBlockExpanded(msg.id, -1) ? "Hide" : "Details" }}
+                {{
+                  isToolBlockExpanded(messageStableKey(msg, index), -1)
+                    ? "Hide"
+                    : "Details"
+                }}
               </button>
             </div>
             <pre class="tool-result-card-preview">{{
               previewText(messageContent(msg), 6)
             }}</pre>
             <pre
-              v-if="isToolBlockExpanded(msg.id, -1)"
+              v-if="isToolBlockExpanded(messageStableKey(msg, index), -1)"
               class="tool-result-card-details"
               >{{ messageContent(msg) }}</pre
             >
@@ -278,13 +284,13 @@ defineExpose({ preserveScroll });
             <div v-if="block.kind === 'thinking'" class="thinking-block">
               <button
                 class="thinking-toggle"
-                @click="toggleThinking(msg.id, bIdx)"
+                @click="toggleThinking(messageStableKey(msg, index), bIdx)"
               >
                 <Sparkle class="toggle-icon" aria-hidden="true" />
                 Thinking
               </button>
               <MarkdownRenderer
-                v-if="isThinkingExpanded(msg.id, bIdx)"
+                v-if="isThinkingExpanded(messageStableKey(msg, index), bIdx)"
                 class="thinking-content"
                 :content="block.text"
               />
@@ -294,8 +300,8 @@ defineExpose({ preserveScroll });
               v-else-if="block.kind === 'tool'"
               class="tool-card-block"
               :block="block"
-              :expanded="isToolBlockExpanded(msg.id, bIdx)"
-              @toggle="toggleToolBlock(msg.id, bIdx)"
+              :expanded="isToolBlockExpanded(messageStableKey(msg, index), bIdx)"
+              @toggle="toggleToolBlock(messageStableKey(msg, index), bIdx)"
             />
 
             <figure

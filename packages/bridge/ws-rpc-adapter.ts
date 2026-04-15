@@ -23,6 +23,9 @@ import type {
   RpcResponse,
   RpcSessionState,
   RpcSlashCommand,
+  RpcTranscriptMessage,
+  RpcTranscriptSnapshotEvent,
+  RpcTranscriptUpsertEvent,
   RpcTreeEntry,
   RpcWorkspaceEntry,
   RpcTreeTrackColumn,
@@ -123,6 +126,13 @@ interface PendingUIRequest {
   reject: (error: Error) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
   method: string;
+}
+
+interface TranscriptSyncState {
+  sessionPath: string | null;
+  nextEphemeralId: number;
+  messageIdToKey: Map<string, string>;
+  openKeysByRole: Map<string, string[]>;
 }
 
 interface SessionTreeNodeLike {
@@ -504,19 +514,90 @@ function buildTreeEntriesForSessionPath(sessionPath: string): RpcTreeEntry[] {
   return buildTreeEntriesFromSession(sessionManager);
 }
 
+function transcriptMessageFromBranchEntry(
+  entry: unknown,
+  fallbackKey: string,
+): RpcTranscriptMessage | null {
+  if (!entry || typeof entry !== "object") return null;
+
+  const typedEntry = entry as {
+    type?: string;
+    id?: unknown;
+    role?: unknown;
+    timestamp?: unknown;
+    message?: unknown;
+  };
+
+  if (
+    typedEntry.type === "message" &&
+    typedEntry.message &&
+    typeof typedEntry.message === "object"
+  ) {
+    const message = typedEntry.message as Record<string, unknown>;
+    const id = typeof typedEntry.id === "string" ? typedEntry.id : undefined;
+    const role = typeof message.role === "string" ? message.role : null;
+    if (!role) return null;
+    return {
+      ...message,
+      transcriptKey: id ?? fallbackKey,
+      id,
+      role,
+      timestamp:
+        typeof typedEntry.timestamp === "string"
+          ? typedEntry.timestamp
+          : undefined,
+    };
+  }
+
+  if (typeof typedEntry.role === "string") {
+    const flatMessage = typedEntry as Record<string, unknown>;
+    const id = typeof typedEntry.id === "string" ? typedEntry.id : undefined;
+    return {
+      ...flatMessage,
+      transcriptKey: id ?? fallbackKey,
+      id,
+      role: typedEntry.role,
+      timestamp:
+        typeof typedEntry.timestamp === "string"
+          ? typedEntry.timestamp
+          : undefined,
+    };
+  }
+
+  return null;
+}
+
 function flattenMessagesForTranscript(
-  branch: readonly SessionEntry[],
-): unknown[] {
-  return branch
-    .filter(entry => entry.type === "message")
-    .map(entry => {
-      const messageEntry = entry as Extract<SessionEntry, { type: "message" }>;
-      return {
-        id: messageEntry.id,
-        ...messageEntry.message,
-        timestamp: messageEntry.timestamp,
-      };
-    });
+  branch: readonly unknown[],
+): RpcTranscriptMessage[] {
+  const messages: RpcTranscriptMessage[] = [];
+
+  for (let index = 0; index < branch.length; index += 1) {
+    const message = transcriptMessageFromBranchEntry(
+      branch[index],
+      `snapshot:${index}`,
+    );
+    if (message) {
+      messages.push(message);
+    }
+  }
+
+  return messages;
+}
+
+function extractEventMessage(event: object): Record<string, unknown> | null {
+  if (!event || typeof event !== "object") return null;
+
+  const typedEvent = event as { message?: unknown; role?: unknown };
+  if (typedEvent.message && typeof typedEvent.message === "object") {
+    return typedEvent.message as Record<string, unknown>;
+  }
+
+  if (typeof typedEvent.role === "string") {
+    return event as Record<string, unknown>;
+  }
+
+  return null;
 }
 
 function findLatestModelInfo(
@@ -555,25 +636,6 @@ function buildStateFromStoredSession(
     messageCount: sessionManager.getEntries()?.length ?? 0,
     pendingMessageCount: 0,
   };
-}
-
-function toClientEventPayload(
-  event: AgentSessionEvent,
-): Record<string, unknown> {
-  switch (event.type) {
-    case "message_start":
-      return { type: event.type, ...event.message };
-    case "message_update":
-      return {
-        type: event.type,
-        ...event.message,
-        assistantMessageEvent: event.assistantMessageEvent,
-      };
-    case "message_end":
-      return { type: event.type, ...event.message };
-    default:
-      return event as unknown as Record<string, unknown>;
-  }
 }
 
 function formatTreeEntryLabel(node: SessionTreeNodeLike): string {
@@ -917,6 +979,12 @@ export class WsRpcAdapter {
   private pendingSessionManager: SessionManager | null = null;
   private selectedSessionUnsubscribe: (() => void) | undefined;
   private workspaceEntriesCache: RpcWorkspaceEntry[] | null = null;
+  private transcriptSync: TranscriptSyncState = {
+    sessionPath: null,
+    nextEphemeralId: 0,
+    messageIdToKey: new Map(),
+    openKeysByRole: new Map(),
+  };
 
   constructor(
     client: WsClient,
@@ -935,6 +1003,7 @@ export class WsRpcAdapter {
 
     this.setupWebSocket();
     this.subscribeToEvents();
+    this.sendInitialTranscriptSnapshot();
   }
 
   /**
@@ -962,53 +1031,278 @@ export class WsRpcAdapter {
   }
 
   /**
-   * Subscribe to Pi events and broadcast them
+   * Subscribe to Pi events and route them directly to the active browser view.
    */
   subscribeToEvents(): void {
-    // Subscribe to all Pi events via the extension API
+    void this.eventBus;
+
     this.context.pi.on("agent_start", (event: object) => {
-      this.eventBus.broadcast({ type: "agent_start", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.sendEvent({ type: "agent_start", ...(event as Record<string, unknown>) });
     });
 
     this.context.pi.on("agent_end", (event: object) => {
-      this.eventBus.broadcast({ type: "agent_end", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.sendEvent({ type: "agent_end", ...(event as Record<string, unknown>) });
     });
 
     this.context.pi.on("message_start", (event: object) => {
-      this.eventBus.broadcast({ type: "message_start", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.handleTranscriptLifecycleEvent(
+        "message_start",
+        event,
+        this.currentTranscriptSessionPath(),
+      );
     });
 
     this.context.pi.on("message_update", (event: object) => {
-      this.eventBus.broadcast({ type: "message_update", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.handleTranscriptLifecycleEvent(
+        "message_update",
+        event,
+        this.currentTranscriptSessionPath(),
+      );
     });
 
     this.context.pi.on("message_end", (event: object) => {
-      this.eventBus.broadcast({ type: "message_end", ...event });
-    });
-
-    this.context.pi.on("turn_start", (event: object) => {
-      this.eventBus.broadcast({ type: "turn_start", ...event });
-    });
-
-    this.context.pi.on("turn_end", (event: object) => {
-      this.eventBus.broadcast({ type: "turn_end", ...event });
-    });
-
-    this.context.pi.on("tool_execution_start", (event: object) => {
-      this.eventBus.broadcast({ type: "tool_execution_start", ...event });
-    });
-
-    this.context.pi.on("tool_execution_update", (event: object) => {
-      this.eventBus.broadcast({ type: "tool_execution_update", ...event });
-    });
-
-    this.context.pi.on("tool_execution_end", (event: object) => {
-      this.eventBus.broadcast({ type: "tool_execution_end", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.handleTranscriptLifecycleEvent(
+        "message_end",
+        event,
+        this.currentTranscriptSessionPath(),
+      );
     });
 
     this.context.pi.on("model_select", (event: object) => {
-      this.eventBus.broadcast({ type: "model_select", ...event });
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.sendEvent({ type: "model_select", ...(event as Record<string, unknown>) });
     });
+  }
+
+  private sendEvent(payload: Record<string, unknown>): void {
+    this.sendResponse({
+      type: "event",
+      payload,
+    });
+  }
+
+  private currentTranscriptSessionPath(): string | null {
+    return (
+      this.selectedSession?.sessionFile ??
+      this.selectedSessionPath ??
+      this.pendingSessionManager?.getSessionFile() ??
+      this.context.ctx.sessionManager.getSessionFile() ??
+      null
+    );
+  }
+
+  private shouldHandleLiveSessionEvents(): boolean {
+    const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
+    return (
+      !this.selectedSession &&
+      (!this.selectedSessionPath || this.selectedSessionPath === liveSessionPath)
+    );
+  }
+
+  private buildCurrentTranscriptMessages(): RpcTranscriptMessage[] {
+    if (this.selectedSession) {
+      return flattenMessagesForTranscript(
+        this.selectedSession.sessionManager.getBranch(),
+      );
+    }
+
+    if (this.pendingSessionManager) {
+      return flattenMessagesForTranscript(this.pendingSessionManager.getBranch());
+    }
+
+    if (this.selectedSessionPath && fs.existsSync(this.selectedSessionPath)) {
+      const sessionManager = openSessionManager(this.selectedSessionPath);
+      return flattenMessagesForTranscript(sessionManager.getBranch());
+    }
+
+    return flattenMessagesForTranscript(this.context.ctx.sessionManager.getBranch());
+  }
+
+  private resetTranscriptSync(
+    messages: readonly RpcTranscriptMessage[],
+    sessionPath: string | null,
+  ): void {
+    this.transcriptSync = {
+      sessionPath,
+      nextEphemeralId: 0,
+      messageIdToKey: new Map(),
+      openKeysByRole: new Map(),
+    };
+
+    for (const message of messages) {
+      if (message.id) {
+        this.transcriptSync.messageIdToKey.set(
+          message.id,
+          message.transcriptKey,
+        );
+      }
+    }
+  }
+
+  private sendTranscriptSnapshot(
+    messages: readonly RpcTranscriptMessage[],
+    sessionPath: string | null,
+  ): void {
+    this.resetTranscriptSync(messages, sessionPath);
+    const payload: RpcTranscriptSnapshotEvent = {
+      type: "transcript_snapshot",
+      sessionPath: sessionPath ?? undefined,
+      messages: [...messages],
+    };
+    this.sendEvent(payload as unknown as Record<string, unknown>);
+  }
+
+  private sendInitialTranscriptSnapshot(): void {
+    this.sendTranscriptSnapshot(
+      this.buildCurrentTranscriptMessages(),
+      this.currentTranscriptSessionPath(),
+    );
+  }
+
+  private nextTranscriptKey(): string {
+    this.transcriptSync.nextEphemeralId += 1;
+    return `live:${this.transcriptSync.nextEphemeralId}`;
+  }
+
+  private roleOpenKeys(role: string): string[] {
+    const existing = this.transcriptSync.openKeysByRole.get(role);
+    if (existing) return existing;
+    const created: string[] = [];
+    this.transcriptSync.openKeysByRole.set(role, created);
+    return created;
+  }
+
+  private markRoleKeyOpen(role: string, key: string): void {
+    const keys = this.roleOpenKeys(role);
+    if (!keys.includes(key)) {
+      keys.push(key);
+    }
+  }
+
+  private markRoleKeyClosed(role: string, key: string): void {
+    const keys = this.transcriptSync.openKeysByRole.get(role);
+    if (!keys) return;
+    const next = keys.filter(candidate => candidate !== key);
+    if (next.length > 0) {
+      this.transcriptSync.openKeysByRole.set(role, next);
+      return;
+    }
+    this.transcriptSync.openKeysByRole.delete(role);
+  }
+
+  private findOpenRoleKey(role: string): string | null {
+    const keys = this.transcriptSync.openKeysByRole.get(role);
+    if (!keys || keys.length === 0) return null;
+    return keys[keys.length - 1] ?? null;
+  }
+
+  private resolveTranscriptKey(
+    eventType: "message_start" | "message_update" | "message_end",
+    message: Record<string, unknown>,
+  ): string | null {
+    const role = typeof message.role === "string" ? message.role : null;
+    if (!role) return null;
+
+    const messageId = typeof message.id === "string" ? message.id : null;
+    if (eventType === "message_start") {
+      const key =
+        (messageId && this.transcriptSync.messageIdToKey.get(messageId)) ??
+        this.nextTranscriptKey();
+      if (messageId) {
+        this.transcriptSync.messageIdToKey.set(messageId, key);
+      }
+      this.markRoleKeyOpen(role, key);
+      return key;
+    }
+
+    const knownKey =
+      (messageId && this.transcriptSync.messageIdToKey.get(messageId)) ??
+      this.findOpenRoleKey(role);
+    const key = knownKey ?? this.nextTranscriptKey();
+
+    if (messageId) {
+      this.transcriptSync.messageIdToKey.set(messageId, key);
+    }
+    if (!knownKey) {
+      this.markRoleKeyOpen(role, key);
+    }
+    if (eventType === "message_end") {
+      this.markRoleKeyClosed(role, key);
+    }
+    return key;
+  }
+
+  private toTranscriptMessage(
+    message: Record<string, unknown>,
+    transcriptKey: string,
+  ): RpcTranscriptMessage | null {
+    const role = typeof message.role === "string" ? message.role : null;
+    if (!role) return null;
+
+    return {
+      transcriptKey,
+      ...message,
+      id: typeof message.id === "string" ? message.id : undefined,
+      role,
+      timestamp:
+        typeof message.timestamp === "string" ? message.timestamp : undefined,
+    };
+  }
+
+  private handleTranscriptLifecycleEvent(
+    eventType: "message_start" | "message_update" | "message_end",
+    event: object,
+    sessionPath: string | null,
+  ): void {
+    const message = extractEventMessage(event);
+    if (!message) return;
+
+    if (this.transcriptSync.sessionPath !== sessionPath) {
+      this.resetTranscriptSync([], sessionPath);
+    }
+
+    const transcriptKey = this.resolveTranscriptKey(eventType, message);
+    if (!transcriptKey) return;
+
+    const transcriptMessage = this.toTranscriptMessage(message, transcriptKey);
+    if (!transcriptMessage) return;
+
+    const payload: RpcTranscriptUpsertEvent = {
+      type: "transcript_upsert",
+      sessionPath: sessionPath ?? undefined,
+      message: transcriptMessage,
+    };
+    this.sendEvent(payload as unknown as Record<string, unknown>);
+  }
+
+  private handleSelectedSessionEvent(event: AgentSessionEvent): void {
+    const sessionPath = this.currentTranscriptSessionPath();
+    const eventType = (event as { type: string }).type;
+
+    switch (eventType) {
+      case "message_start":
+      case "message_update":
+      case "message_end":
+        this.handleTranscriptLifecycleEvent(eventType, event, sessionPath);
+        return;
+      case "agent_start":
+        this.sendEvent({
+          type: "agent_start",
+          ...(event as unknown as Record<string, unknown>),
+        });
+        return;
+      case "agent_end":
+      case "model_select":
+        this.sendEvent(event as unknown as Record<string, unknown>);
+        return;
+      default:
+        return;
+    }
   }
 
   private disposeSelectedSession(): void {
@@ -1080,11 +1374,13 @@ export class WsRpcAdapter {
 
     this.selectedSession = created.session;
     this.selectedSessionUnsubscribe = created.session.subscribe(event => {
-      this.sendResponse({
-        type: "event",
-        payload: toClientEventPayload(event),
-      });
+      this.handleSelectedSessionEvent(event);
     });
+
+    this.sendTranscriptSnapshot(
+      flattenMessagesForTranscript(created.session.sessionManager.getBranch()),
+      created.session.sessionFile ?? null,
+    );
 
     return created.session;
   }
@@ -1155,13 +1451,16 @@ export class WsRpcAdapter {
     sessionManager: SessionManager,
     sessionPath: string,
   ): RpcResponse {
+    const messages = flattenMessagesForTranscript(sessionManager.getBranch());
+    this.resetTranscriptSync(messages, sessionPath);
+
     return {
       id: correlationId,
       type: "response",
       command: "switch_session",
       success: true,
       data: {
-        messages: flattenMessagesForTranscript(sessionManager.getBranch()),
+        messages,
         treeEntries: buildTreeEntriesFromSession(sessionManager),
         sessionId: sessionManager.getSessionId(),
         sessionName: sessionDisplayName(sessionManager, sessionPath),
@@ -1313,13 +1612,15 @@ export class WsRpcAdapter {
         if (autoCreated && autoCreatedSm) {
           const sm = autoCreatedSm;
           const sessionFile = sm.getSessionFile();
+          const messages = flattenMessagesForTranscript(sm.getBranch());
+          this.resetTranscriptSync(messages, sessionFile ?? null);
           return {
             id: correlationId,
             type: "response",
             command: "new_session",
             success: true,
             data: {
-              messages: flattenMessagesForTranscript(sm.getBranch()),
+              messages,
               treeEntries: buildTreeEntriesFromSession(sm),
               sessionId: sm.getSessionId(),
               sessionName: sessionDisplayName(sm, sessionFile),
@@ -1969,13 +2270,15 @@ export class WsRpcAdapter {
         }
         this.pendingSessionManager = sessionManager;
 
+        const messages = flattenMessagesForTranscript(sessionManager.getBranch());
+        this.resetTranscriptSync(messages, sessionFile ?? null);
         return {
           id: correlationId,
           type: "response",
           command: "new_session",
           success: true,
           data: {
-            messages: flattenMessagesForTranscript(sessionManager.getBranch()),
+            messages,
             treeEntries: buildTreeEntriesFromSession(sessionManager),
             sessionId: sessionManager.getSessionId(),
             sessionName: sessionDisplayName(sessionManager, sessionFile),
@@ -1991,16 +2294,19 @@ export class WsRpcAdapter {
 
       case "get_messages": {
         if (this.selectedSession) {
+          const messages = flattenMessagesForTranscript(
+            this.selectedSession.sessionManager.getBranch(),
+          );
+          this.resetTranscriptSync(
+            messages,
+            this.selectedSession.sessionFile ?? null,
+          );
           return {
             id: correlationId,
             type: "response",
             command: "get_messages",
             success: true,
-            data: {
-              messages: flattenMessagesForTranscript(
-                this.selectedSession.sessionManager.getBranch(),
-              ),
-            },
+            data: { messages },
           };
         }
 
@@ -2009,24 +2315,24 @@ export class WsRpcAdapter {
           fs.existsSync(this.selectedSessionPath)
         ) {
           const sessionManager = openSessionManager(this.selectedSessionPath);
+          const messages = flattenMessagesForTranscript(
+            sessionManager.getBranch(),
+          );
+          this.resetTranscriptSync(messages, this.selectedSessionPath);
           return {
             id: correlationId,
             type: "response",
             command: "get_messages",
             success: true,
-            data: {
-              messages: flattenMessagesForTranscript(
-                sessionManager.getBranch(),
-              ),
-            },
+            data: { messages },
           };
         }
 
-        const entries = ctx.sessionManager.getBranch();
-        const messages = entries.filter((e: unknown) => {
-          const entry = e as { role?: string; type?: string };
-          return entry.role !== undefined || entry.type === "message";
-        });
+        const messages = flattenMessagesForTranscript(ctx.sessionManager.getBranch());
+        this.resetTranscriptSync(
+          messages,
+          ctx.sessionManager.getSessionFile() ?? null,
+        );
         return {
           id: correlationId,
           type: "response",

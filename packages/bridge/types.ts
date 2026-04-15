@@ -170,6 +170,28 @@ export interface RpcSessionStats {
   cacheWriteTokens: number;
 }
 
+export interface RpcTranscriptMessage {
+  transcriptKey: string;
+  id?: string;
+  role: string;
+  content?: unknown;
+  text?: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
+export interface RpcTranscriptSnapshotEvent {
+  type: "transcript_snapshot";
+  sessionPath?: string;
+  messages: RpcTranscriptMessage[];
+}
+
+export interface RpcTranscriptUpsertEvent {
+  type: "transcript_upsert";
+  sessionPath?: string;
+  message: RpcTranscriptMessage;
+}
+
 // ============================================================================
 // RPC Responses (server → client)
 // ============================================================================

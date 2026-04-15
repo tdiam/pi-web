@@ -284,7 +284,7 @@ describe("Bridge Integration", () => {
           success: true,
           data: {
             sessionId: "test-session-123",
-            sessionName: "Test Session",
+            sessionName: "Hello",
             messageCount: 2,
             pendingMessageCount: 0,
             isStreaming: false,

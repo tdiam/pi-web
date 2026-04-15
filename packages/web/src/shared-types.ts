@@ -16,6 +16,9 @@ export type {
   RpcWorkspaceEntry,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcTranscriptMessage,
+  RpcTranscriptSnapshotEvent,
+  RpcTranscriptUpsertEvent,
   ClientMessage,
   ServerMessage,
 } from "../../bridge/types";

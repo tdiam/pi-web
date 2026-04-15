@@ -9,6 +9,9 @@ import type {
   RpcWorkspaceEntry,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcTranscriptMessage,
+  RpcTranscriptSnapshotEvent,
+  RpcTranscriptUpsertEvent,
   ClientMessage,
   ServerMessage,
 } from "../shared-types";
@@ -17,7 +20,7 @@ import {
   upsertModel,
   type RpcModelInfo,
 } from "../utils/models";
-import { messageContent, normalizeTranscript } from "../utils/transcript";
+import { normalizeTranscript } from "../utils/transcript";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +30,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 /** Minimal shape of a message entry from get_messages / message events. */
 export interface TranscriptEntry {
+  transcriptKey?: string;
   id?: string;
   role: string;
   content?: unknown;
@@ -87,6 +91,7 @@ function normalizeSessionStats(value: unknown): RpcSessionStats | null {
 
 const connectionStatus = ref<ConnectionStatus>("disconnected");
 const rawTranscript = ref<TranscriptEntry[]>([]);
+const transcriptSessionPath = ref<string | null>(null);
 const transcript = computed(() => normalizeTranscript(rawTranscript.value));
 const sessionState = ref<RpcSessionState | null>(null);
 const sessions = ref<SessionEntry[]>([]);
@@ -139,11 +144,8 @@ const prefillText = ref<string | null>(null);
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let transcriptRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-let transcriptRefreshInFlight = false;
 let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30_000;
-const TRANSCRIPT_REFRESH_DELAY_MS = 50;
 let disposed = false;
 let requestIdCounter = 0;
 let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
@@ -238,37 +240,66 @@ function sendCommand(payload: RpcCommand): Promise<RpcResponse> {
   });
 }
 
-function hasPendingMessageIds(): boolean {
-  return rawTranscript.value.some(
-    entry => typeof entry.role === "string" && !entry.id,
+function normalizeTranscriptEntry(
+  entry: TranscriptEntry | RpcTranscriptMessage,
+  fallbackKey: string,
+): TranscriptEntry {
+  return {
+    ...entry,
+    transcriptKey:
+      typeof entry.transcriptKey === "string" && entry.transcriptKey
+        ? entry.transcriptKey
+        : typeof entry.id === "string" && entry.id
+          ? entry.id
+          : fallbackKey,
+  };
+}
+
+function replaceTranscript(
+  entries: readonly (TranscriptEntry | RpcTranscriptMessage)[],
+  sessionPath: string | null = transcriptSessionPath.value,
+) {
+  rawTranscript.value = entries.map((entry, index) =>
+    normalizeTranscriptEntry(entry, `snapshot:${index}`),
+  );
+  transcriptSessionPath.value = sessionPath;
+}
+
+function shouldReplaceSessionTranscript(sessionPath: string | null): boolean {
+  return (
+    rawTranscript.value.length === 0 || transcriptSessionPath.value !== sessionPath
   );
 }
 
-function requestTranscriptRefresh(
-  delayMs: number = TRANSCRIPT_REFRESH_DELAY_MS,
+function applySessionTranscript(
+  entries: readonly (TranscriptEntry | RpcTranscriptMessage)[],
+  sessionPath: string | null,
 ) {
-  if (transcriptRefreshTimer || transcriptRefreshInFlight) return;
-  if (connectionStatus.value !== "connected") return;
-  if (!hasPendingMessageIds()) return;
+  if (!shouldReplaceSessionTranscript(sessionPath)) return;
+  replaceTranscript(entries, sessionPath);
+}
 
-  transcriptRefreshTimer = setTimeout(async () => {
-    transcriptRefreshTimer = null;
-    if (transcriptRefreshInFlight) return;
-    if (connectionStatus.value !== "connected") return;
-    if (!hasPendingMessageIds()) return;
+function upsertTranscriptMessage(
+  entry: TranscriptEntry | RpcTranscriptMessage,
+  sessionPath: string | null = transcriptSessionPath.value,
+) {
+  const normalized = normalizeTranscriptEntry(
+    entry,
+    `live:${rawTranscript.value.length}`,
+  );
+  transcriptSessionPath.value = sessionPath;
+  const index = rawTranscript.value.findIndex(
+    current => current.transcriptKey === normalized.transcriptKey,
+  );
 
-    transcriptRefreshInFlight = true;
-    try {
-      await sendCommand({ type: "get_messages" });
-    } catch {
-      // Keep the best-effort polling local to debug metadata hydration.
-    } finally {
-      transcriptRefreshInFlight = false;
-      if (hasPendingMessageIds()) {
-        requestTranscriptRefresh();
-      }
-    }
-  }, delayMs);
+  if (index >= 0) {
+    const updated = [...rawTranscript.value];
+    updated[index] = { ...updated[index], ...normalized };
+    rawTranscript.value = updated;
+    return;
+  }
+
+  rawTranscript.value = [...rawTranscript.value, normalized];
 }
 
 function sendPrompt(message: string, images?: RpcImageContent[]) {
@@ -358,118 +389,6 @@ function dismissNotification(id: string) {
 // Message handling
 // ---------------------------------------------------------------------------
 
-function findTranscriptMessageIndex(msg: TranscriptEntry): number {
-  if (msg.id) {
-    const exactMatch = rawTranscript.value.findIndex(
-      entry => entry.id === msg.id,
-    );
-    if (exactMatch >= 0) return exactMatch;
-  }
-
-  const role = typeof msg.role === "string" ? msg.role : null;
-  for (let index = rawTranscript.value.length - 1; index >= 0; index -= 1) {
-    const entry = rawTranscript.value[index];
-    if (entry.id) continue;
-    if (role && entry.role !== role) continue;
-    return index;
-  }
-
-  return msg.id ? -1 : rawTranscript.value.length - 1;
-}
-
-function mergeTranscriptMessage(msg: TranscriptEntry) {
-  const index = findTranscriptMessageIndex(msg);
-  if (index >= 0) {
-    const updated = [...rawTranscript.value];
-    updated[index] = { ...updated[index], ...msg };
-    rawTranscript.value = updated;
-    return;
-  }
-
-  rawTranscript.value = [...rawTranscript.value, msg];
-}
-
-function comparableTranscriptText(entry: TranscriptEntry): string {
-  return messageContent(entry).replace(/\s+/g, " ").trim();
-}
-
-function sameTranscriptMessage(
-  current: TranscriptEntry,
-  snapshot: TranscriptEntry,
-): boolean {
-  if (current.id && snapshot.id) {
-    return current.id === snapshot.id;
-  }
-
-  if (current.role !== snapshot.role) {
-    return false;
-  }
-
-  const currentText = comparableTranscriptText(current);
-  const snapshotText = comparableTranscriptText(snapshot);
-  if (currentText || snapshotText) {
-    return (
-      currentText === snapshotText ||
-      currentText.startsWith(snapshotText) ||
-      snapshotText.startsWith(currentText)
-    );
-  }
-
-  const currentContent = JSON.stringify(current.content ?? current.text ?? null);
-  const snapshotContent = JSON.stringify(
-    snapshot.content ?? snapshot.text ?? null,
-  );
-  if (currentContent !== "null" || snapshotContent !== "null") {
-    return currentContent === snapshotContent;
-  }
-
-  // Empty streaming placeholders often arrive before server-side ids hydrate.
-  return !current.id || !snapshot.id;
-}
-
-function mergeTranscriptSnapshot(snapshot: TranscriptEntry[]): TranscriptEntry[] {
-  const current = rawTranscript.value;
-  if (current.length === 0) {
-    return [...snapshot];
-  }
-
-  if (snapshot.length === 0) {
-    return hasPendingMessageIds() ? [...current] : [];
-  }
-
-  const overlapLimit = Math.min(current.length, snapshot.length);
-  let overlapCount = 0;
-  while (
-    overlapCount < overlapLimit &&
-    sameTranscriptMessage(current[overlapCount], snapshot[overlapCount])
-  ) {
-    overlapCount += 1;
-  }
-
-  if (overlapCount === 0) {
-    return [...snapshot];
-  }
-
-  const merged = snapshot.slice(0, overlapCount).map((entry, index) => ({
-    ...current[index],
-    ...entry,
-  }));
-
-  if (overlapCount === current.length && overlapCount === snapshot.length) {
-    return merged;
-  }
-
-  if (overlapCount === snapshot.length && snapshot.length < current.length) {
-    return [...merged, ...current.slice(overlapCount)];
-  }
-
-  if (overlapCount === current.length && current.length < snapshot.length) {
-    return [...merged, ...snapshot.slice(overlapCount)];
-  }
-
-  return [...merged, ...snapshot.slice(overlapCount)];
-}
-
 function handleServerMessage(raw: MessageEvent) {
   let envelope: ServerMessage;
   try {
@@ -506,9 +425,7 @@ function handleResponse(payload: RpcResponse) {
           | { messages: TranscriptEntry[] }
           | undefined;
         if (data) {
-          rawTranscript.value = hasPendingMessageIds()
-            ? mergeTranscriptSnapshot(data.messages)
-            : data.messages;
+          replaceTranscript(data.messages, transcriptSessionPath.value);
         }
         break;
       }
@@ -557,7 +474,7 @@ function handleResponse(payload: RpcResponse) {
             }
           | undefined;
         if (data && Array.isArray(data.messages)) {
-          rawTranscript.value = [...data.messages];
+          applySessionTranscript(data.messages, data.sessionPath ?? null);
           if (data.sessionPath) {
             activeTreeSessionPath.value = data.sessionPath;
             liveSessionPath.value = data.sessionPath;
@@ -610,7 +527,7 @@ function handleResponse(payload: RpcResponse) {
             }
           | undefined;
         if (data && Array.isArray(data.messages)) {
-          rawTranscript.value = [...data.messages];
+          applySessionTranscript(data.messages, data.sessionPath ?? null);
           if (data.sessionPath) {
             activeTreeSessionPath.value = data.sessionPath;
             liveSessionPath.value = data.sessionPath;
@@ -627,7 +544,7 @@ function handleResponse(payload: RpcResponse) {
             } as RpcSessionState;
           }
         } else {
-          rawTranscript.value = [];
+          replaceTranscript([], null);
           treeEntries.value = [];
           sessionState.value = null;
         }
@@ -679,40 +596,22 @@ function handleResponse(payload: RpcResponse) {
   }
 }
 
-function eventTranscriptMessage(
-  payload: Record<string, unknown>,
-): TranscriptEntry {
-  const {
-    type: _eventType,
-    assistantMessageEvent: _assistantMessageEvent,
-    ...message
-  } = payload;
-  return message as TranscriptEntry;
-}
-
 function handleEvent(payload: Record<string, unknown>) {
   const eventType = payload.type as string;
 
   switch (eventType) {
-    case "message_start": {
-      isStreaming.value = true;
-      const msg = eventTranscriptMessage(payload);
-      if (msg.role) {
-        rawTranscript.value = [...rawTranscript.value, msg];
+    case "transcript_snapshot": {
+      const data = payload as RpcTranscriptSnapshotEvent;
+      if (Array.isArray(data.messages)) {
+        replaceTranscript(data.messages, data.sessionPath ?? null);
       }
-      requestTranscriptRefresh();
       break;
     }
-    case "message_update": {
-      const msg = eventTranscriptMessage(payload);
-      mergeTranscriptMessage(msg);
-      requestTranscriptRefresh();
-      break;
-    }
-    case "message_end": {
-      const msg = eventTranscriptMessage(payload);
-      mergeTranscriptMessage(msg);
-      requestTranscriptRefresh();
+    case "transcript_upsert": {
+      const data = payload as RpcTranscriptUpsertEvent;
+      if (data.message) {
+        upsertTranscriptMessage(data.message, data.sessionPath ?? null);
+      }
       break;
     }
     case "agent_start": {
@@ -797,7 +696,6 @@ async function fetchInitialState() {
   try {
     await Promise.all([
       sendCommand({ type: "get_state" }),
-      sendCommand({ type: "get_messages" }),
       sendCommand({ type: "list_sessions" }),
       sendCommand({ type: "get_commands" }),
       sendCommand({ type: "get_available_models" }),
@@ -838,11 +736,6 @@ function connect() {
     // Clear extension UI state
     pendingExtensionRequest.value = null;
     notifications.value = [];
-    if (transcriptRefreshTimer) {
-      clearTimeout(transcriptRefreshTimer);
-      transcriptRefreshTimer = null;
-    }
-    transcriptRefreshInFlight = false;
     // Clear pending requests
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timer);
@@ -866,11 +759,6 @@ function disconnect() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  if (transcriptRefreshTimer) {
-    clearTimeout(transcriptRefreshTimer);
-    transcriptRefreshTimer = null;
-  }
-  transcriptRefreshInFlight = false;
   if (ws) {
     ws.close();
     ws = null;

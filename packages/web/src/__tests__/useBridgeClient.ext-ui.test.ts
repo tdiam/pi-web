@@ -119,12 +119,13 @@ describe("extension_ui_request handling", () => {
     expect(sentCommandTypes).toEqual(
       expect.arrayContaining([
         "get_state",
-        "get_messages",
         "list_sessions",
         "get_commands",
         "get_available_models",
       ]),
     );
+
+    expect(sentCommandTypes).not.toContain("get_messages");
 
     // Tree data is loaded lazily when the panel is opened.
     const treeRequests = sentCommandTypes.filter(
@@ -902,7 +903,7 @@ describe("extension_ui_request handling", () => {
     expect(client.notifications.value[0].id).toBe("n2");
   });
 
-  it("backfills delayed message ids onto existing transcript entries", async () => {
+  it("replaces transcript from bridge snapshots", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();
     simulateOpen(ws);
@@ -910,53 +911,29 @@ describe("extension_ui_request handling", () => {
     simulateMessage(ws, {
       type: "event",
       payload: {
-        type: "message_start",
-        role: "user",
-        content: "Hello",
+        type: "transcript_snapshot",
+        messages: [
+          {
+            transcriptKey: "user-1",
+            id: "user-1",
+            role: "user",
+            content: "Hello",
+          },
+        ],
       },
     });
-    simulateMessage(ws, {
-      type: "event",
-      payload: {
-        type: "message_end",
+
+    expect(client.transcript.value).toEqual([
+      {
+        transcriptKey: "user-1",
         id: "user-1",
         role: "user",
         content: "Hello",
       },
-    });
-
-    simulateMessage(ws, {
-      type: "event",
-      payload: {
-        type: "message_start",
-        role: "assistant",
-        content: "Hi",
-      },
-    });
-    simulateMessage(ws, {
-      type: "event",
-      payload: {
-        type: "message_update",
-        id: "assistant-1",
-        role: "assistant",
-        content: "Hi there",
-      },
-    });
-
-    expect(client.transcript.value).toHaveLength(2);
-    expect(client.transcript.value[0]).toMatchObject({
-      id: "user-1",
-      role: "user",
-      content: "Hello",
-    });
-    expect(client.transcript.value[1]).toMatchObject({
-      id: "assistant-1",
-      role: "assistant",
-      content: "Hi there",
-    });
+    ]);
   });
 
-  it("refreshes transcript while message ids are still pending", async () => {
+  it("upserts transcript messages by transcriptKey without polling", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();
     simulateOpen(ws);
@@ -965,100 +942,108 @@ describe("extension_ui_request handling", () => {
     simulateMessage(ws, {
       type: "event",
       payload: {
-        type: "message_start",
-        role: "user",
-        content: "Hello",
+        type: "transcript_upsert",
+        message: {
+          transcriptKey: "live:1",
+          role: "assistant",
+          content: "Hi",
+        },
       },
     });
-
-    await new Promise(resolve => setTimeout(resolve, 80));
-
-    const refreshRequest = ws.send.mock.calls
-      .map(
-        ([message]: [string]) =>
-          JSON.parse(message) as { payload?: { type?: string; id?: string } },
-      )
-      .find(message => message.payload?.type === "get_messages");
-
-    expect(refreshRequest?.payload?.id).toBeTruthy();
-
     simulateMessage(ws, {
-      type: "response",
+      type: "event",
       payload: {
-        type: "response",
-        id: refreshRequest?.payload?.id,
-        command: "get_messages",
-        success: true,
-        data: {
-          messages: [{ id: "user-1", role: "user", content: "Hello" }],
+        type: "transcript_upsert",
+        message: {
+          transcriptKey: "live:1",
+          id: "assistant-1",
+          role: "assistant",
+          content: "Hi there",
         },
       },
     });
 
-    await new Promise(resolve => setTimeout(resolve, 80));
-
     expect(client.transcript.value).toEqual([
-      { id: "user-1", role: "user", content: "Hello" },
+      {
+        transcriptKey: "live:1",
+        id: "assistant-1",
+        role: "assistant",
+        content: "Hi there",
+      },
     ]);
     expect(
-      ws.send.mock.calls.filter(([message]: [string]) => {
-        const parsed = JSON.parse(message) as { payload?: { type?: string } };
-        return parsed.payload?.type === "get_messages";
-      }),
-    ).toHaveLength(1);
+      ws.send.mock.calls.some(([message]: [string]) =>
+        message.includes('"type":"get_messages"'),
+      ),
+    ).toBe(false);
   });
 
-  it("keeps newer local messages when get_messages returns a stale prefix", async () => {
+  it("keeps newer transcript events when new_session returns an empty snapshot", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();
     simulateOpen(ws);
 
     simulateMessage(ws, {
-      type: "response",
+      type: "event",
       payload: {
-        type: "response",
-        command: "get_messages",
-        success: true,
-        data: {
-          messages: [{ id: "assistant-0", role: "assistant", content: "Old" }],
+        type: "transcript_snapshot",
+        sessionPath: "/tmp/old.jsonl",
+        messages: [
+          {
+            transcriptKey: "old-1",
+            id: "old-1",
+            role: "assistant",
+            content: "Old",
+          },
+        ],
+      },
+    });
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_snapshot",
+        sessionPath: "/tmp/new.jsonl",
+        messages: [],
+      },
+    });
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        sessionPath: "/tmp/new.jsonl",
+        message: {
+          transcriptKey: "live:1",
+          id: "user-1",
+          role: "user",
+          content: "Hello",
         },
       },
     });
 
     simulateMessage(ws, {
-      type: "event",
-      payload: {
-        type: "message_end",
-        id: "user-1",
-        role: "user",
-        content: "Continue here",
-      },
-    });
-    simulateMessage(ws, {
-      type: "event",
-      payload: {
-        type: "message_start",
-        role: "assistant",
-        content: "",
-      },
-    });
-
-    simulateMessage(ws, {
       type: "response",
       payload: {
         type: "response",
-        command: "get_messages",
+        command: "new_session",
         success: true,
         data: {
-          messages: [{ id: "assistant-0", role: "assistant", content: "Old" }],
+          messages: [],
+          treeEntries: [],
+          sessionId: "session-2",
+          sessionName: "Session 2",
+          sessionPath: "/tmp/new.jsonl",
+          cancelled: false,
         },
       },
     });
 
     expect(client.transcript.value).toEqual([
-      { id: "assistant-0", role: "assistant", content: "Old" },
-      { id: "user-1", role: "user", content: "Continue here" },
-      { role: "assistant", content: "" },
+      {
+        transcriptKey: "live:1",
+        id: "user-1",
+        role: "user",
+        content: "Hello",
+      },
     ]);
   });
 

@@ -942,21 +942,67 @@ describe("WsRpcAdapter", () => {
   });
 
   describe("event fan-out", () => {
-    it("should broadcast Pi events via eventBus", () => {
-      // Get the agent_start handler registered in subscribeToEvents
-      const agentStartHandler = (
+    it("sends an initial transcript snapshot to the client", () => {
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const firstCall = JSON.parse(sendCalls[0][0] as string);
+
+      expect(firstCall.type).toBe("event");
+      expect(firstCall.payload.type).toBe("transcript_snapshot");
+      expect(firstCall.payload.messages).toEqual([
+        {
+          transcriptKey: "snapshot:0",
+          role: "user",
+          content: "Hello",
+          id: undefined,
+          timestamp: undefined,
+        },
+      ]);
+    });
+
+    it("routes live transcript updates directly to the client", () => {
+      (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+      const messageStartHandler = (
         context.pi.on as ReturnType<typeof vi.fn>
-      ).mock.calls.find(call => call[0] === "agent_start")?.[1];
+      ).mock.calls.find(call => call[0] === "message_start")?.[1];
+      const messageUpdateHandler = (
+        context.pi.on as ReturnType<typeof vi.fn>
+      ).mock.calls.find(call => call[0] === "message_update")?.[1];
 
-      expect(agentStartHandler).toBeDefined();
+      messageStartHandler?.({
+        message: { role: "assistant", content: "Hi" },
+      });
+      messageUpdateHandler?.({
+        message: {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Hi there",
+        },
+      });
 
-      // Create a mock broadcast
-      const broadcastSpy = vi.spyOn(eventBus, "broadcast");
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
 
-      // Call the handler with a test event
-      agentStartHandler?.({ type: "agent_start" });
-
-      expect(broadcastSpy).toHaveBeenCalled();
+      expect(sendCalls).toHaveLength(2);
+      expect(sendCalls[0].type).toBe("event");
+      expect(sendCalls[0].payload).toMatchObject({
+        type: "transcript_upsert",
+        message: {
+          transcriptKey: "live:1",
+          role: "assistant",
+          content: "Hi",
+        },
+      });
+      expect(sendCalls[1].payload).toMatchObject({
+        type: "transcript_upsert",
+        message: {
+          transcriptKey: "live:1",
+          id: "assistant-1",
+          role: "assistant",
+          content: "Hi there",
+        },
+      });
     });
   });
 
