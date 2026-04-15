@@ -17,14 +17,17 @@ const emit = defineEmits<{
 const model = computed(() => buildToolCardModel(props.block));
 const hasDetails = computed(() => model.value.details.length > 0);
 const showPreview = computed(() => !props.expanded || !hasDetails.value);
-const readPath = computed(() => {
+function filePathFromArgs(): string | undefined {
   const args = props.block.toolArgs;
   if (!args || typeof args !== "object" || Array.isArray(args))
     return undefined;
   return typeof (args as Record<string, unknown>).path === "string"
     ? ((args as Record<string, unknown>).path as string)
     : undefined;
-});
+}
+
+const readPath = computed(filePathFromArgs);
+const writePath = computed(filePathFromArgs);
 const editDiff = computed(() => {
   if (props.block.toolName !== "edit") return undefined;
   const details = props.block.resultDetails;
@@ -83,6 +86,12 @@ const editDiff = computed(() => {
     >
       <pre class="tool-card-preview">{{ model.preview }}</pre>
     </div>
+    <div
+      v-else-if="showPreview && model.preview && block.toolName === 'write'"
+      class="tool-card-code-panel"
+    >
+      <HighlightedCode :code="model.preview" :path="writePath" />
+    </div>
     <pre v-else-if="showPreview && model.preview" class="tool-card-preview">{{
       model.preview
     }}</pre>
@@ -99,6 +108,12 @@ const editDiff = computed(() => {
           class="tool-card-code-panel"
         >
           <HighlightedCode :code="section.text" :path="readPath" />
+        </div>
+        <div
+          v-else-if="block.toolName === 'write' && section.label === 'Content'"
+          class="tool-card-code-panel"
+        >
+          <HighlightedCode :code="section.text" :path="writePath" />
         </div>
         <div v-else-if="block.toolName === 'bash'" class="tool-card-code-panel">
           <pre class="tool-card-section-text">{{ section.text }}</pre>
