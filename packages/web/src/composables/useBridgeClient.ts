@@ -281,7 +281,9 @@ function applyTranscriptPage(
   );
 
   if (mode === "prepend") {
-    const existingKeys = new Set(rawTranscript.value.map(entry => entry.transcriptKey));
+    const existingKeys = new Set(
+      rawTranscript.value.map(entry => entry.transcriptKey),
+    );
     const merged = normalized.filter(
       entry => !existingKeys.has(entry.transcriptKey),
     );
@@ -306,8 +308,10 @@ function shouldReplaceSessionTranscript(sessionPath: string | null): boolean {
 }
 
 function currentTranscriptContainsLiveOnlyEntries(): boolean {
-  return rawTranscript.value.some(entry =>
-    typeof entry.transcriptKey === "string" && entry.transcriptKey.startsWith("live:"),
+  return rawTranscript.value.some(
+    entry =>
+      typeof entry.transcriptKey === "string" &&
+      entry.transcriptKey.startsWith("live:"),
   );
 }
 

@@ -646,6 +646,123 @@ describe("WsRpcAdapter", () => {
       expect(response.payload.data.hasOlder).toBe(false);
     });
 
+    it("includes compaction and model changes in transcript pages", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-compact-"));
+      const sessionManager = SessionManager.create(tmpDir, tmpDir);
+      sessionManager.appendModelChange("openai", "gpt-5");
+      sessionManager.appendMessage({
+        role: "user",
+        content: "Summarize the repo",
+        timestamp: Date.now(),
+      } as any);
+      const firstKeptEntryId = sessionManager.getLeafId();
+      if (!firstKeptEntryId) {
+        throw new Error("expected a first kept entry id");
+      }
+      sessionManager.appendCompaction(
+        "Kept the repo summary and pending fixes.",
+        firstKeptEntryId,
+        18800,
+      );
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("session file was not created");
+      }
+
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(sessionFile);
+      (
+        context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => sessionManager.getBranch());
+
+      const command: RpcCommand = {
+        id: "cmd-compact",
+        type: "get_messages",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data.messages).toEqual([
+        expect.objectContaining({
+          role: "system",
+          content: [
+            {
+              type: "model_change",
+              provider: "openai",
+              modelId: "gpt-5",
+            },
+          ],
+        }),
+        expect.objectContaining({
+          role: "user",
+          content: "Summarize the repo",
+        }),
+        expect.objectContaining({
+          role: "system",
+          content: [
+            {
+              type: "compaction",
+              summary: "Kept the repo summary and pending fixes.",
+              tokensBefore: 18800,
+              firstKeptEntryId,
+            },
+          ],
+        }),
+      ]);
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("hides bootstrap model and thinking entries for an empty session", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-empty-"));
+      const sessionManager = SessionManager.create(tmpDir, tmpDir);
+      sessionManager.appendModelChange("openai", "gpt-5");
+      sessionManager.appendThinkingLevelChange("high");
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("session file was not created");
+      }
+
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(sessionFile);
+      (
+        context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => sessionManager.getBranch());
+
+      const command: RpcCommand = {
+        id: "cmd-empty",
+        type: "get_messages",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data.messages).toEqual([]);
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
     it("should handle get_commands command", async () => {
       const command: RpcCommand = { id: "cmd-1", type: "get_commands" };
       (
@@ -1075,6 +1192,70 @@ describe("WsRpcAdapter", () => {
           percent: 12.5,
         },
       });
+    });
+
+    it("refreshes the transcript after live compaction completes", async () => {
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-live-compact-"),
+      );
+      const sessionManager = SessionManager.create(tmpDir, tmpDir);
+      sessionManager.appendMessage({
+        role: "user",
+        content: "Initial prompt",
+        timestamp: Date.now(),
+      } as any);
+      const firstKeptEntryId = sessionManager.getLeafId();
+      if (!firstKeptEntryId) {
+        throw new Error("expected a branch leaf id");
+      }
+      sessionManager.appendCompaction(
+        "Saved the active task before pruning history.",
+        firstKeptEntryId,
+        22400,
+      );
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("session file was not created");
+      }
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(sessionFile);
+      (
+        context.ctx.sessionManager.getBranch as ReturnType<typeof vi.fn>
+      ).mockImplementation(() => sessionManager.getBranch());
+
+      (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+      const compactionEndHandler = (
+        context.pi.on as ReturnType<typeof vi.fn>
+      ).mock.calls.find(call => call[0] === "compaction_end")?.[1];
+
+      compactionEndHandler?.({ type: "compaction_end" });
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      expect(sendCalls[0].payload).toMatchObject({
+        type: "transcript_snapshot",
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: "system",
+            content: [
+              {
+                type: "compaction",
+                summary: "Saved the active task before pruning history.",
+                tokensBefore: 22400,
+                firstKeptEntryId,
+              },
+            ],
+          }),
+        ]),
+      });
+      expect(sendCalls[1].payload).toMatchObject({ type: "session_stats" });
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });
 

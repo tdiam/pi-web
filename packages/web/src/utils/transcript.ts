@@ -39,11 +39,28 @@ export interface ImageContentBlock {
   mimeType?: string;
 }
 
+export type SystemBlockType =
+  | "compaction"
+  | "branch_summary"
+  | "model_change"
+  | "thinking_level_change"
+  | "session_info";
+
+export interface SystemContentBlock {
+  kind: "system";
+  systemType: SystemBlockType;
+  label: string;
+  title: string;
+  body?: string;
+  meta?: string;
+}
+
 export type ContentBlock =
   | TextContentBlock
   | ToolContentBlock
   | ThinkingContentBlock
-  | ImageContentBlock;
+  | ImageContentBlock
+  | SystemContentBlock;
 
 interface UnknownBlock {
   type?: string;
@@ -58,6 +75,13 @@ interface UnknownBlock {
   mimeType?: string;
   url?: string;
   image_url?: string | { url?: string };
+  summary?: string;
+  tokensBefore?: number;
+  firstKeptEntryId?: string;
+  fromId?: string;
+  provider?: string;
+  modelId?: string;
+  thinkingLevel?: string;
 }
 
 export function isErrorMessage(msg: TranscriptEntryLike): boolean {
@@ -80,6 +104,10 @@ export function isToolResultMessage(msg: TranscriptEntryLike): boolean {
   return msg.role === "toolResult" || msg.role === "tool";
 }
 
+export function isSystemMessage(msg: TranscriptEntryLike): boolean {
+  return msg.role === "system";
+}
+
 export function messageContent(
   msg: Pick<TranscriptEntryLike, "content" | "text">,
 ): string {
@@ -95,6 +123,9 @@ export function messageContent(
           return typedBlock.text;
         if (typedBlock.type === "toolResult") {
           return toolResultText(typedBlock);
+        }
+        if (isSystemBlockType(typedBlock.type)) {
+          return systemBlockText(typedBlock);
         }
         return "";
       })
@@ -140,6 +171,11 @@ export function contentBlocks(msg: TranscriptEntryLike): ContentBlock[] {
       if (thinkingText) {
         blocks.push({ kind: "thinking", text: thinkingText });
       }
+      continue;
+    }
+
+    if (isSystemBlockType(type)) {
+      blocks.push(systemContentBlock(typedBlock));
       continue;
     }
 
@@ -318,6 +354,112 @@ function cloneContent(content: unknown): unknown {
 function cloneBlock(block: unknown): unknown {
   if (typeof block !== "object" || block === null) return block;
   return { ...(block as Record<string, unknown>) };
+}
+
+function isSystemBlockType(type: unknown): type is SystemBlockType {
+  return (
+    type === "compaction" ||
+    type === "branch_summary" ||
+    type === "model_change" ||
+    type === "thinking_level_change" ||
+    type === "session_info"
+  );
+}
+
+function systemContentBlock(block: UnknownBlock): SystemContentBlock {
+  switch (block.type) {
+    case "compaction": {
+      const tokensBefore =
+        typeof block.tokensBefore === "number" &&
+        Number.isFinite(block.tokensBefore)
+          ? block.tokensBefore
+          : null;
+      return {
+        kind: "system",
+        systemType: "compaction",
+        label: "Compaction",
+        title: "Context compacted",
+        body:
+          typeof block.summary === "string" && block.summary.trim()
+            ? block.summary.trim()
+            : undefined,
+        meta:
+          tokensBefore === null ? undefined : formatTokenCount(tokensBefore),
+      };
+    }
+    case "branch_summary":
+      return {
+        kind: "system",
+        systemType: "branch_summary",
+        label: "Branch Summary",
+        title: "Branch summarized",
+        body:
+          typeof block.summary === "string" && block.summary.trim()
+            ? block.summary.trim()
+            : undefined,
+      };
+    case "model_change": {
+      const provider =
+        typeof block.provider === "string" && block.provider.trim()
+          ? block.provider.trim()
+          : undefined;
+      const modelId =
+        typeof block.modelId === "string" && block.modelId.trim()
+          ? block.modelId.trim()
+          : "Unknown model";
+      return {
+        kind: "system",
+        systemType: "model_change",
+        label: "Model",
+        title: modelId,
+        meta: provider,
+      };
+    }
+    case "thinking_level_change": {
+      const level =
+        typeof block.thinkingLevel === "string" && block.thinkingLevel.trim()
+          ? block.thinkingLevel.trim()
+          : "Unknown";
+      return {
+        kind: "system",
+        systemType: "thinking_level_change",
+        label: "Thinking",
+        title: level,
+      };
+    }
+    case "session_info": {
+      const name =
+        typeof block.name === "string" && block.name.trim()
+          ? block.name.trim()
+          : "Untitled session";
+      return {
+        kind: "system",
+        systemType: "session_info",
+        label: "Session",
+        title: name,
+      };
+    }
+    default:
+      return {
+        kind: "system",
+        systemType: "session_info",
+        label: "System",
+        title: "Session updated",
+      };
+  }
+}
+
+function systemBlockText(block: UnknownBlock): string {
+  const contentBlock = systemContentBlock(block);
+  return contentBlock.body
+    ? `${contentBlock.title}\n${contentBlock.body}`
+    : contentBlock.title;
+}
+
+function formatTokenCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M tokens`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}k tokens`;
+  return `${count} tokens`;
 }
 
 function toolResultText(block: UnknownBlock): string {

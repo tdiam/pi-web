@@ -552,6 +552,13 @@ function transcriptMessageFromBranchEntry(
     };
   }
 
+  if (typedEntry.type) {
+    return transcriptMessageFromSessionEntry(
+      typedEntry as SessionEntry,
+      fallbackKey,
+    );
+  }
+
   if (typeof typedEntry.role === "string") {
     const flatMessage = typedEntry as Record<string, unknown>;
     const id = typeof typedEntry.id === "string" ? typedEntry.id : undefined;
@@ -570,6 +577,84 @@ function transcriptMessageFromBranchEntry(
   return null;
 }
 
+function transcriptMessageFromSessionEntry(
+  entry: SessionEntry,
+  fallbackKey: string,
+): RpcTranscriptMessage | null {
+  const id = typeof entry.id === "string" ? entry.id : undefined;
+  const timestamp =
+    typeof entry.timestamp === "string" ? entry.timestamp : undefined;
+
+  switch (entry.type) {
+    case "compaction":
+      return {
+        transcriptKey: id ?? fallbackKey,
+        id,
+        role: "system",
+        timestamp,
+        content: [
+          {
+            type: "compaction",
+            summary: entry.summary,
+            tokensBefore: entry.tokensBefore,
+            firstKeptEntryId: entry.firstKeptEntryId,
+          },
+        ],
+      };
+    case "branch_summary":
+      return {
+        transcriptKey: id ?? fallbackKey,
+        id,
+        role: "system",
+        timestamp,
+        content: [
+          {
+            type: "branch_summary",
+            summary: entry.summary,
+            fromId: entry.fromId,
+          },
+        ],
+      };
+    case "model_change":
+      return {
+        transcriptKey: id ?? fallbackKey,
+        id,
+        role: "system",
+        timestamp,
+        content: [
+          {
+            type: "model_change",
+            provider: entry.provider,
+            modelId: entry.modelId,
+          },
+        ],
+      };
+    case "thinking_level_change":
+      return {
+        transcriptKey: id ?? fallbackKey,
+        id,
+        role: "system",
+        timestamp,
+        content: [
+          {
+            type: "thinking_level_change",
+            thinkingLevel: entry.thinkingLevel,
+          },
+        ],
+      };
+    case "session_info":
+      return {
+        transcriptKey: id ?? fallbackKey,
+        id,
+        role: "system",
+        timestamp,
+        content: [{ type: "session_info", name: entry.name }],
+      };
+    default:
+      return null;
+  }
+}
+
 function flattenMessagesForTranscript(
   branch: readonly unknown[],
 ): RpcTranscriptMessage[] {
@@ -585,7 +670,29 @@ function flattenMessagesForTranscript(
     }
   }
 
-  return messages;
+  return filterBootstrapTranscriptMessages(messages);
+}
+
+function filterBootstrapTranscriptMessages(
+  messages: readonly RpcTranscriptMessage[],
+): RpcTranscriptMessage[] {
+  if (messages.length === 0) return [];
+  if (messages.some(message => !isBootstrapTranscriptMessage(message))) {
+    return [...messages];
+  }
+  return [];
+}
+
+function isBootstrapTranscriptMessage(message: RpcTranscriptMessage): boolean {
+  if (message.role !== "system" || !Array.isArray(message.content)) {
+    return false;
+  }
+  if (message.content.length !== 1) return false;
+
+  const [block] = message.content;
+  if (typeof block !== "object" || block === null) return false;
+  const type = (block as { type?: unknown }).type;
+  return type === "model_change" || type === "thinking_level_change";
 }
 
 function normalizeTranscriptPageLimit(limit: unknown): number {
@@ -633,7 +740,9 @@ function buildTranscriptPage(
   if (direction === "older") {
     const cursorIndex = decodeTranscriptCursor(options?.cursor);
     const upperBound =
-      cursorIndex == null ? Math.max(0, total - 1) : Math.min(total - 1, cursorIndex);
+      cursorIndex == null
+        ? Math.max(0, total - 1)
+        : Math.min(total - 1, cursorIndex);
     end = Math.max(0, upperBound);
     start = Math.max(0, end - limit);
   }
@@ -645,7 +754,8 @@ function buildTranscriptPage(
   return {
     sessionPath: sessionPath ?? undefined,
     messages: pageMessages,
-    oldestCursor: pageMessages.length > 0 ? encodeTranscriptCursor(start) : undefined,
+    oldestCursor:
+      pageMessages.length > 0 ? encodeTranscriptCursor(start) : undefined,
     newestCursor:
       pageMessages.length > 0 ? encodeTranscriptCursor(end - 1) : undefined,
     hasOlder,
@@ -1124,6 +1234,12 @@ export class WsRpcAdapter {
       this.queueSessionStatsEvent(this.currentTranscriptSessionPath());
     });
 
+    this.context.pi.on("compaction_end", () => {
+      if (!this.shouldHandleLiveSessionEvents()) return;
+      this.sendTranscriptSnapshot(this.buildCurrentTranscriptPage());
+      this.queueSessionStatsEvent(this.currentTranscriptSessionPath());
+    });
+
     this.context.pi.on("message_start", (event: object) => {
       if (!this.shouldHandleLiveSessionEvents()) return;
       this.handleTranscriptLifecycleEvent(
@@ -1406,6 +1522,10 @@ export class WsRpcAdapter {
           );
         }
         this.sendEvent(event as unknown as Record<string, unknown>);
+        this.queueSessionStatsEvent(sessionPath);
+        return;
+      case "compaction_end":
+        this.sendTranscriptSnapshot(this.buildCurrentTranscriptPage());
         this.queueSessionStatsEvent(sessionPath);
         return;
       case "model_select":

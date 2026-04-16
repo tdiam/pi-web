@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronRight, Pencil, Sparkle } from "lucide-vue-next";
+import { Pencil, Sparkle } from "lucide-vue-next";
 import { onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import { userMessageCopyText } from "../utils/messageCopy";
@@ -44,9 +44,8 @@ let wasDisconnected = false;
 let savedScrollTop = 0;
 let savedScrollHeight = 0;
 let topLoadArmed = true;
-let pendingHistoryAnchor:
-  | { scrollTop: number; scrollHeight: number }
-  | null = null;
+let pendingHistoryAnchor: { scrollTop: number; scrollHeight: number } | null =
+  null;
 
 const TOP_LOAD_THRESHOLD = 120;
 
@@ -64,15 +63,17 @@ function restoreScroll() {
   wasDisconnected = false;
 }
 
-function roleClass(role: string): "user" | "assistant" | "tool" {
+function roleClass(role: string): "user" | "assistant" | "tool" | "system" {
   if (role === "user") return "user";
   if (role === "assistant") return "assistant";
+  if (role === "system") return "system";
   return "tool";
 }
 
 function roleLabel(role: string): string {
   if (role === "toolResult") return "Tool Result";
   if (role === "tool") return "Tool";
+  if (role === "system") return "System";
   return role;
 }
 
@@ -284,7 +285,8 @@ watch(
     await nextTick();
 
     if (pendingHistoryAnchor && container.value) {
-      const delta = container.value.scrollHeight - pendingHistoryAnchor.scrollHeight;
+      const delta =
+        container.value.scrollHeight - pendingHistoryAnchor.scrollHeight;
       container.value.scrollTop = pendingHistoryAnchor.scrollTop + delta;
       pendingHistoryAnchor = null;
       return;
@@ -351,7 +353,9 @@ defineExpose({ preserveScroll });
         :disabled="pageLoading"
         @click="requestOlderTranscript()"
       >
-        {{ pageLoading ? "Loading earlier messages..." : "Load earlier messages" }}
+        {{
+          pageLoading ? "Loading earlier messages..." : "Load earlier messages"
+        }}
       </button>
     </div>
 
@@ -457,7 +461,26 @@ defineExpose({ preserveScroll });
               ID {{ messageIdLabel(msg) }}
             </div>
             <template v-for="(block, bIdx) in contentBlocks(msg)" :key="bIdx">
-              <div v-if="block.kind === 'thinking'" class="thinking-block">
+              <article
+                v-if="block.kind === 'system'"
+                class="system-block"
+                :data-system-type="block.systemType"
+              >
+                <div class="system-block-header">
+                  <span class="system-block-label">{{ block.label }}</span>
+                  <span v-if="block.meta" class="system-block-meta">{{
+                    block.meta
+                  }}</span>
+                </div>
+                <div class="system-block-title">{{ block.title }}</div>
+                <MarkdownRenderer
+                  v-if="block.body"
+                  class="system-block-body"
+                  :content="block.body"
+                />
+              </article>
+
+              <div v-else-if="block.kind === 'thinking'" class="thinking-block">
                 <button
                   class="thinking-toggle"
                   @click="toggleThinking(messageStableKey(msg, index), bIdx)"
@@ -617,12 +640,17 @@ defineExpose({ preserveScroll });
 }
 
 .message-row.assistant,
-.message-row.user {
+.message-row.user,
+.message-row.system {
   display: flex;
 }
 
 .message-row.user {
   justify-content: flex-end;
+}
+
+.message-row.system {
+  justify-content: center;
 }
 
 .message-row.tool {
@@ -664,7 +692,8 @@ defineExpose({ preserveScroll });
 }
 
 .message-content.assistant,
-.message-content.tool {
+.message-content.tool,
+.message-content.system {
   width: 100%;
   padding-left: 14px;
 }
@@ -749,21 +778,71 @@ defineExpose({ preserveScroll });
 .markdown-body + .thinking-block,
 .markdown-body + .tool-card-block,
 .markdown-body + .message-image-block,
+.markdown-body + .system-block,
 .thinking-block + .markdown-body,
 .thinking-block + .tool-card-block,
 .thinking-block + .message-image-block,
+.thinking-block + .system-block,
 .tool-card-block + .markdown-body,
 .tool-card-block + .thinking-block,
 .tool-card-block + .message-image-block,
+.tool-card-block + .system-block,
 .message-image-block + .markdown-body,
 .message-image-block + .thinking-block,
 .message-image-block + .tool-card-block,
-.message-image-block + .message-image-block {
+.message-image-block + .message-image-block,
+.message-image-block + .system-block,
+.system-block + .markdown-body,
+.system-block + .thinking-block,
+.system-block + .tool-card-block,
+.system-block + .message-image-block,
+.system-block + .system-block {
   margin-top: 12px;
 }
 
 .thinking-block {
   padding-left: 10px;
+}
+
+.system-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 86%, transparent);
+}
+
+.system-block-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.system-block-label,
+.system-block-meta {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+}
+
+.system-block-title {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.system-block-body {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.6;
 }
 
 .message-image-block {
@@ -977,6 +1056,7 @@ defineExpose({ preserveScroll });
   .message-content.assistant,
   .message-content.tool,
   .message-content.user,
+  .message-content.system,
   .tool-row {
     margin-left: 0;
     max-width: 100%;
@@ -990,6 +1070,11 @@ defineExpose({ preserveScroll });
 
   .thinking-block {
     padding-left: 0;
+  }
+
+  .system-block {
+    max-width: 100%;
+    padding: 10px 12px;
   }
 
   .tool-result-card-header {
@@ -1031,7 +1116,8 @@ defineExpose({ preserveScroll });
 
   .tool-result-card-preview,
   .tool-result-card-details,
-  .thinking-content {
+  .thinking-content,
+  .system-block-body {
     font-size: 0.68rem;
   }
 

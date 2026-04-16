@@ -298,4 +298,51 @@ describe("normalizeTranscript", () => {
       },
     ]);
   });
+
+  it("parses compact and other system entries into structured transcript blocks", () => {
+    const compactionMessage = {
+      role: "system",
+      content: [
+        {
+          type: "compaction",
+          summary: "- Preserved the current task\n- Kept pending follow-ups",
+          tokensBefore: 15420,
+        },
+      ],
+    } satisfies TranscriptEntryLike;
+
+    const modelChangeMessage = {
+      role: "system",
+      content: [
+        {
+          type: "model_change",
+          provider: "openai",
+          modelId: "gpt-5",
+        },
+      ],
+    } satisfies TranscriptEntryLike;
+
+    expect(messageContent(compactionMessage)).toBe(
+      "Context compacted\n- Preserved the current task\n- Kept pending follow-ups",
+    );
+    expect(contentBlocks(compactionMessage)).toEqual([
+      {
+        kind: "system",
+        systemType: "compaction",
+        label: "Compaction",
+        title: "Context compacted",
+        body: "- Preserved the current task\n- Kept pending follow-ups",
+        meta: "15.4k tokens",
+      },
+    ]);
+    expect(contentBlocks(modelChangeMessage)).toEqual([
+      {
+        kind: "system",
+        systemType: "model_change",
+        label: "Model",
+        title: "gpt-5",
+        meta: "openai",
+      },
+    ]);
+  });
 });
