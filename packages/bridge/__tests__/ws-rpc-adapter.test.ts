@@ -530,18 +530,36 @@ describe("WsRpcAdapter", () => {
 
       await new Promise(r => setTimeout(r, 10));
 
-      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
       expect(sendCalls.length).toBeGreaterThan(0);
 
-      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
-      const response = JSON.parse(lastCall);
+      const response = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "get_state" &&
+          call.payload.success,
+      );
 
-      expect(response.type).toBe("response");
-      expect(response.payload.command).toBe("get_state");
-      expect(response.payload.success).toBe(true);
-      expect(response.payload.data).toHaveProperty("sessionId", "session-123");
-      expect(response.payload.data).toHaveProperty("messageCount", 1);
-      expect(response.payload.data).toHaveProperty("sessionName", "Hello");
+      expect(response?.type).toBe("response");
+      expect(response?.payload.command).toBe("get_state");
+      expect(response?.payload.success).toBe(true);
+      expect(response?.payload.data).toHaveProperty("sessionId", "session-123");
+      expect(response?.payload.data).toHaveProperty("messageCount", 1);
+      expect(response?.payload.data).toHaveProperty("sessionName", "Hello");
+
+      const statsEvent = sendCalls.find(
+        call => call.type === "event" && call.payload.type === "session_stats",
+      );
+      expect(statsEvent?.payload).toMatchObject({
+        type: "session_stats",
+        stats: {
+          tokens: 1000,
+          contextWindow: 8000,
+          percent: 12.5,
+        },
+      });
     });
 
     it("should handle get_messages command", async () => {

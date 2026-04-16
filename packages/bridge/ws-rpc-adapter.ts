@@ -1746,7 +1746,9 @@ export class WsRpcAdapter {
 
       if (
         response.success &&
-        (command.type === "switch_session" || command.type === "new_session")
+        (command.type === "get_state" ||
+          command.type === "switch_session" ||
+          command.type === "new_session")
       ) {
         this.queueSessionStatsEvent(this.currentTranscriptSessionPath());
       }
