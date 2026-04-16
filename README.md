@@ -53,3 +53,7 @@ Open the printed URL (default: `http://localhost:8080`) in your browser.
 ## License
 
 MIT
+
+## Known issues
+
+- Safari(IOS/MacOS) has problems on websocket connection

@@ -889,9 +889,9 @@ resizeTextarea();
   gap: 10px;
   min-width: 0;
   padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: 14px;
-  background: color-mix(in srgb, var(--panel-2) 68%, transparent);
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
 }
 
 .attachment-chip-preview {
@@ -900,7 +900,7 @@ resizeTextarea();
   border-radius: 10px;
   object-fit: cover;
   background: var(--panel);
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
 }
 
 .attachment-chip-body {
@@ -930,33 +930,56 @@ resizeTextarea();
   color: var(--text-subtle);
 }
 
-.attachment-chip-remove,
+.attachment-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: transparent;
+  color: var(--text-subtle);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
 .attach-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--button-bg) 88%, transparent);
+  width: 32px;
+  height: 32px;
+  margin-top: 6px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
   color: var(--text-subtle);
   cursor: pointer;
   transition:
     background 0.15s ease,
     border-color 0.15s ease,
     color 0.15s ease,
-    transform 0.15s ease;
-}
-
-.attachment-chip-remove {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
+    opacity 0.15s ease;
 }
 
 .attachment-chip-remove:hover,
 .attach-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: var(--button-hover);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.attachment-chip-remove:focus-visible,
+.attach-btn:focus-visible {
+  outline: none;
+  border-color: var(--border-strong);
+  background: var(--panel-2);
   color: var(--text);
 }
 
@@ -973,16 +996,10 @@ resizeTextarea();
   min-width: 0;
 }
 
-.attach-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 12px;
-  margin-top: 6px;
-}
-
 .attach-btn.active {
   color: var(--text);
-  border-color: var(--border-strong);
+  border-color: color-mix(in srgb, var(--border-strong) 88%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 86%, transparent);
 }
 
 .prompt-input {
