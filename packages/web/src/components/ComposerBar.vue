@@ -444,7 +444,8 @@ function handleInputKeydown(e: KeyboardEvent) {
       e.key === "ArrowUp" ||
       e.key === "Escape" ||
       ((props.workspaceEntriesLoading || mentionSuggestions.value.length > 0) &&
-        (!composing && (e.key === "Enter" || e.key === "Tab"))))
+        !composing &&
+        (e.key === "Enter" || e.key === "Tab")))
   ) {
     mentionPaletteRef.value.handleKeydown(e);
     return;

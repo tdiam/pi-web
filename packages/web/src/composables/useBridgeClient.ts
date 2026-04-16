@@ -268,7 +268,8 @@ function replaceTranscript(
 
 function shouldReplaceSessionTranscript(sessionPath: string | null): boolean {
   return (
-    rawTranscript.value.length === 0 || transcriptSessionPath.value !== sessionPath
+    rawTranscript.value.length === 0 ||
+    transcriptSessionPath.value !== sessionPath
   );
 }
 

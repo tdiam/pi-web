@@ -1043,12 +1043,18 @@ export class WsRpcAdapter {
 
     this.context.pi.on("agent_start", (event: object) => {
       if (!this.shouldHandleLiveSessionEvents()) return;
-      this.sendEvent({ type: "agent_start", ...(event as Record<string, unknown>) });
+      this.sendEvent({
+        type: "agent_start",
+        ...(event as Record<string, unknown>),
+      });
     });
 
     this.context.pi.on("agent_end", (event: object) => {
       if (!this.shouldHandleLiveSessionEvents()) return;
-      this.sendEvent({ type: "agent_end", ...(event as Record<string, unknown>) });
+      this.sendEvent({
+        type: "agent_end",
+        ...(event as Record<string, unknown>),
+      });
       this.queueSessionStatsEvent(this.currentTranscriptSessionPath());
     });
 
@@ -1081,7 +1087,10 @@ export class WsRpcAdapter {
 
     this.context.pi.on("model_select", (event: object) => {
       if (!this.shouldHandleLiveSessionEvents()) return;
-      this.sendEvent({ type: "model_select", ...(event as Record<string, unknown>) });
+      this.sendEvent({
+        type: "model_select",
+        ...(event as Record<string, unknown>),
+      });
       this.queueSessionStatsEvent(this.currentTranscriptSessionPath());
     });
   }
@@ -1107,7 +1116,8 @@ export class WsRpcAdapter {
     const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
     return (
       !this.selectedSession &&
-      (!this.selectedSessionPath || this.selectedSessionPath === liveSessionPath)
+      (!this.selectedSessionPath ||
+        this.selectedSessionPath === liveSessionPath)
     );
   }
 
@@ -1119,7 +1129,9 @@ export class WsRpcAdapter {
     }
 
     if (this.pendingSessionManager) {
-      return flattenMessagesForTranscript(this.pendingSessionManager.getBranch());
+      return flattenMessagesForTranscript(
+        this.pendingSessionManager.getBranch(),
+      );
     }
 
     if (this.selectedSessionPath && fs.existsSync(this.selectedSessionPath)) {
@@ -1127,7 +1139,9 @@ export class WsRpcAdapter {
       return flattenMessagesForTranscript(sessionManager.getBranch());
     }
 
-    return flattenMessagesForTranscript(this.context.ctx.sessionManager.getBranch());
+    return flattenMessagesForTranscript(
+      this.context.ctx.sessionManager.getBranch(),
+    );
   }
 
   private resetTranscriptSync(
@@ -1498,7 +1512,9 @@ export class WsRpcAdapter {
           (model as { provider: string; id: string }).provider === provider &&
           (model as { provider: string; id: string }).id === modelId,
       );
-      return (matched as { contextWindow?: number } | undefined)?.contextWindow ?? 0;
+      return (
+        (matched as { contextWindow?: number } | undefined)?.contextWindow ?? 0
+      );
     } catch {
       return 0;
     }
@@ -1512,7 +1528,7 @@ export class WsRpcAdapter {
     const liveSessionPath = ctx.sessionManager.getSessionFile();
     const resolvedTargetPath =
       targetPath === undefined
-        ? selectedSessionPath ?? liveSessionPath ?? null
+        ? (selectedSessionPath ?? liveSessionPath ?? null)
         : targetPath;
 
     if (
@@ -1579,7 +1595,10 @@ export class WsRpcAdapter {
 
     const usage = ctx.getContextUsage();
     const branch = ctx.sessionManager.getBranch();
-    const summary = summarizeTokenUsage(branch, ctx.sessionManager.getEntries());
+    const summary = summarizeTokenUsage(
+      branch,
+      ctx.sessionManager.getEntries(),
+    );
 
     let tokens: number | null = usage?.tokens ?? null;
     let contextWindow = usage?.contextWindow ?? 0;
@@ -2319,7 +2338,9 @@ export class WsRpcAdapter {
         }
         this.pendingSessionManager = sessionManager;
 
-        const messages = flattenMessagesForTranscript(sessionManager.getBranch());
+        const messages = flattenMessagesForTranscript(
+          sessionManager.getBranch(),
+        );
         this.resetTranscriptSync(messages, sessionFile ?? null);
         return {
           id: correlationId,
@@ -2377,7 +2398,9 @@ export class WsRpcAdapter {
           };
         }
 
-        const messages = flattenMessagesForTranscript(ctx.sessionManager.getBranch());
+        const messages = flattenMessagesForTranscript(
+          ctx.sessionManager.getBranch(),
+        );
         this.resetTranscriptSync(
           messages,
           ctx.sessionManager.getSessionFile() ?? null,

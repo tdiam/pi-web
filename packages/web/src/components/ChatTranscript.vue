@@ -206,7 +206,10 @@ defineExpose({ preserveScroll });
         <span class="hint-chip">Drop or paste images</span>
       </div>
     </div>
-    <template v-for="(msg, index) in messages" :key="messageStableKey(msg, index)">
+    <template
+      v-for="(msg, index) in messages"
+      :key="messageStableKey(msg, index)"
+    >
       <div v-if="isToolResultMessage(msg)" class="message-row tool">
         <div class="message-meta">
           <span class="message-role">{{ roleLabel(msg.role) }}</span>
@@ -300,7 +303,9 @@ defineExpose({ preserveScroll });
               v-else-if="block.kind === 'tool'"
               class="tool-card-block"
               :block="block"
-              :expanded="isToolBlockExpanded(messageStableKey(msg, index), bIdx)"
+              :expanded="
+                isToolBlockExpanded(messageStableKey(msg, index), bIdx)
+              "
               @toggle="toggleToolBlock(messageStableKey(msg, index), bIdx)"
             />
 

@@ -114,7 +114,10 @@ function formatToolTitle(
       if (!command) return "Run command";
       const firstLine = command.replace(/\r/g, "").split("\n")[0]!;
       const totalLines = command.replace(/\r/g, "").split("\n").length;
-      const suffix = totalLines > 1 ? ` (+${totalLines - 1} more line${totalLines - 1 > 1 ? "s" : ""})` : "";
+      const suffix =
+        totalLines > 1
+          ? ` (+${totalLines - 1} more line${totalLines - 1 > 1 ? "s" : ""})`
+          : "";
       return firstLine + suffix;
     }
     case "edit": {
@@ -262,12 +265,6 @@ function tailPreviewText(
   if (lines.length <= maxLines) return normalized;
   const remaining = lines.length - maxLines;
   return `... ${remaining} earlier line${remaining === 1 ? "" : "s"}\n${lines.slice(-maxLines).join("\n")}`;
-}
-
-function compactInline(text: string, maxLength: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxLength) return compact;
-  return `${compact.slice(0, maxLength - 3)}...`;
 }
 
 function humanizeToolName(toolName: string): string {
