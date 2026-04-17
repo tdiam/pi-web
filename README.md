@@ -1,4 +1,4 @@
-# pi-web-bridge
+# pi-web
 
 A [Pi](https://github.com/mariozechner/pi-coding-agent) extension that opens a
 WebSocket bridge for browser-based interaction.
