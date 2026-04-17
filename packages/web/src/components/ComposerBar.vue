@@ -101,7 +101,8 @@ const commandContext = computed(() =>
   getSlashCommandContext(inputText.value, cursorOffset.value),
 );
 const availableSlashCommands = computed(() =>
-  mergeSlashCommandOptions(props.commands),
+  // Temporarily keep the web slash-command palette limited to /compact.
+  mergeSlashCommandOptions([]),
 );
 const filteredSlashCommands = computed(() => {
   if (!commandContext.value) return [];
