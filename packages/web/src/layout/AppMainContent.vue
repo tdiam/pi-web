@@ -25,6 +25,7 @@ defineProps<{
   transcriptInitialLoading: boolean;
   transcriptPageLoading: boolean;
   isStreaming: boolean;
+  isCompacting: boolean;
   isDebugMode: boolean;
   connectionStatus: ConnectionStatus;
   commands: readonly RpcSlashCommand[];
@@ -100,6 +101,7 @@ defineExpose({ preserveTranscriptScroll });
       :initial-loading="transcriptInitialLoading"
       :page-loading="transcriptPageLoading"
       :is-streaming="isStreaming"
+      :is-compacting="isCompacting"
       :show-message-ids="isDebugMode"
       :allow-revision="allowRevision"
       @load-older="emit('loadOlderTranscript')"

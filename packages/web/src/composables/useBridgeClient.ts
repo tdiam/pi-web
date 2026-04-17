@@ -106,6 +106,11 @@ const availableModels = ref<RpcModelInfo[]>([]);
 const currentModel = ref<RpcModelInfo | null>(null);
 const currentThinkingLevel = ref<RpcThinkingLevel | null>(null);
 const isStreaming = ref(false);
+const compactingRequestCount = ref(0);
+const remoteCompactionActive = ref(false);
+const isCompacting = computed(
+  () => compactingRequestCount.value > 0 || remoteCompactionActive.value,
+);
 
 // Session stats (context usage + cost)
 const sessionStats = ref<RpcSessionStats | null>(null);
@@ -239,14 +244,17 @@ function createRequestId(): string {
   return `req_${Date.now().toString(36)}_${requestIdCounter}_${Math.random().toString(36).slice(2)}`;
 }
 
-function sendCommand(payload: RpcCommand): Promise<RpcResponse> {
+function sendCommand(
+  payload: RpcCommand,
+  options?: { timeoutMs?: number },
+): Promise<RpcResponse> {
   return new Promise((resolve, reject) => {
     const id = payload.id ?? createRequestId();
     const command = { ...payload, id };
     const timer = setTimeout(() => {
       pendingRequests.delete(id);
       reject(new Error(`RPC timeout: ${command.type}`));
-    }, 15_000);
+    }, options?.timeoutMs ?? 15_000);
     pendingRequests.set(id, { resolve, reject, timer });
     sendEnvelope({ type: "command", payload: command });
   });
@@ -395,6 +403,30 @@ function upsertTranscriptMessage(
   rawTranscript.value = [...rawTranscript.value, normalized];
 }
 
+function appendCompactErrorMessage(message: string) {
+  const detail = message.trim();
+  const errorMessage = detail
+    ? `Compaction failed: ${detail}`
+    : "Compaction failed";
+
+  upsertTranscriptMessage({
+    transcriptKey: `local:compact-error:${Date.now()}:${requestIdCounter}`,
+    role: "assistant",
+    stopReason: "error",
+    errorMessage,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function setCompactionState(isCompacting: boolean) {
+  remoteCompactionActive.value = isCompacting;
+  if (!sessionState.value) return;
+  sessionState.value = {
+    ...sessionState.value,
+    isCompacting,
+  };
+}
+
 function sendPrompt(message: string, images?: RpcImageContent[]) {
   sendEnvelope({
     type: "command",
@@ -443,6 +475,33 @@ async function fetchWorkspaceEntries(
 function abortGeneration() {
   if (!isStreaming.value) return Promise.resolve(null);
   return sendCommand({ type: "abort" });
+}
+
+async function compactSession(customInstructions?: string) {
+  compactingRequestCount.value += 1;
+
+  try {
+    const response = await sendCommand(
+      { type: "compact", customInstructions },
+      { timeoutMs: 120_000 },
+    );
+
+    if (!response.success) {
+      appendCompactErrorMessage(response.error ?? "Unknown compaction error");
+    }
+
+    return response;
+  } catch (error) {
+    appendCompactErrorMessage(
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  } finally {
+    compactingRequestCount.value = Math.max(
+      0,
+      compactingRequestCount.value - 1,
+    );
+  }
 }
 
 async function setThinkingLevel(level: RpcThinkingLevel) {
@@ -548,6 +607,7 @@ function handleResponse(payload: RpcResponse) {
             data.thinkingLevel,
           );
           isStreaming.value = data.isStreaming;
+          setCompactionState(data.isCompacting);
           if (!activeTreeSessionPath.value && data.sessionFile) {
             activeTreeSessionPath.value = data.sessionFile;
           }
@@ -644,7 +704,12 @@ function handleResponse(payload: RpcResponse) {
           treeEntries.value = [];
           sessionState.value = null;
         }
+        setCompactionState(false);
         sendCommand({ type: "list_sessions" }).catch(() => {});
+        break;
+      }
+      case "compact": {
+        sendCommand({ type: "get_state" }).catch(() => {});
         break;
       }
       case "get_commands": {
@@ -743,6 +808,22 @@ function handleEvent(payload: RpcBridgeEvent) {
       }
       break;
     }
+    case "compaction_start": {
+      setCompactionState(true);
+      break;
+    }
+    case "compaction_end": {
+      setCompactionState(false);
+      if (
+        payload.reason !== "manual" &&
+        !payload.aborted &&
+        typeof payload.errorMessage === "string" &&
+        payload.errorMessage.trim()
+      ) {
+        appendCompactErrorMessage(payload.errorMessage);
+      }
+      break;
+    }
   }
 }
 
@@ -808,6 +889,7 @@ async function fetchInitialState() {
       sendCommand({ type: "get_state" }),
       sendCommand({ type: "list_sessions" }),
       sendCommand({ type: "get_available_models" }),
+      sendCommand({ type: "get_commands" }),
     ]);
   } catch {
     transcriptInitialLoading.value = false;
@@ -838,6 +920,7 @@ function connect() {
 
   ws.addEventListener("close", (event?: CloseEvent) => {
     connectionStatus.value = "disconnected";
+    remoteCompactionActive.value = false;
     reconnectCount.value++;
     lastDisconnectReason.value = event?.reason
       ? `Connection lost: ${event.reason}`
@@ -921,6 +1004,7 @@ export function useBridgeClient() {
     currentModel: readonly(currentModel),
     currentThinkingLevel: readonly(currentThinkingLevel),
     isStreaming: readonly(isStreaming),
+    isCompacting: readonly(isCompacting),
     sessionStats: readonly(sessionStats),
     // Reconnect diagnostics
     isReconnecting,
@@ -940,6 +1024,7 @@ export function useBridgeClient() {
     loadOlderTranscriptPage,
     fetchWorkspaceEntries,
     abortGeneration,
+    compactSession,
     setThinkingLevel,
     setAutoCompactionEnabled,
     connect,

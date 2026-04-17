@@ -122,6 +122,7 @@ describe("extension_ui_request handling", () => {
         "get_state",
         "list_sessions",
         "get_available_models",
+        "get_commands",
       ]),
     );
 
@@ -571,6 +572,196 @@ describe("extension_ui_request handling", () => {
 
     await pendingSet;
     expect(client.sessionState.value?.autoCompactionEnabled).toBe(true);
+  });
+
+  it("compactSession exposes in-flight compaction state and refreshes state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const pendingCompact = client.compactSession("Keep pending todos");
+    expect(client.isCompacting.value).toBe(true);
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"compact"'),
+    );
+
+    const compactCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"compact"'),
+    );
+    expect(compactCommandCall).toBeDefined();
+    const compactCommand = JSON.parse(compactCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: compactCommand.payload.id,
+        type: "response",
+        command: "compact",
+        success: true,
+        data: {
+          summary: "Compacted",
+        },
+      },
+    });
+
+    await pendingCompact;
+    expect(client.isCompacting.value).toBe(false);
+    expect(
+      ws.send.mock.calls.some(([message]: [string]) =>
+        message.includes('"type":"get_state"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("appends one transcript error when manual compact fails", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const pendingCompact = client.compactSession("Keep pending todos");
+    const compactCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"compact"'),
+    );
+    expect(compactCommandCall).toBeDefined();
+    const compactCommand = JSON.parse(compactCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "compaction_start",
+        reason: "manual",
+      },
+    });
+
+    expect(client.isCompacting.value).toBe(true);
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "compaction_end",
+        reason: "manual",
+        result: null,
+        aborted: false,
+        willRetry: false,
+        errorMessage: "Compaction requires an active session",
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: compactCommand.payload.id,
+        type: "response",
+        command: "compact",
+        success: false,
+        error: "Compaction requires an active session",
+      },
+    });
+
+    await expect(pendingCompact).resolves.toMatchObject({
+      command: "compact",
+      success: false,
+      error: "Compaction requires an active session",
+    });
+
+    const errorEntries = client.transcript.value.filter(
+      entry => entry.stopReason === "error",
+    );
+    expect(errorEntries).toHaveLength(1);
+    expect(errorEntries[0]).toMatchObject({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Compaction failed: Compaction requires an active session",
+    });
+  });
+
+  it("appends a transcript error when the compact request rejects", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const pendingCompact = client.compactSession("Keep pending todos");
+
+    const closeHandler = ws.addEventListener.mock.calls.find(
+      (c: unknown[]) => c[0] === "close",
+    )?.[1] as (() => void) | undefined;
+    expect(closeHandler).toBeDefined();
+    closeHandler!();
+
+    await expect(pendingCompact).rejects.toThrow("WebSocket closed");
+
+    const lastEntry = client.transcript.value.at(-1);
+    expect(lastEntry).toMatchObject({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Compaction failed: WebSocket closed",
+    });
+  });
+
+  it("tracks pushed auto-compaction events and appends failures", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/session-1.jsonl",
+          sessionName: "Session 1",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: true,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "compaction_start",
+        reason: "threshold",
+      },
+    });
+
+    expect(client.isCompacting.value).toBe(true);
+    expect(client.sessionState.value?.isCompacting).toBe(true);
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "compaction_end",
+        reason: "threshold",
+        result: null,
+        aborted: false,
+        willRetry: false,
+        errorMessage: "API quota exceeded",
+      },
+    });
+
+    expect(client.isCompacting.value).toBe(false);
+    expect(client.sessionState.value?.isCompacting).toBe(false);
+    expect(client.transcript.value.at(-1)).toMatchObject({
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "Compaction failed: API quota exceeded",
+    });
   });
 
   it("sendPrompt forwards image attachments in the prompt payload", async () => {

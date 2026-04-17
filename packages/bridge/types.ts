@@ -169,6 +169,22 @@ export interface RpcModelSelectEvent {
   source: "set" | "cycle" | "restore";
 }
 
+export type RpcCompactionReason = "manual" | "threshold" | "overflow";
+
+export interface RpcCompactionStartEvent {
+  type: "compaction_start";
+  reason: RpcCompactionReason;
+}
+
+export interface RpcCompactionEndEvent {
+  type: "compaction_end";
+  reason: RpcCompactionReason;
+  result: RpcCompactionResult | null;
+  aborted: boolean;
+  willRetry: boolean;
+  errorMessage?: string;
+}
+
 export interface RpcCommandMap {
   /** Prompting */
   prompt: {
@@ -715,6 +731,8 @@ export type RpcBridgeEvent =
   | RpcAgentStartEvent
   | RpcAgentEndEvent
   | RpcModelSelectEvent
+  | RpcCompactionStartEvent
+  | RpcCompactionEndEvent
   | { type: "session_compact" };
 
 export type ServerMessage =

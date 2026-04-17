@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { Pencil, Sparkle } from "lucide-vue-next";
-import { onBeforeUnmount, onMounted, ref, watch, nextTick } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import { userMessageCopyText } from "../utils/messageCopy";
 import type { ImageContentBlock } from "../utils/transcript";
@@ -21,6 +28,7 @@ const props = defineProps<{
   initialLoading: boolean;
   pageLoading: boolean;
   isStreaming: boolean;
+  isCompacting: boolean;
   showMessageIds: boolean;
   allowRevision: boolean;
 }>();
@@ -79,6 +87,14 @@ function roleLabel(role: string): string {
 
 const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
+const showBusyIndicator = computed(
+  () => props.isStreaming || props.isCompacting,
+);
+const busyIndicatorLabel = computed(() =>
+  props.isCompacting && !props.isStreaming
+    ? "Compacting context"
+    : "Assistant is responding",
+);
 
 function messageStableKey(msg: TranscriptEntry, index: number): string {
   return msg.transcriptKey ?? msg.id ?? `message:${index}`;
@@ -165,7 +181,7 @@ function canReviseMessage(msg: TranscriptEntry): msg is TranscriptEntry & {
 } {
   return Boolean(
     props.allowRevision &&
-    !props.isStreaming &&
+    !showBusyIndicator.value &&
     msg.role === "user" &&
     typeof msg.id === "string" &&
     userMessageText(msg),
@@ -304,9 +320,9 @@ watch(
 );
 
 watch(
-  () => props.isStreaming,
-  async streaming => {
-    if (streaming) {
+  () => showBusyIndicator.value,
+  async busy => {
+    if (busy) {
       await nextTick();
       if (container.value) {
         container.value.scrollTop = container.value.scrollHeight;
@@ -535,7 +551,8 @@ defineExpose({ preserveScroll });
       </div>
     </template>
 
-    <div v-if="isStreaming" class="streaming-indicator">
+    <div v-if="showBusyIndicator" class="streaming-indicator">
+      <span class="busy-label">{{ busyIndicatorLabel }}</span>
       <span class="dot"></span>
       <span class="dot"></span>
       <span class="dot"></span>
@@ -1005,6 +1022,12 @@ defineExpose({ preserveScroll });
   padding: 0 0 8px 14px;
   width: min(920px, calc(100% - 64px));
   margin: 0 auto;
+}
+
+.busy-label {
+  margin-right: 4px;
+  font-size: 0.72rem;
+  color: var(--text-subtle);
 }
 
 .streaming-indicator .dot {

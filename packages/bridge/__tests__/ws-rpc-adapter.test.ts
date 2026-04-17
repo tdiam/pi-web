@@ -1395,6 +1395,87 @@ describe("WsRpcAdapter", () => {
       });
     });
 
+    it("forwards selected-session compaction lifecycle events", async () => {
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-compaction-events-"),
+      );
+      const sessionManager = SessionManager.create(tmpDir, tmpDir);
+      sessionManager.appendMessage({
+        role: "user",
+        content: "Initial prompt",
+        timestamp: Date.now(),
+      } as any);
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("session file was not created");
+      }
+
+      (adapter as any).selectedSession = {
+        model: undefined,
+        thinkingLevel: "medium",
+        isStreaming: false,
+        isCompacting: true,
+        steeringMode: "all",
+        followUpMode: "all",
+        sessionFile,
+        sessionId: "selected-session",
+        autoCompactionEnabled: true,
+        pendingMessageCount: 0,
+        sessionManager,
+      };
+
+      (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+      (adapter as any).handleSelectedSessionEvent({
+        type: "compaction_start",
+        reason: "threshold",
+      });
+
+      let sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      expect(sendCalls[0].payload).toEqual({
+        type: "compaction_start",
+        reason: "threshold",
+      });
+
+      (ws.send as ReturnType<typeof vi.fn>).mockClear();
+
+      (adapter as any).handleSelectedSessionEvent({
+        type: "compaction_end",
+        reason: "threshold",
+        result: undefined,
+        aborted: false,
+        willRetry: false,
+        errorMessage: "API quota exceeded",
+      });
+
+      await new Promise(r => setTimeout(r, 10));
+
+      sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(call =>
+        JSON.parse(call[0] as string),
+      );
+      expect(sendCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({ type: "transcript_snapshot" }),
+          }),
+          expect.objectContaining({
+            payload: {
+              type: "compaction_end",
+              reason: "threshold",
+              result: null,
+              aborted: false,
+              willRetry: false,
+              errorMessage: "API quota exceeded",
+            },
+          }),
+        ]),
+      );
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
     it("refreshes the transcript after live compaction completes", async () => {
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), "pi-web-live-compact-"),

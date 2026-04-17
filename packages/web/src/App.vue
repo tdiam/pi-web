@@ -15,6 +15,7 @@ import type {
 } from "./shared-types";
 import { readInitialDebugMode } from "./utils/debugMode";
 import type { RpcModelInfo } from "./utils/models";
+import { parseCompactSlashCommand } from "./utils/slashCommands";
 
 type ThemeMode = "dark" | "light";
 
@@ -36,6 +37,7 @@ const {
   currentModel,
   currentThinkingLevel,
   isStreaming,
+  isCompacting,
   isReconnecting,
   reconnectCount,
   lastDisconnectReason,
@@ -43,6 +45,7 @@ const {
   sendPrompt,
   loadOlderTranscriptPage,
   abortGeneration,
+  compactSession,
   sendCommand,
   fetchWorkspaceEntries,
   setThinkingLevel,
@@ -228,6 +231,13 @@ async function handlePrompt(payload: {
   images: RpcImageContent[];
   revisionEntryId?: string;
 }) {
+  const compactCommand = parseCompactSlashCommand(payload.message);
+  if (compactCommand) {
+    pendingRevision.value = null;
+    compactSession(compactCommand.customInstructions).catch(() => {});
+    return;
+  }
+
   if (payload.revisionEntryId) {
     try {
       const response = await sendCommand({
@@ -398,6 +408,7 @@ onBeforeUnmount(() => {
         :transcript-initial-loading="transcriptInitialLoading"
         :transcript-page-loading="transcriptPageLoading"
         :is-streaming="isStreaming"
+        :is-compacting="isCompacting"
         :is-debug-mode="debugModeAvailable && debugMode"
         :connection-status="connectionStatus"
         :commands="commands"

@@ -26,6 +26,8 @@ import type {
   RpcAgentStartEvent,
   RpcBridgeEvent,
   RpcCommand,
+  RpcCompactionEndEvent,
+  RpcCompactionStartEvent,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
   RpcImageContent,
@@ -285,6 +287,35 @@ function toRpcModelSelectEvent(
       ? toRpcModel(event.previousModel)
       : undefined,
     source: event.source,
+  };
+}
+
+function toRpcCompactionStartEvent(
+  event: Extract<AgentSessionEvent, { type: "compaction_start" }>,
+): RpcCompactionStartEvent {
+  return {
+    type: "compaction_start",
+    reason: event.reason,
+  };
+}
+
+function toRpcCompactionEndEvent(
+  event: Extract<AgentSessionEvent, { type: "compaction_end" }>,
+): RpcCompactionEndEvent {
+  return {
+    type: "compaction_end",
+    reason: event.reason,
+    result: event.result
+      ? {
+          summary: event.result.summary,
+          firstKeptEntryId: event.result.firstKeptEntryId,
+          tokensBefore: event.result.tokensBefore,
+          details: event.result.details,
+        }
+      : null,
+    aborted: event.aborted,
+    willRetry: event.willRetry,
+    errorMessage: event.errorMessage,
   };
 }
 
@@ -1687,8 +1718,12 @@ export class WsRpcAdapter {
         this.sendEvent(toRpcAgentEndEvent(event));
         this.queueSessionStatsEvent(sessionPath);
         return;
+      case "compaction_start":
+        this.sendEvent(toRpcCompactionStartEvent(event));
+        return;
       case "compaction_end":
         this.sendTranscriptSnapshot(this.buildCurrentTranscriptPage());
+        this.sendEvent(toRpcCompactionEndEvent(event));
         this.queueSessionStatsEvent(sessionPath);
         return;
       default:

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
-import type { RpcSlashCommand } from "../shared-types";
+import type { SlashCommandOption } from "../utils/slashCommands";
 
 const props = defineProps<{
-  commands: RpcSlashCommand[];
+  commands: SlashCommandOption[];
   filter: string;
 }>();
 
@@ -74,7 +74,7 @@ function scrollToHighlighted() {
   });
 }
 
-function handleClick(cmd: RpcSlashCommand) {
+function handleClick(cmd: SlashCommandOption) {
   emit("select", cmd.name);
 }
 

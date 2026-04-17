@@ -18,11 +18,18 @@ import {
 } from "../utils/attachments";
 import type { RpcModelInfo } from "../utils/models";
 import {
+  applySlashCommandCompletion,
+  getSlashCommandContext,
+  mergeSlashCommandOptions,
+  parseCompactSlashCommand,
+} from "../utils/slashCommands";
+import {
   applyWorkspaceMentionCompletion,
   getWorkspaceMentionContext,
   getWorkspaceMentionSuggestions,
   type WorkspaceMentionSuggestion,
 } from "../utils/workspaceMentions";
+import CommandPalette from "./CommandPalette.vue";
 import ModelDropdown from "./ModelDropdown.vue";
 import WorkspaceMentionPalette from "./WorkspaceMentionPalette.vue";
 
@@ -78,6 +85,7 @@ const composerRootRef = ref<HTMLDivElement | null>(null);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isDisabled = computed(() => props.connectionStatus !== "connected");
+const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null);
 const mentionPaletteRef = ref<InstanceType<
   typeof WorkspaceMentionPalette
 > | null>(null);
@@ -85,9 +93,26 @@ const attachments = ref<ComposerAttachment[]>([]);
 const isDragActive = ref(false);
 const attachmentNotice = ref<string | null>(null);
 const cursorOffset = ref(0);
+const dismissedCommandKey = ref<string | null>(null);
 const dismissedMentionKey = ref<string | null>(null);
 const isComposing = ref(false);
 
+const commandContext = computed(() =>
+  getSlashCommandContext(inputText.value, cursorOffset.value),
+);
+const availableSlashCommands = computed(() =>
+  mergeSlashCommandOptions(props.commands),
+);
+const filteredSlashCommands = computed(() => {
+  if (!commandContext.value) return [];
+  const query = commandContext.value.query.toLowerCase();
+  if (!query) return availableSlashCommands.value;
+  return availableSlashCommands.value.filter(
+    command =>
+      command.name.toLowerCase().includes(query) ||
+      (command.description ?? "").toLowerCase().includes(query),
+  );
+});
 const mentionContext = computed(() =>
   getWorkspaceMentionContext(inputText.value, cursorOffset.value),
 );
@@ -98,8 +123,12 @@ const mentionSuggestions = computed(() => {
     mentionContext.value,
   );
 });
+const showCommandPalette = computed(() => {
+  if (isDisabled.value || !commandContext.value) return false;
+  return dismissedCommandKey.value !== getCommandKey(commandContext.value);
+});
 const showMentionPalette = computed(() => {
-  if (!mentionContext.value) return false;
+  if (showCommandPalette.value || !mentionContext.value) return false;
   if (dismissedMentionKey.value === getMentionKey(mentionContext.value)) {
     return false;
   }
@@ -163,6 +192,13 @@ function normalizeSubmittedText(value: string): string {
   lines[0] = lines[0].trimStart();
   lines[lines.length - 1] = lines[lines.length - 1].trimEnd();
   return lines.join("\n");
+}
+
+function getCommandKey(
+  command: ReturnType<typeof getSlashCommandContext> | null,
+): string | null {
+  if (!command) return null;
+  return `${command.start}:${command.query}`;
 }
 
 function getMentionKey(
@@ -240,6 +276,7 @@ function applyExternalText(
     clearAttachments();
   }
   clearAttachmentNotice();
+  dismissedCommandKey.value = null;
   dismissedMentionKey.value = null;
   focusComposer({ reveal: true });
 }
@@ -249,6 +286,13 @@ watch(inputText, () => {
   nextTick(() => {
     syncCursorFromTextarea();
   });
+});
+
+watch(commandContext, (command, previousCommand) => {
+  const commandKey = getCommandKey(command);
+  if (commandKey && commandKey !== getCommandKey(previousCommand)) {
+    dismissedCommandKey.value = null;
+  }
 });
 
 watch(mentionContext, (mention, previousMention) => {
@@ -349,6 +393,7 @@ function submitMessage(message: string) {
   });
   inputText.value = "";
   cursorOffset.value = 0;
+  dismissedCommandKey.value = null;
   dismissedMentionKey.value = null;
   revisionBackup.value = null;
   clearAttachments();
@@ -359,6 +404,12 @@ function submitMessage(message: string) {
 function handleSubmit() {
   const text = normalizedInputText.value;
   if ((!text && !hasAttachments.value) || isDisabled.value) return;
+
+  if (parseCompactSlashCommand(text) && hasAttachments.value) {
+    setAttachmentNotice("/compact does not accept image attachments");
+    return;
+  }
+
   submitMessage(text);
 }
 
@@ -373,6 +424,35 @@ function handlePrimaryAction() {
     return;
   }
   handleSubmit();
+}
+
+function handleCommandSelect(commandName: string) {
+  const command = availableSlashCommands.value.find(
+    item => item.name === commandName,
+  );
+  const context = commandContext.value;
+  if (!command || !context) return;
+
+  const nextState = applySlashCommandCompletion(
+    inputText.value,
+    context,
+    command,
+  );
+
+  inputText.value = nextState.text;
+  dismissedCommandKey.value = null;
+  nextTick(() => {
+    const el = textareaRef.value;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(nextState.cursor, nextState.cursor);
+    cursorOffset.value = nextState.cursor;
+    resizeTextarea();
+  });
+}
+
+function handleCommandClose() {
+  dismissedCommandKey.value = getCommandKey(commandContext.value);
 }
 
 function handleMentionSelect(item: WorkspaceMentionSuggestion) {
@@ -428,6 +508,7 @@ function handleCancelRevision() {
   }
   revisionBackup.value = null;
   clearAttachmentNotice();
+  dismissedCommandKey.value = null;
   dismissedMentionKey.value = null;
   emit("cancelRevision");
   focusComposer();
@@ -518,6 +599,20 @@ function handleInputKeydown(e: KeyboardEvent) {
   const composing = isInputComposing(e);
 
   if (
+    showCommandPalette.value &&
+    commandPaletteRef.value &&
+    (e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "Escape" ||
+      (filteredSlashCommands.value.length > 0 &&
+        !composing &&
+        (e.key === "Enter" || e.key === "Tab")))
+  ) {
+    commandPaletteRef.value.handleKeydown(e);
+    return;
+  }
+
+  if (
     showMentionPalette.value &&
     mentionPaletteRef.value &&
     (e.key === "ArrowDown" ||
@@ -554,8 +649,16 @@ resizeTextarea();
 <template>
   <div ref="composerRootRef" class="composer-bar">
     <div class="composer-inner-wrap">
+      <CommandPalette
+        v-if="showCommandPalette"
+        ref="commandPaletteRef"
+        :commands="availableSlashCommands"
+        :filter="commandContext?.query ?? ''"
+        @select="handleCommandSelect"
+        @close="handleCommandClose"
+      />
       <WorkspaceMentionPalette
-        v-if="showMentionPalette"
+        v-else-if="showMentionPalette"
         ref="mentionPaletteRef"
         :items="mentionSuggestions"
         :loading="workspaceEntriesLoading"
