@@ -4,6 +4,7 @@ import type { SessionEntry } from "../composables/useBridgeClient";
 defineProps<{
   sessions: readonly SessionEntry[];
   activeSessionId: string | null;
+  runningSessionPath: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -24,12 +25,24 @@ const emit = defineEmits<{
         v-for="s in sessions"
         :key="s.id"
         class="rail-item"
-        :class="{ active: s.id === activeSessionId }"
+        :class="{
+          active: s.id === activeSessionId,
+          running: s.path === runningSessionPath,
+        }"
         :title="s.path"
         @click="emit('select', s.path)"
       >
         <span class="item-indicator"></span>
         <span class="item-label">{{ s.name }}</span>
+        <span
+          v-if="s.path === runningSessionPath"
+          class="item-status"
+          role="status"
+          aria-label="Agent running"
+          title="Agent running"
+        >
+          <span class="item-status-dot" aria-hidden="true"></span>
+        </span>
       </li>
     </ul>
     <p v-else class="rail-empty">No sessions</p>
@@ -110,11 +123,37 @@ const emit = defineEmits<{
   background: var(--text);
 }
 
+.rail-item.running .item-indicator {
+  background: var(--diff-added-accent);
+}
+
 .item-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.item-status {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.item-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--diff-added-accent);
+  box-shadow: 0 0 0 0
+    color-mix(in srgb, var(--diff-added-accent) 34%, transparent);
+  animation:
+    session-running-blink 1.1s ease-in-out infinite,
+    session-running-ping 1.8s ease-out infinite;
 }
 
 .rail-empty {
@@ -122,5 +161,35 @@ const emit = defineEmits<{
   padding: 8px 10px;
   font-size: 0.78rem;
   color: var(--text-subtle);
+}
+
+@keyframes session-running-blink {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.38;
+    transform: scale(0.86);
+  }
+}
+
+@keyframes session-running-ping {
+  0% {
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--diff-added-accent) 34%, transparent);
+  }
+
+  75% {
+    box-shadow: 0 0 0 6px
+      color-mix(in srgb, var(--diff-added-accent) 0%, transparent);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--diff-added-accent) 0%, transparent);
+  }
 }
 </style>

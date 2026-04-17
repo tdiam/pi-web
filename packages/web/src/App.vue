@@ -29,6 +29,7 @@ const {
   sessionStats,
   sessions,
   treeEntries,
+  liveSessionPath,
   isHistoricalView,
   commands,
   workspaceEntries,
@@ -59,6 +60,10 @@ const {
 } = useBridgeClient();
 
 const activeSessionId = computed(() => sessionState.value?.sessionId ?? null);
+const runningSessionPath = computed(() => {
+  if (!isStreaming.value) return null;
+  return liveSessionPath.value ?? sessionState.value?.sessionFile ?? null;
+});
 const activeSessionLabel = computed(() => {
   const active = sessions.value.find(
     session => session.id === activeSessionId.value,
@@ -389,6 +394,7 @@ onBeforeUnmount(() => {
       <AppSidebar
         :sessions="sessions"
         :active-session-id="activeSessionId"
+        :running-session-path="runningSessionPath"
         :sidebar-open="sidebarOpen"
         :tree-panel-open="treePanelOpen"
         :is-historical-view="isHistoricalView"

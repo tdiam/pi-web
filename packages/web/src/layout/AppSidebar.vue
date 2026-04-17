@@ -6,6 +6,7 @@ import type { SessionEntry } from "../composables/useBridgeClient";
 defineProps<{
   sessions: readonly SessionEntry[];
   activeSessionId: string | null;
+  runningSessionPath: string | null;
   sidebarOpen: boolean;
   treePanelOpen: boolean;
   isHistoricalView: boolean;
@@ -25,6 +26,7 @@ const emit = defineEmits<{
     <SessionRail
       :sessions="sessions"
       :active-session-id="activeSessionId"
+      :running-session-path="runningSessionPath"
       @select="emit('selectSession', $event)"
     >
       <template #header-actions>
