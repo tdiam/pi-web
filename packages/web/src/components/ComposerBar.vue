@@ -70,6 +70,7 @@ const emit = defineEmits<{
 }>();
 
 const MAX_TEXTAREA_HEIGHT = 160;
+const TEXTAREA_HEIGHT_BUFFER = 4;
 
 const inputText = ref("");
 const composerRootRef = ref<HTMLDivElement | null>(null);
@@ -120,7 +121,7 @@ const selectedThinkingLabel = computed(
     )?.label ?? "Off",
 );
 const thinkingSelectWidth = computed(
-  () => `calc(${selectedThinkingLabel.value.length + 1.5}ch + 84px)`,
+  () => `calc(${selectedThinkingLabel.value.length}ch + 0.25rem)`,
 );
 const normalizedInputText = computed(() =>
   normalizeSubmittedText(inputText.value),
@@ -183,7 +184,21 @@ function resizeTextarea() {
     const el = textareaRef.value;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT)}px`;
+
+    const styles = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(styles.lineHeight) || 0;
+    const paddingTop = Number.parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(styles.paddingBottom) || 0;
+    const minHeight = Math.ceil(
+      lineHeight + paddingTop + paddingBottom + TEXTAREA_HEIGHT_BUFFER,
+    );
+    const nextHeight = Math.min(
+      Math.max(el.scrollHeight + TEXTAREA_HEIGHT_BUFFER, minHeight),
+      MAX_TEXTAREA_HEIGHT,
+    );
+
+    // Keep a small safety margin so descenders like "g" do not get clipped.
+    el.style.height = `${nextHeight}px`;
     el.style.overflowY =
       el.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
   });
@@ -651,11 +666,15 @@ resizeTextarea();
             />
             <label
               class="thinking-control"
+              :class="{ disabled: isDisabled }"
               :style="{
                 '--thinking-select-width': thinkingSelectWidth,
               }"
             >
               <span class="sr-only">Thinking level</span>
+              <span class="thinking-control-label" aria-hidden="true"
+                >Thinking</span
+              >
               <select
                 class="thinking-select"
                 :value="selectedThinkingLevel"
@@ -963,15 +982,19 @@ resizeTextarea();
 }
 
 .prompt-input {
+  display: block;
+  box-sizing: border-box;
   flex: 1;
   min-width: 0;
   max-height: 160px;
-  padding: 10px 6px 8px;
+  padding: 9px 6px 10px;
   border: none;
   background: transparent;
   color: var(--text);
+  font-family: var(--pi-font-sans);
   font-size: 0.94rem;
-  line-height: 1.5;
+  font-weight: 400;
+  line-height: 1.55;
   outline: none;
   resize: none;
   overflow-y: hidden;
@@ -985,6 +1008,7 @@ resizeTextarea();
 
 .prompt-input::placeholder {
   color: var(--text-subtle);
+  line-height: inherit;
 }
 
 .send-btn {
@@ -1065,46 +1089,59 @@ resizeTextarea();
 }
 
 .thinking-control {
-  position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
 }
 
-.thinking-control::before {
-  content: "Thinking";
-  position: absolute;
-  top: 50%;
-  left: 10px;
-  transform: translateY(-50%);
-  font-family: var(--pi-font-sans);
-  font-size: 0.62rem;
+.thinking-control:hover:not(.disabled),
+.thinking-control:focus-within {
+  border-color: var(--border-strong);
+  background: var(--panel-2);
+}
+
+.thinking-control.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thinking-control-label {
+  display: inline-flex;
+  align-items: center;
   color: var(--text-subtle);
-  pointer-events: none;
+  font-family: var(--pi-font-sans);
+  font-size: 0.66rem;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .thinking-select {
   width: var(--thinking-select-width, auto);
-  height: 26px;
-  padding: 0 20px 0 68px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--text);
   font-family: var(--pi-font-mono);
   font-size: 0.66rem;
+  line-height: 1.2;
   outline: none;
   cursor: pointer;
   appearance: none;
 }
 
-.thinking-select:hover:not(:disabled),
-.thinking-select:focus {
-  border-color: var(--border-strong);
-  background: var(--panel-2);
-}
-
 .thinking-select:disabled {
-  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -1239,8 +1276,8 @@ resizeTextarea();
   }
 
   .prompt-input {
-    padding: 6px 0 4px;
-    line-height: 1.45;
+    padding: 5px 0 6px;
+    line-height: 1.5;
   }
 
   .composer-footer-row {
