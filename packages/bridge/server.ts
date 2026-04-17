@@ -199,9 +199,7 @@ export class BridgeServer {
       return;
     }
 
-    const openSockets = this.wsServer
-      ? Array.from(this.wsServer.clients)
-      : [];
+    const openSockets = this.wsServer ? Array.from(this.wsServer.clients) : [];
 
     // Resolve adapter-side state immediately, then force the sockets closed so
     // wsServer.close() and httpServer.close() cannot hang on a stale browser tab.
@@ -210,9 +208,7 @@ export class BridgeServer {
     }
     this.adapters.clear();
 
-    await Promise.all(
-      openSockets.map(ws => this.closeWebSocketConnection(ws)),
-    );
+    await Promise.all(openSockets.map(ws => this.closeWebSocketConnection(ws)));
 
     // Close WebSocket server
     if (this.wsServer) {
