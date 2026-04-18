@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { createBridgeTerminalView } from "../terminal-log-view.js";
-import { DEFAULT_BRIDGE_CONFIG, type BridgeEvent } from "../types.js";
+import {
+  DEFAULT_BRIDGE_CONFIG,
+  type BridgeEvent,
+  type WsClient,
+} from "../types.js";
 
 describe("createBridgeTerminalView", () => {
+  const client: WsClient = {
+    id: "client-1234567890",
+    seq: 1,
+    connectedAt: new Date().toISOString(),
+  };
+
   it("requests exit when Ctrl+C input is received", () => {
     const view = createBridgeTerminalView(
       () => () => {},
@@ -34,8 +44,55 @@ describe("createBridgeTerminalView", () => {
 
     handler?.({ type: "server_start", host: "127.0.0.1", port: 3000 });
 
-    expect(onUpdate).toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledWith(true);
     view.dispose();
     expect(unsubscribe).toHaveBeenCalled();
+  });
+
+  it("forces a full redraw when client count changes", () => {
+    let handler: ((event: BridgeEvent) => void) | undefined;
+    const onUpdate = vi.fn();
+
+    createBridgeTerminalView(
+      eventHandler => {
+        handler = eventHandler;
+        return () => {};
+      },
+      () => ({ status: "running", host: "127.0.0.1", port: 3000 }),
+      () => [client],
+      DEFAULT_BRIDGE_CONFIG,
+      onUpdate,
+    );
+
+    handler?.({ type: "client_connect", client });
+    handler?.({ type: "client_disconnect", client, reason: "closed" });
+
+    expect(onUpdate).toHaveBeenNthCalledWith(1, true);
+    expect(onUpdate).toHaveBeenNthCalledWith(2, true);
+  });
+
+  it("keeps incremental redraws for log-only events", () => {
+    let handler: ((event: BridgeEvent) => void) | undefined;
+    const onUpdate = vi.fn();
+
+    createBridgeTerminalView(
+      eventHandler => {
+        handler = eventHandler;
+        return () => {};
+      },
+      () => ({ status: "running", host: "127.0.0.1", port: 3000 }),
+      () => [client],
+      DEFAULT_BRIDGE_CONFIG,
+      onUpdate,
+    );
+
+    handler?.({
+      type: "command_received",
+      client,
+      commandType: "ping",
+      correlationId: "corr-12345678",
+    });
+
+    expect(onUpdate).toHaveBeenCalledWith(false);
   });
 });

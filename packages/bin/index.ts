@@ -107,7 +107,7 @@ async function webBridgeHandler(
         () => bridgeController!.getState(),
         () => bridgeController!.getClients(),
         config,
-        () => tui.requestRender(),
+        force => tui.requestRender(force),
       );
       terminalView = view;
 

@@ -264,7 +264,7 @@ export function createBridgeTerminalView(
   getState: () => BridgeState,
   getClients: () => WsClient[],
   _config: BridgeConfig,
-  onUpdate?: () => void,
+  onUpdate?: (force?: boolean) => void,
 ): TerminalLogView & { dispose: () => void } {
   const maxLines = 100;
   const logs: Array<{
@@ -277,17 +277,18 @@ export function createBridgeTerminalView(
   const addLog = (
     message: string,
     type: "info" | "client" | "error" | "shutdown" = "info",
+    forceUpdate = false,
   ): void => {
     logs.push({ timestamp: new Date(), message, type });
     if (logs.length > maxLines) {
       logs.shift();
     }
-    onUpdate?.();
+    onUpdate?.(forceUpdate);
   };
 
   const requestExit = (): void => {
     exitRequested = true;
-    onUpdate?.();
+    onUpdate?.(true);
   };
 
   const unsubscribe = subscribe(event => {
@@ -306,22 +307,25 @@ export function createBridgeTerminalView(
         addLog(
           `Server started on ${event.host}:${event.port}${lanInfo}`,
           "info",
+          true,
         );
         break;
       }
       case "server_stop":
-        addLog("Server stopped", "info");
+        addLog("Server stopped", "info", true);
         break;
       case "client_connect":
         addLog(
           `Client #${event.client.seq} connected (${event.client.id.slice(0, 12)}...)`,
           "client",
+          true,
         );
         break;
       case "client_disconnect":
         addLog(
           `Client #${event.client.seq} disconnected: ${event.reason || "unknown"}`,
           "client",
+          true,
         );
         break;
       case "command_received":
@@ -337,10 +341,10 @@ export function createBridgeTerminalView(
         );
         break;
       case "sigint_received":
-        addLog("SIGINT received, starting shutdown...", "shutdown");
+        addLog("SIGINT received, starting shutdown...", "shutdown", true);
         break;
       case "shutdown_complete":
-        addLog("Shutdown complete", "shutdown");
+        addLog("Shutdown complete", "shutdown", true);
         break;
       case "auth_rejected":
         addLog(
