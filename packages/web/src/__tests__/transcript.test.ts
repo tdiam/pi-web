@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTranscriptDisplayItems,
   contentBlocks,
   messageContent,
   normalizeTranscript,
@@ -295,6 +296,206 @@ describe("normalizeTranscript", () => {
         src: "data:image/png;base64,aGVsbG8=",
         alt: "Image attachment",
         mimeType: "image/png",
+      },
+    ]);
+  });
+
+  it("merges initial model and thinking entries into one session event row", () => {
+    const items = buildTranscriptDisplayItems([
+      {
+        id: "m1",
+        role: "system",
+        content: [
+          {
+            type: "model_change",
+            provider: "openai",
+            modelId: "gpt-5.4",
+          },
+        ],
+      },
+      {
+        id: "m2",
+        role: "system",
+        content: [
+          {
+            type: "thinking_level_change",
+            thinkingLevel: "xhigh",
+          },
+        ],
+      },
+      {
+        id: "u1",
+        role: "user",
+        content: "Inspect terminal-log-view.ts",
+      },
+    ]);
+
+    expect(items).toEqual([
+      {
+        kind: "session_event",
+        key: "session-event:m1-m2",
+        label: "Session configured",
+        model: { provider: "openai", id: "gpt-5.4" },
+        thinkingLevel: "xhigh",
+        sourceMessageIds: ["m1", "m2"],
+      },
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 2,
+      },
+    ]);
+  });
+
+  it("merges mid-session config changes into a compact event row", () => {
+    const items = buildTranscriptDisplayItems([
+      {
+        id: "u1",
+        role: "user",
+        content: "Inspect terminal-log-view.ts",
+      },
+      {
+        id: "m1",
+        role: "system",
+        content: [
+          {
+            type: "model_change",
+            provider: "openai",
+            modelId: "gpt-5.5",
+          },
+        ],
+      },
+      {
+        id: "m2",
+        role: "system",
+        content: [
+          {
+            type: "thinking_level_change",
+            thinkingLevel: "high",
+          },
+        ],
+      },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "Continuing with a higher reasoning level.",
+      },
+    ]);
+
+    expect(items).toEqual([
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 0,
+      },
+      {
+        kind: "session_event",
+        key: "session-event:m1-m2",
+        label: "Settings changed",
+        model: { provider: "openai", id: "gpt-5.5" },
+        thinkingLevel: "high",
+        sourceMessageIds: ["m1", "m2"],
+      },
+      {
+        kind: "message",
+        message: {
+          id: "a1",
+          role: "assistant",
+          content: "Continuing with a higher reasoning level.",
+        },
+        messageIndex: 3,
+      },
+    ]);
+  });
+
+  it("appends a pending config event when the transcript has not caught up yet", () => {
+    const items = buildTranscriptDisplayItems(
+      [
+        {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+      ],
+      {
+        pendingSessionEvent: {
+          key: "pending:1",
+          thinkingLevel: "high",
+        },
+      },
+    );
+
+    expect(items).toEqual([
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 0,
+      },
+      {
+        kind: "session_event",
+        key: "pending:1",
+        label: "Thinking changed",
+        thinkingLevel: "high",
+        sourceMessageIds: [],
+      },
+    ]);
+  });
+
+  it("does not duplicate a pending config event once the transcript reflects it", () => {
+    const items = buildTranscriptDisplayItems(
+      [
+        {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        {
+          id: "m1",
+          role: "system",
+          content: [
+            {
+              type: "thinking_level_change",
+              thinkingLevel: "high",
+            },
+          ],
+        },
+      ],
+      {
+        pendingSessionEvent: {
+          key: "pending:1",
+          thinkingLevel: "high",
+        },
+      },
+    );
+
+    expect(items).toEqual([
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 0,
+      },
+      {
+        kind: "session_event",
+        key: "session-event:m1",
+        label: "Thinking changed",
+        thinkingLevel: "high",
+        sourceMessageIds: ["m1"],
       },
     ]);
   });

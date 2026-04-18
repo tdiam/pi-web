@@ -72,6 +72,50 @@ export type ContentBlock =
   | ImageContentBlock
   | SystemContentBlock;
 
+type ConfigSystemBlock = Extract<
+  RpcTranscriptSystemBlock,
+  { type: "model_change" | "thinking_level_change" }
+>;
+type ModelChangeSystemBlock = Extract<
+  RpcTranscriptSystemBlock,
+  { type: "model_change" }
+>;
+type ThinkingLevelChangeSystemBlock = Extract<
+  RpcTranscriptSystemBlock,
+  { type: "thinking_level_change" }
+>;
+
+export interface TranscriptMessageDisplayItem {
+  kind: "message";
+  message: TranscriptEntryLike;
+  messageIndex: number;
+}
+
+export interface TranscriptSessionEventDisplayItem {
+  kind: "session_event";
+  key: string;
+  label: string;
+  model?: {
+    provider?: string;
+    id: string;
+  };
+  thinkingLevel?: string;
+  sourceMessageIds: string[];
+}
+
+export interface PendingTranscriptSessionEvent {
+  key: string;
+  model?: {
+    provider?: string;
+    id: string;
+  };
+  thinkingLevel?: string;
+}
+
+export type TranscriptDisplayItem =
+  | TranscriptMessageDisplayItem
+  | TranscriptSessionEventDisplayItem;
+
 type TranscriptContentItem = string | RpcTranscriptContentBlock;
 type ToolResultContentItem = NonNullable<
   RpcTranscriptToolResultBlock["content"]
@@ -226,6 +270,124 @@ export function normalizeTranscript(
   return normalized;
 }
 
+export function buildTranscriptDisplayItems(
+  messages: readonly TranscriptEntryLike[],
+  options?: {
+    pendingSessionEvent?: PendingTranscriptSessionEvent | null;
+  },
+): TranscriptDisplayItem[] {
+  const items: TranscriptDisplayItem[] = [];
+  let hasSeenNonConfigMessage = false;
+  let lastModel:
+    | {
+        provider?: string;
+        id: string;
+      }
+    | undefined;
+  let lastThinkingLevel: string | undefined;
+  let index = 0;
+
+  while (index < messages.length) {
+    if (!configSystemBlock(messages[index])) {
+      items.push({
+        kind: "message",
+        message: messages[index],
+        messageIndex: index,
+      });
+      hasSeenNonConfigMessage = true;
+      index += 1;
+      continue;
+    }
+
+    const startIndex = index;
+    let model: ModelChangeSystemBlock | undefined;
+    let thinking: ThinkingLevelChangeSystemBlock | undefined;
+    const sourceMessageIds: string[] = [];
+
+    while (index < messages.length) {
+      const block = configSystemBlock(messages[index]);
+      if (!block) break;
+
+      if (block.type === "model_change") {
+        model = block;
+      } else {
+        thinking = block;
+      }
+
+      const messageId = messages[index]?.id;
+      if (typeof messageId === "string" && messageId.trim()) {
+        sourceMessageIds.push(messageId);
+      }
+      index += 1;
+    }
+
+    const normalizedModel = model
+      ? {
+          provider: normalizeOptionalText(model.provider),
+          id: normalizeText(model.modelId, "Unknown model"),
+        }
+      : undefined;
+    const normalizedThinkingLevel = thinking
+      ? normalizeText(thinking.thinkingLevel, "Unknown")
+      : undefined;
+
+    if (normalizedModel) {
+      lastModel = normalizedModel;
+    }
+    if (normalizedThinkingLevel) {
+      lastThinkingLevel = normalizedThinkingLevel;
+    }
+
+    items.push({
+      kind: "session_event",
+      key: sessionEventKey(messages, startIndex, index - 1),
+      label: sessionEventLabel(
+        hasSeenNonConfigMessage,
+        Boolean(normalizedModel),
+        Boolean(normalizedThinkingLevel),
+      ),
+      model: normalizedModel,
+      thinkingLevel: normalizedThinkingLevel,
+      sourceMessageIds,
+    });
+  }
+
+  const pendingEvent = options?.pendingSessionEvent;
+  if (pendingEvent && hasSeenNonConfigMessage) {
+    const pendingModel = pendingEvent.model
+      ? normalizePendingSessionEventModel(pendingEvent.model)
+      : undefined;
+    const pendingThinkingLevel = normalizeOptionalText(
+      pendingEvent.thinkingLevel,
+    );
+    const nextModel =
+      pendingModel && !sameTranscriptModel(lastModel, pendingModel)
+        ? pendingModel
+        : undefined;
+    const nextThinkingLevel =
+      pendingThinkingLevel && pendingThinkingLevel !== lastThinkingLevel
+        ? pendingThinkingLevel
+        : undefined;
+
+    if (nextModel || nextThinkingLevel) {
+      items.push({
+        kind: "session_event",
+        key: pendingEvent.key,
+        label: sessionEventLabel(
+          true,
+          Boolean(nextModel),
+          Boolean(nextThinkingLevel),
+        ),
+        model: nextModel,
+        thinkingLevel: nextThinkingLevel,
+        sourceMessageIds: [],
+      });
+    }
+  }
+
+  return items;
+}
+
 function appendToolResultToPreviousAssistant(
   normalized: TranscriptEntryLike[],
   toolResultMessage: TranscriptEntryLike,
@@ -329,6 +491,95 @@ function cloneToolResultContent(
         return [];
     }
   });
+}
+
+function configSystemBlock(
+  message: TranscriptEntryLike,
+): ConfigSystemBlock | null {
+  if (message.role !== "system" || !Array.isArray(message.content)) {
+    return null;
+  }
+  if (message.content.length !== 1) return null;
+
+  const [block] = message.content;
+  if (typeof block !== "object" || block === null) return null;
+  if (block.type !== "model_change" && block.type !== "thinking_level_change") {
+    return null;
+  }
+
+  return block as ConfigSystemBlock;
+}
+
+function sessionEventKey(
+  messages: readonly TranscriptEntryLike[],
+  startIndex: number,
+  endIndex: number,
+): string {
+  const startKey = transcriptMessageKey(messages[startIndex], startIndex);
+  const endKey = transcriptMessageKey(messages[endIndex], endIndex);
+  return startKey === endKey
+    ? `session-event:${startKey}`
+    : `session-event:${startKey}-${endKey}`;
+}
+
+function transcriptMessageKey(
+  message: TranscriptEntryLike | undefined,
+  index: number,
+): string {
+  if (!message) return `message:${index}`;
+  return message.transcriptKey ?? message.id ?? `message:${index}`;
+}
+
+function sessionEventLabel(
+  hasSeenNonConfigMessage: boolean,
+  hasModel: boolean,
+  hasThinking: boolean,
+): string {
+  if (!hasSeenNonConfigMessage) return "Session configured";
+  if (hasModel && hasThinking) return "Settings changed";
+  if (hasModel) return "Model switched";
+  if (hasThinking) return "Thinking changed";
+  return "Settings changed";
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed || undefined;
+}
+
+function normalizeText(value: string | undefined, fallback: string): string {
+  return normalizeOptionalText(value) ?? fallback;
+}
+
+function normalizePendingSessionEventModel(value: {
+  provider?: string;
+  id: string;
+}): {
+  provider?: string;
+  id: string;
+} {
+  return {
+    provider: normalizeOptionalText(value.provider),
+    id: normalizeText(value.id, "Unknown model"),
+  };
+}
+
+function sameTranscriptModel(
+  left:
+    | {
+        provider?: string;
+        id: string;
+      }
+    | undefined,
+  right:
+    | {
+        provider?: string;
+        id: string;
+      }
+    | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return left.id === right.id && left.provider === right.provider;
 }
 
 function isSystemBlock(

@@ -16,6 +16,7 @@ import type {
   RpcWorkspaceEntry,
 } from "../shared-types";
 import type { RpcModelInfo } from "../utils/models";
+import type { PendingTranscriptSessionEvent } from "../utils/transcript";
 
 defineProps<{
   compatWarningVisible: boolean;
@@ -24,6 +25,7 @@ defineProps<{
   transcriptHasOlder: boolean;
   transcriptInitialLoading: boolean;
   transcriptPageLoading: boolean;
+  pendingTranscriptConfigEvent: PendingTranscriptSessionEvent | null;
   isStreaming: boolean;
   isCompacting: boolean;
   isDebugMode: boolean;
@@ -100,6 +102,7 @@ defineExpose({ preserveTranscriptScroll });
       :has-older="transcriptHasOlder"
       :initial-loading="transcriptInitialLoading"
       :page-loading="transcriptPageLoading"
+      :pending-transcript-config-event="pendingTranscriptConfigEvent"
       :is-streaming="isStreaming"
       :is-compacting="isCompacting"
       :show-message-ids="isDebugMode"

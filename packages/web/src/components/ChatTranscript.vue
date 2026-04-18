@@ -10,14 +10,18 @@ import {
 } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
 import { userMessageCopyText } from "../utils/messageCopy";
-import type { ImageContentBlock } from "../utils/transcript";
 import {
+  buildTranscriptDisplayItems,
   contentBlocks,
+  errorMessageText,
   isAbortedMessage,
   isErrorMessage,
-  errorMessageText,
   isToolResultMessage,
   messageContent,
+  type ImageContentBlock,
+  type PendingTranscriptSessionEvent,
+  type TranscriptDisplayItem,
+  type TranscriptSessionEventDisplayItem,
 } from "../utils/transcript";
 import ImageLightbox from "./ImageLightbox.vue";
 import MarkdownRenderer from "./MarkdownRenderer.vue";
@@ -28,6 +32,7 @@ const props = defineProps<{
   hasOlder: boolean;
   initialLoading: boolean;
   pageLoading: boolean;
+  pendingTranscriptConfigEvent: PendingTranscriptSessionEvent | null;
   isStreaming: boolean;
   isCompacting: boolean;
   showMessageIds: boolean;
@@ -88,6 +93,11 @@ function roleLabel(role: string): string {
 
 const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
+const displayItems = computed(() =>
+  buildTranscriptDisplayItems(props.messages, {
+    pendingSessionEvent: props.pendingTranscriptConfigEvent,
+  }),
+);
 const showBusyIndicator = computed(
   () => props.isStreaming || props.isCompacting,
 );
@@ -101,6 +111,21 @@ const lightboxIndex = ref(0);
 
 function messageStableKey(msg: TranscriptEntry, index: number): string {
   return msg.transcriptKey ?? msg.id ?? `message:${index}`;
+}
+
+function displayItemKey(item: TranscriptDisplayItem, index: number): string {
+  return item.kind === "message"
+    ? messageStableKey(item.message, item.messageIndex)
+    : item.key || `session-event:${index}`;
+}
+
+function sessionEventModelText(
+  item: TranscriptSessionEventDisplayItem,
+): string {
+  if (!item.model) return "";
+  return item.model.provider
+    ? `${item.model.provider} / ${item.model.id}`
+    : item.model.id;
 }
 
 function toolBlockKey(messageKey: string, blockIdx: number): string {
@@ -402,196 +427,273 @@ defineExpose({ preserveScroll });
     </div>
 
     <template
-      v-for="(msg, index) in messages"
-      :key="messageStableKey(msg, index)"
+      v-for="(item, index) in displayItems"
+      :key="displayItemKey(item, index)"
     >
-      <div v-if="isToolResultMessage(msg)" class="message-row tool">
-        <div class="message-meta">
-          <span class="message-role">{{ roleLabel(msg.role) }}</span>
-        </div>
-        <div class="message-content tool-row">
-          <div class="tool-result-card">
-            <div class="tool-result-card-header">
-              <div class="tool-result-card-heading">
-                <span class="tool-result-card-label">{{
-                  roleLabel(msg.role)
-                }}</span>
-                <span v-if="showMessageIds" class="message-debug-id">
-                  ID {{ messageIdLabel(msg) }}
-                </span>
-              </div>
-              <button
-                v-if="toolResultCanExpand(msg)"
-                type="button"
-                class="tool-result-card-toggle"
-                @click="toggleToolBlock(messageStableKey(msg, index), -1)"
-                :title="
-                  isToolBlockExpanded(messageStableKey(msg, index), -1)
-                    ? 'Collapse'
-                    : 'Expand'
-                "
-              >
-                {{
-                  isToolBlockExpanded(messageStableKey(msg, index), -1)
-                    ? "Hide"
-                    : "Details"
-                }}
-              </button>
-            </div>
-            <pre
-              v-if="toolResultPreview(msg)"
-              class="tool-result-card-preview"
-              >{{ toolResultPreview(msg) }}</pre
-            >
-            <div
-              v-if="toolResultImages(msg).length > 0"
-              class="tool-result-card-images"
-            >
-              <figure
-                v-for="(image, imageIndex) in toolResultImages(msg)"
-                :key="`${image.src}-${imageIndex}`"
-                class="message-image-block"
-              >
-                <button
-                  type="button"
-                  class="message-image-button"
-                  :aria-label="`Open image ${imageIndex + 1}`"
-                  @click="openImageLightbox(toolResultImages(msg), imageIndex)"
-                >
-                  <img
-                    class="message-image"
-                    :src="image.src"
-                    :alt="image.alt"
-                    loading="lazy"
-                  />
-                </button>
-              </figure>
-            </div>
-            <pre
-              v-if="
-                isToolBlockExpanded(messageStableKey(msg, index), -1) &&
-                toolResultText(msg).trim()
-              "
-              class="tool-result-card-details"
-              >{{ toolResultText(msg) }}</pre
-            >
-          </div>
-        </div>
-      </div>
-
-      <div
-        v-else-if="isErrorMessage(msg)"
-        class="message-row"
-        :class="roleClass(msg.role)"
-      >
-        <div class="message-content" :class="roleClass(msg.role)">
-          <div v-if="showMessageIds" class="message-debug-id">
-            ID {{ messageIdLabel(msg) }}
-          </div>
-          <div class="error-block" :class="{ aborted: isAbortedMessage(msg) }">
-            <span class="error-label">{{
-              isAbortedMessage(msg) ? "Cancelled" : "Error"
+      <div v-if="item.kind === 'session_event'" class="session-event-row">
+        <div class="session-event-line" aria-hidden="true"></div>
+        <div class="session-event-body">
+          <span class="session-event-label">{{ item.label }}</span>
+          <span v-if="item.model" class="session-event-chip">
+            <span class="session-event-chip-label">Model</span>
+            <span class="session-event-chip-value">{{
+              sessionEventModelText(item)
             }}</span>
-            <span v-if="errorMessageText(msg)" class="error-message">{{
-              errorMessageText(msg)
+          </span>
+          <span v-if="item.thinkingLevel" class="session-event-chip">
+            <span class="session-event-chip-label">Thinking</span>
+            <span class="session-event-chip-value">{{
+              item.thinkingLevel
             }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div v-else class="message-row" :class="roleClass(msg.role)">
-        <div class="message-stack" :class="roleClass(msg.role)">
-          <div
-            class="message-content"
-            :class="roleClass(msg.role)"
-            :data-user-message-index="msg.role === 'user' ? index : undefined"
+          </span>
+          <span
+            v-if="showMessageIds && item.sourceMessageIds.length > 0"
+            class="session-event-debug"
           >
-            <div v-if="showMessageIds" class="message-debug-id">
-              ID {{ messageIdLabel(msg) }}
-            </div>
-            <template v-for="(block, bIdx) in contentBlocks(msg)" :key="bIdx">
-              <article
-                v-if="block.kind === 'system'"
-                class="system-block"
-                :data-system-type="block.systemType"
-              >
-                <div class="system-block-header">
-                  <span class="system-block-label">{{ block.label }}</span>
-                  <span v-if="block.meta" class="system-block-meta">{{
-                    block.meta
-                  }}</span>
-                </div>
-                <div class="system-block-title">{{ block.title }}</div>
-                <MarkdownRenderer
-                  v-if="block.body"
-                  class="system-block-body"
-                  :content="block.body"
-                />
-              </article>
+            IDs {{ item.sourceMessageIds.join(", ") }}
+          </span>
+        </div>
+        <div class="session-event-line" aria-hidden="true"></div>
+      </div>
 
-              <div v-else-if="block.kind === 'thinking'" class="thinking-block">
+      <template v-else>
+        <div v-if="isToolResultMessage(item.message)" class="message-row tool">
+          <div class="message-meta">
+            <span class="message-role">{{ roleLabel(item.message.role) }}</span>
+          </div>
+          <div class="message-content tool-row">
+            <div class="tool-result-card">
+              <div class="tool-result-card-header">
+                <div class="tool-result-card-heading">
+                  <span class="tool-result-card-label">{{
+                    roleLabel(item.message.role)
+                  }}</span>
+                  <span v-if="showMessageIds" class="message-debug-id">
+                    ID {{ messageIdLabel(item.message) }}
+                  </span>
+                </div>
                 <button
-                  class="thinking-toggle"
-                  @click="toggleThinking(messageStableKey(msg, index), bIdx)"
+                  v-if="toolResultCanExpand(item.message)"
+                  type="button"
+                  class="tool-result-card-toggle"
+                  @click="
+                    toggleToolBlock(
+                      messageStableKey(item.message, item.messageIndex),
+                      -1,
+                    )
+                  "
+                  :title="
+                    isToolBlockExpanded(
+                      messageStableKey(item.message, item.messageIndex),
+                      -1,
+                    )
+                      ? 'Collapse'
+                      : 'Expand'
+                  "
                 >
-                  <Sparkle class="toggle-icon" aria-hidden="true" />
-                  Thinking
+                  {{
+                    isToolBlockExpanded(
+                      messageStableKey(item.message, item.messageIndex),
+                      -1,
+                    )
+                      ? "Hide"
+                      : "Details"
+                  }}
                 </button>
+              </div>
+              <pre
+                v-if="toolResultPreview(item.message)"
+                class="tool-result-card-preview"
+                >{{ toolResultPreview(item.message) }}</pre
+              >
+              <div
+                v-if="toolResultImages(item.message).length > 0"
+                class="tool-result-card-images"
+              >
+                <figure
+                  v-for="(image, imageIndex) in toolResultImages(item.message)"
+                  :key="`${image.src}-${imageIndex}`"
+                  class="message-image-block"
+                >
+                  <button
+                    type="button"
+                    class="message-image-button"
+                    :aria-label="`Open image ${imageIndex + 1}`"
+                    @click="
+                      openImageLightbox(
+                        toolResultImages(item.message),
+                        imageIndex,
+                      )
+                    "
+                  >
+                    <img
+                      class="message-image"
+                      :src="image.src"
+                      :alt="image.alt"
+                      loading="lazy"
+                    />
+                  </button>
+                </figure>
+              </div>
+              <pre
+                v-if="
+                  isToolBlockExpanded(
+                    messageStableKey(item.message, item.messageIndex),
+                    -1,
+                  ) && toolResultText(item.message).trim()
+                "
+                class="tool-result-card-details"
+                >{{ toolResultText(item.message) }}</pre
+              >
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else-if="isErrorMessage(item.message)"
+          class="message-row"
+          :class="roleClass(item.message.role)"
+        >
+          <div class="message-content" :class="roleClass(item.message.role)">
+            <div v-if="showMessageIds" class="message-debug-id">
+              ID {{ messageIdLabel(item.message) }}
+            </div>
+            <div
+              class="error-block"
+              :class="{ aborted: isAbortedMessage(item.message) }"
+            >
+              <span class="error-label">{{
+                isAbortedMessage(item.message) ? "Cancelled" : "Error"
+              }}</span>
+              <span
+                v-if="errorMessageText(item.message)"
+                class="error-message"
+                >{{ errorMessageText(item.message) }}</span
+              >
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="message-row" :class="roleClass(item.message.role)">
+          <div class="message-stack" :class="roleClass(item.message.role)">
+            <div
+              class="message-content"
+              :class="roleClass(item.message.role)"
+              :data-user-message-index="
+                item.message.role === 'user' ? item.messageIndex : undefined
+              "
+            >
+              <div v-if="showMessageIds" class="message-debug-id">
+                ID {{ messageIdLabel(item.message) }}
+              </div>
+              <template
+                v-for="(block, bIdx) in contentBlocks(item.message)"
+                :key="bIdx"
+              >
+                <article
+                  v-if="block.kind === 'system'"
+                  class="system-block"
+                  :data-system-type="block.systemType"
+                >
+                  <div class="system-block-header">
+                    <span class="system-block-label">{{ block.label }}</span>
+                    <span v-if="block.meta" class="system-block-meta">{{
+                      block.meta
+                    }}</span>
+                  </div>
+                  <div class="system-block-title">{{ block.title }}</div>
+                  <MarkdownRenderer
+                    v-if="block.body"
+                    class="system-block-body"
+                    :content="block.body"
+                  />
+                </article>
+
+                <div
+                  v-else-if="block.kind === 'thinking'"
+                  class="thinking-block"
+                >
+                  <button
+                    class="thinking-toggle"
+                    @click="
+                      toggleThinking(
+                        messageStableKey(item.message, item.messageIndex),
+                        bIdx,
+                      )
+                    "
+                  >
+                    <Sparkle class="toggle-icon" aria-hidden="true" />
+                    Thinking
+                  </button>
+                  <MarkdownRenderer
+                    v-if="
+                      isThinkingExpanded(
+                        messageStableKey(item.message, item.messageIndex),
+                        bIdx,
+                      )
+                    "
+                    class="thinking-content"
+                    :content="block.text"
+                  />
+                </div>
+
+                <ToolCard
+                  v-else-if="block.kind === 'tool'"
+                  class="tool-card-block"
+                  :block="block"
+                  :expanded="
+                    isToolBlockExpanded(
+                      messageStableKey(item.message, item.messageIndex),
+                      bIdx,
+                    )
+                  "
+                  @toggle="
+                    toggleToolBlock(
+                      messageStableKey(item.message, item.messageIndex),
+                      bIdx,
+                    )
+                  "
+                />
+
+                <figure
+                  v-else-if="block.kind === 'image'"
+                  class="message-image-block"
+                >
+                  <button
+                    type="button"
+                    class="message-image-button"
+                    aria-label="Open image"
+                    @click="openImageLightbox([block])"
+                  >
+                    <img
+                      class="message-image"
+                      :src="block.src"
+                      :alt="block.alt"
+                      loading="lazy"
+                    />
+                  </button>
+                </figure>
+
                 <MarkdownRenderer
-                  v-if="isThinkingExpanded(messageStableKey(msg, index), bIdx)"
-                  class="thinking-content"
+                  v-else-if="block.kind === 'text' && block.text"
                   :content="block.text"
                 />
-              </div>
-
-              <ToolCard
-                v-else-if="block.kind === 'tool'"
-                class="tool-card-block"
-                :block="block"
-                :expanded="
-                  isToolBlockExpanded(messageStableKey(msg, index), bIdx)
-                "
-                @toggle="toggleToolBlock(messageStableKey(msg, index), bIdx)"
-              />
-
-              <figure
-                v-else-if="block.kind === 'image'"
-                class="message-image-block"
+              </template>
+            </div>
+            <div v-if="canReviseMessage(item.message)" class="message-actions">
+              <button
+                type="button"
+                class="message-action-button"
+                aria-label="Edit message"
+                title="Edit message"
+                @click="handleRevise(item.message)"
               >
-                <button
-                  type="button"
-                  class="message-image-button"
-                  aria-label="Open image"
-                  @click="openImageLightbox([block])"
-                >
-                  <img
-                    class="message-image"
-                    :src="block.src"
-                    :alt="block.alt"
-                    loading="lazy"
-                  />
-                </button>
-              </figure>
-
-              <MarkdownRenderer
-                v-else-if="block.kind === 'text' && block.text"
-                :content="block.text"
-              />
-            </template>
-          </div>
-          <div v-if="canReviseMessage(msg)" class="message-actions">
-            <button
-              type="button"
-              class="message-action-button"
-              aria-label="Edit message"
-              title="Edit message"
-              @click="handleRevise(msg)"
-            >
-              <Pencil class="message-action-icon" aria-hidden="true" />
-            </button>
+                <Pencil class="message-action-icon" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </template>
 
     <div v-if="showBusyIndicator" class="streaming-indicator">
@@ -697,6 +799,84 @@ defineExpose({ preserveScroll });
 .history-loader-button:disabled {
   opacity: 0.7;
   cursor: progress;
+}
+
+.session-event-row {
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(24px, 1fr) auto minmax(24px, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.session-event-line {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--border) 88%, transparent),
+    transparent
+  );
+}
+
+.session-event-body {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.session-event-label {
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-subtle);
+}
+
+.session-event-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 20%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  color: var(--text-muted);
+}
+
+.session-event-chip-label {
+  display: inline-flex;
+  align-items: center;
+  padding-right: 8px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: var(--text-subtle);
+}
+
+.session-event-chip-value {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.session-event-debug {
+  font-family: var(--pi-font-mono);
+  font-size: 0.64rem;
+  color: var(--text-subtle);
 }
 
 .message-row {
@@ -1131,6 +1311,15 @@ defineExpose({ preserveScroll });
 @media (max-width: 900px) {
   .chat-transcript {
     padding: 16px 16px 10px;
+  }
+
+  .session-event-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .session-event-line {
+    display: none;
   }
 
   .message-row.tool {

@@ -26,7 +26,10 @@ import {
   upsertModel,
   type RpcModelInfo,
 } from "../utils/models";
-import { normalizeTranscript } from "../utils/transcript";
+import {
+  normalizeTranscript,
+  type PendingTranscriptSessionEvent,
+} from "../utils/transcript";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -86,6 +89,9 @@ const transcriptInitialLoading = ref(true);
 const transcriptPageLoading = ref(false);
 const transcript = computed(() => normalizeTranscript(rawTranscript.value));
 const sessionState = ref<RpcSessionState | null>(null);
+const pendingTranscriptConfigEvent = ref<
+  (PendingTranscriptSessionEvent & { sessionPath: string | null }) | null
+>(null);
 const sessions = ref<SessionEntry[]>([]);
 const treeEntries = ref<TreeEntry[]>([]);
 const activeTreeSessionPath = ref<string | null>(null);
@@ -145,6 +151,7 @@ let reconnectDelay = 1000;
 const MAX_RECONNECT_DELAY = 30_000;
 let disposed = false;
 let requestIdCounter = 0;
+let pendingTranscriptConfigEventCounter = 0;
 let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
 
 /** Pending RPC requests keyed by correlation id. */
@@ -213,6 +220,62 @@ function normalizeThinkingLevel(value: unknown): RpcThinkingLevel | null {
   }
 }
 
+function clearPendingTranscriptConfigEvent() {
+  pendingTranscriptConfigEvent.value = null;
+}
+
+function updatePendingTranscriptConfigEvent(change: {
+  model?: RpcModelInfo | null;
+  thinkingLevel?: RpcThinkingLevel | null;
+}) {
+  const sessionPath = transcriptSessionPath.value;
+  const existing = pendingTranscriptConfigEvent.value;
+  const nextKey =
+    existing && existing.sessionPath === sessionPath
+      ? existing.key
+      : `pending-session-event:${++pendingTranscriptConfigEventCounter}`;
+  const next: PendingTranscriptSessionEvent & { sessionPath: string | null } = {
+    key: nextKey,
+    sessionPath,
+    model:
+      existing && existing.sessionPath === sessionPath
+        ? existing.model
+        : undefined,
+    thinkingLevel:
+      existing && existing.sessionPath === sessionPath
+        ? existing.thinkingLevel
+        : undefined,
+  };
+
+  if ("model" in change) {
+    next.model = change.model
+      ? {
+          provider: change.model.provider,
+          id: change.model.id,
+        }
+      : undefined;
+  }
+  if ("thinkingLevel" in change) {
+    next.thinkingLevel = change.thinkingLevel ?? undefined;
+  }
+
+  pendingTranscriptConfigEvent.value =
+    next.model || next.thinkingLevel ? next : null;
+}
+
+const visiblePendingTranscriptConfigEvent =
+  computed<PendingTranscriptSessionEvent | null>(() => {
+    const pending = pendingTranscriptConfigEvent.value;
+    if (!pending) return null;
+    return pending.sessionPath === transcriptSessionPath.value
+      ? {
+          key: pending.key,
+          model: pending.model,
+          thinkingLevel: pending.thinkingLevel,
+        }
+      : null;
+  });
+
 function sendEnvelope(msg: ClientMessage) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(msg));
@@ -274,6 +337,12 @@ function replaceTranscript(
   rawTranscript.value = entries.map((entry, index) =>
     normalizeTranscriptEntry(entry, `snapshot:${index}`),
   );
+  if (
+    transcriptSessionPath.value !== sessionPath ||
+    rawTranscript.value.length === 0
+  ) {
+    clearPendingTranscriptConfigEvent();
+  }
   transcriptSessionPath.value = sessionPath;
 }
 
@@ -297,7 +366,11 @@ function applyTranscriptPage(
     rawTranscript.value = normalized;
   }
 
-  transcriptSessionPath.value = page.sessionPath ?? null;
+  const nextSessionPath = page.sessionPath ?? null;
+  if (transcriptSessionPath.value !== nextSessionPath) {
+    clearPendingTranscriptConfigEvent();
+  }
+  transcriptSessionPath.value = nextSessionPath;
   transcriptHasOlder.value = page.hasOlder;
   transcriptOldestCursor.value = page.oldestCursor ?? null;
   transcriptNewestCursor.value = page.newestCursor ?? null;
@@ -538,6 +611,9 @@ async function setThinkingLevel(level: RpcThinkingLevel) {
   const response = await sendCommand({ type: "set_thinking_level", level });
   if (response.success) {
     currentThinkingLevel.value = normalizeThinkingLevel(level);
+    updatePendingTranscriptConfigEvent({
+      thinkingLevel: currentThinkingLevel.value,
+    });
   }
   return response;
 }
@@ -731,6 +807,7 @@ function handleResponse(payload: RpcResponse) {
             currentModel.value,
           );
         }
+        updatePendingTranscriptConfigEvent({ model: currentModel.value });
         break;
       }
       case "get_available_models": {
@@ -990,6 +1067,7 @@ export function useBridgeClient() {
     transcriptHasOlder: readonly(transcriptHasOlder),
     transcriptInitialLoading: readonly(transcriptInitialLoading),
     transcriptPageLoading: readonly(transcriptPageLoading),
+    pendingTranscriptConfigEvent: readonly(visiblePendingTranscriptConfigEvent),
     sessionState: readonly(sessionState),
     sessions: readonly(sessions),
     treeEntries: readonly(treeEntries),

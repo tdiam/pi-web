@@ -25,6 +25,7 @@ const {
   transcriptHasOlder,
   transcriptInitialLoading,
   transcriptPageLoading,
+  pendingTranscriptConfigEvent,
   sessionState,
   sessionStats,
   sessions,
@@ -434,6 +435,7 @@ onBeforeUnmount(() => {
         :transcript-has-older="transcriptHasOlder"
         :transcript-initial-loading="transcriptInitialLoading"
         :transcript-page-loading="transcriptPageLoading"
+        :pending-transcript-config-event="pendingTranscriptConfigEvent"
         :is-streaming="isStreaming"
         :is-compacting="isCompacting"
         :is-debug-mode="debugModeAvailable && debugMode"
