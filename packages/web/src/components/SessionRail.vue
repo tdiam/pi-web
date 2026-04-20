@@ -3,7 +3,7 @@ import type { SessionEntry } from "../composables/useBridgeClient";
 
 defineProps<{
   sessions: readonly SessionEntry[];
-  activeSessionId: string | null;
+  activeSessionPath: string | null;
   runningSessionPath: string | null;
 }>();
 
@@ -26,7 +26,7 @@ const emit = defineEmits<{
         :key="s.id"
         class="rail-item"
         :class="{
-          active: s.id === activeSessionId,
+          active: s.path === activeSessionPath,
           running: s.path === runningSessionPath,
         }"
         :title="s.path"

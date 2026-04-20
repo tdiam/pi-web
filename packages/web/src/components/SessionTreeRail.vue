@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, RefreshCw } from "lucide-vue-next";
+import { PanelRightClose, RefreshCw } from "lucide-vue-next";
 import { computed, ref, watch } from "vue";
 import type { TreeEntry } from "../composables/useBridgeClient";
 import {
@@ -12,12 +12,13 @@ const props = defineProps<{
   entries: readonly TreeEntry[];
   sessionLabel: string;
   sessionPath: string | null;
+  showCollapseToggle?: boolean;
 }>();
 
 const emit = defineEmits<{
-  back: [];
   select: [entryId: string];
   refresh: [];
+  toggleCollapse: [];
 }>();
 
 const query = ref("");
@@ -55,18 +56,21 @@ function handleSelect(entryId: string) {
 <template>
   <div class="tree-rail">
     <header class="tree-header">
-      <button
-        class="nav-button"
-        type="button"
-        aria-label="Back to sessions"
-        title="Back to sessions"
-        @click="emit('back')"
-      >
-        <ArrowLeft aria-hidden="true" />
-      </button>
-      <div class="header-copy">
-        <p class="header-kicker">Session outline</p>
-        <h2 class="header-title">{{ sessionLabel }}</h2>
+      <div class="header-main">
+        <button
+          v-if="showCollapseToggle"
+          class="nav-button collapse-toggle"
+          type="button"
+          aria-label="Collapse outline"
+          title="Collapse outline"
+          @click="emit('toggleCollapse')"
+        >
+          <PanelRightClose aria-hidden="true" />
+        </button>
+        <div class="header-copy">
+          <p class="header-kicker">Session outline</p>
+          <h2 class="header-title">{{ sessionLabel }}</h2>
+        </div>
       </div>
       <button
         class="nav-button"
@@ -164,10 +168,17 @@ function handleSelect(entryId: string) {
 
 .tree-header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   padding: 2px 4px 8px;
+}
+
+.header-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .nav-button {
@@ -199,6 +210,12 @@ function handleSelect(entryId: string) {
 .nav-button svg {
   width: 14px;
   height: 14px;
+}
+
+.collapse-toggle {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
 .header-copy {

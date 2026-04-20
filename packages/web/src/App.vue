@@ -6,6 +6,7 @@ import { useBridgeClient } from "./composables/useBridgeClient";
 import AppHeader from "./layout/AppHeader.vue";
 import AppMainContent from "./layout/AppMainContent.vue";
 import AppNotifications from "./layout/AppNotifications.vue";
+import AppRightSidebar from "./layout/AppRightSidebar.vue";
 import AppSidebar from "./layout/AppSidebar.vue";
 import type {
   RpcImageContent,
@@ -17,7 +18,6 @@ import type { RpcModelInfo } from "./utils/models";
 import { parseCompactSlashCommand } from "./utils/slashCommands";
 
 type ThemeMode = "dark" | "light";
-type SidebarView = "sessions" | "tree";
 
 const {
   connectionStatus,
@@ -60,20 +60,35 @@ const {
   dismissNotification,
 } = useBridgeClient();
 
-const activeSessionId = computed(() => sessionState.value?.sessionId ?? null);
+const activeSessionPath = computed(
+  () => activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null,
+);
 const runningSessionPath = computed(() => {
   if (!isStreaming.value) return null;
   return liveSessionPath.value ?? sessionState.value?.sessionFile ?? null;
 });
+const hasSessionOutline = computed(
+  () =>
+    Boolean(activeSessionPath.value) ||
+    transcript.value.length > 0 ||
+    treeEntries.value.length > 0,
+);
 const activeSessionLabel = computed(() => {
   const active = sessions.value.find(
-    session => session.id === activeSessionId.value,
+    session =>
+      session.path === activeSessionPath.value ||
+      session.id === sessionState.value?.sessionId,
   );
+  if (active?.name) {
+    return active.name;
+  }
+  if (!hasSessionOutline.value) {
+    return "No active session";
+  }
   return (
-    active?.name ??
     sessionState.value?.sessionName ??
     sessionState.value?.sessionId ??
-    "No active session"
+    "Untitled session"
   );
 });
 const networkUrl = computed(() => {
@@ -83,7 +98,7 @@ const networkUrl = computed(() => {
   return h;
 });
 const sidebarOpen = ref(false);
-const sidebarView = ref<SidebarView>("sessions");
+const outlineSidebarOpen = ref(false);
 const mainContentRef = ref<InstanceType<typeof AppMainContent> | null>(null);
 const pendingRevision = ref<{
   entryId: string;
@@ -182,7 +197,7 @@ watch(connectionStatus, status => {
   if (status === "disconnected") {
     mainContentRef.value?.preserveTranscriptScroll();
     pendingRevision.value = null;
-    sidebarView.value = "sessions";
+    outlineSidebarOpen.value = false;
   }
 });
 
@@ -193,14 +208,11 @@ watch(
   },
 );
 
-watch(
-  () => sessionState.value?.sessionId ?? null,
-  sessionId => {
-    if (!sessionId) {
-      sidebarView.value = "sessions";
-    }
-  },
-);
+watch(hasSessionOutline, visible => {
+  if (!visible) {
+    outlineSidebarOpen.value = false;
+  }
+});
 
 const compatWarningVisible = ref(false);
 
@@ -213,6 +225,14 @@ function toggleTheme() {
   theme.value = theme.value === "dark" ? "light" : "dark";
 }
 
+function toggleSessionSidebar() {
+  const nextOpen = !sidebarOpen.value;
+  sidebarOpen.value = nextOpen;
+  if (nextOpen && isCompactLayout()) {
+    outlineSidebarOpen.value = false;
+  }
+}
+
 function toggleDebugMode() {
   if (!debugModeAvailable) return;
   debugMode.value = !debugMode.value;
@@ -223,7 +243,7 @@ async function handleSessionSelect(sessionPath: string) {
   try {
     const response = await sendCommand({ type: "switch_session", sessionPath });
     if (response.success) {
-      sidebarView.value = "tree";
+      sidebarOpen.value = false;
     }
   } catch {
     // Keep the current sidebar state on failure.
@@ -239,20 +259,30 @@ async function handleNewSession() {
   try {
     const response = await sendCommand({ type: "new_session" });
     if (response.success) {
-      sidebarView.value = "tree";
+      sidebarOpen.value = false;
     }
   } catch {
     // Keep the current sidebar state on failure.
   }
 }
 
-function handleSidebarBack() {
-  sidebarView.value = "sessions";
+function toggleOutlineSidebar() {
+  const nextOpen = !outlineSidebarOpen.value;
+  outlineSidebarOpen.value = nextOpen;
+  if (nextOpen) {
+    if (isCompactLayout()) {
+      sidebarOpen.value = false;
+    }
+    handleRefreshTree();
+  }
 }
 
 function handleRefreshTree() {
-  const sessionPath =
-    activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? undefined;
+  if (!hasSessionOutline.value) {
+    return;
+  }
+
+  const sessionPath = activeSessionPath.value ?? undefined;
   sendCommand({ type: "list_tree_entries", sessionPath }).catch(() => {});
 }
 
@@ -260,7 +290,7 @@ function handleTreeEntrySelect(entryId: string) {
   pendingRevision.value = null;
   sendCommand({ type: "select_tree_entry", entryId }).catch(() => {});
   if (isCompactLayout()) {
-    sidebarOpen.value = false;
+    outlineSidebarOpen.value = false;
   }
 }
 
@@ -397,7 +427,7 @@ onBeforeUnmount(() => {
       :active-session-label="activeSessionLabel"
       :network-url="networkUrl"
       :connection-status="connectionStatus"
-      @toggle-sidebar="sidebarOpen = !sidebarOpen"
+      @toggle-sidebar="toggleSessionSidebar"
       @toggle-theme="toggleTheme"
       @toggle-debug-mode="toggleDebugMode"
     />
@@ -408,22 +438,21 @@ onBeforeUnmount(() => {
       :reconnect-count="reconnectCount"
     />
 
-    <div class="app-body">
+    <div
+      class="app-body"
+      :class="{
+        'has-right-rail': hasSessionOutline,
+        'right-rail-open': hasSessionOutline && outlineSidebarOpen,
+      }"
+    >
       <AppSidebar
         :sessions="sessions"
-        :tree-entries="treeEntries"
-        :active-session-id="activeSessionId"
+        :active-session-path="activeSessionPath"
         :running-session-path="runningSessionPath"
         :sidebar-open="sidebarOpen"
-        :sidebar-view="sidebarView"
-        :session-label="activeSessionLabel"
-        :session-path="activeTreeSessionPath"
         @close-sidebar="sidebarOpen = false"
         @select-session="handleSessionSelect"
-        @select-tree-entry="handleTreeEntrySelect"
-        @back-to-sessions="handleSidebarBack"
         @refresh-sessions="handleRefreshSessions"
-        @refresh-tree="handleRefreshTree"
         @new-session="handleNewSession"
       />
 
@@ -461,6 +490,18 @@ onBeforeUnmount(() => {
         @select-model="handleModelSelect"
         @select-thinking-level="handleThinkingLevelSelect"
         @toggle-auto-compaction="handleAutoCompactionToggle"
+      />
+
+      <AppRightSidebar
+        v-if="hasSessionOutline"
+        :tree-entries="treeEntries"
+        :sidebar-open="outlineSidebarOpen"
+        :session-label="activeSessionLabel"
+        :session-path="activeSessionPath"
+        @toggle-sidebar="toggleOutlineSidebar"
+        @close-sidebar="outlineSidebarOpen = false"
+        @select-tree-entry="handleTreeEntrySelect"
+        @refresh-tree="handleRefreshTree"
       />
     </div>
 
@@ -568,8 +609,21 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.app-body.has-right-rail {
+  position: relative;
+}
+
+.app-body.has-right-rail.right-rail-open {
+  grid-template-columns:
+    clamp(280px, 24vw, 360px)
+    minmax(0, 1fr)
+    clamp(280px, 22vw, 340px);
+}
+
 @media (max-width: 900px) {
-  .app-body {
+  .app-body,
+  .app-body.has-right-rail,
+  .app-body.has-right-rail.right-rail-open {
     grid-template-columns: 1fr;
     position: relative;
   }

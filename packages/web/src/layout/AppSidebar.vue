@@ -1,27 +1,19 @@
 <script setup lang="ts">
 import { Plus, RefreshCw } from "lucide-vue-next";
 import SessionRail from "../components/SessionRail.vue";
-import SessionTreeRail from "../components/SessionTreeRail.vue";
-import type { SessionEntry, TreeEntry } from "../composables/useBridgeClient";
+import type { SessionEntry } from "../composables/useBridgeClient";
 
 defineProps<{
   sessions: readonly SessionEntry[];
-  treeEntries: readonly TreeEntry[];
-  activeSessionId: string | null;
+  activeSessionPath: string | null;
   runningSessionPath: string | null;
   sidebarOpen: boolean;
-  sidebarView: "sessions" | "tree";
-  sessionLabel: string;
-  sessionPath: string | null;
 }>();
 
 const emit = defineEmits<{
   closeSidebar: [];
   selectSession: [sessionPath: string];
-  selectTreeEntry: [entryId: string];
-  backToSessions: [];
   refreshSessions: [];
-  refreshTree: [];
   newSession: [];
 }>();
 </script>
@@ -29,9 +21,8 @@ const emit = defineEmits<{
 <template>
   <aside class="left-rail" :class="{ open: sidebarOpen }">
     <SessionRail
-      v-if="sidebarView === 'sessions'"
       :sessions="sessions"
-      :active-session-id="activeSessionId"
+      :active-session-path="activeSessionPath"
       :running-session-path="runningSessionPath"
       @select="emit('selectSession', $event)"
     >
@@ -56,16 +47,6 @@ const emit = defineEmits<{
         </button>
       </template>
     </SessionRail>
-
-    <SessionTreeRail
-      v-else
-      :entries="treeEntries"
-      :session-label="sessionLabel"
-      :session-path="sessionPath"
-      @back="emit('backToSessions')"
-      @select="emit('selectTreeEntry', $event)"
-      @refresh="emit('refreshTree')"
-    />
   </aside>
   <div class="rail-backdrop" @click="emit('closeSidebar')"></div>
 </template>
