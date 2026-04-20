@@ -26,6 +26,8 @@ export type {
   RpcJsonValue,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcGitBranch,
+  RpcGitRepoState,
   RpcImageContent,
   RpcResponse,
   RpcSessionState,

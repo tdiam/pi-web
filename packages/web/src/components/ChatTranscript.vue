@@ -82,20 +82,20 @@ function scrollToMessageId(messageId: string): boolean {
   const root = container.value;
   if (!root || !messageId) return false;
 
-  const target = [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(
-    element => {
-      if (element.dataset.treeEntryId === messageId) {
-        return true;
-      }
+  const target = [
+    ...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR),
+  ].find(element => {
+    if (element.dataset.treeEntryId === messageId) {
+      return true;
+    }
 
-      return (
-        element.dataset.treeEntryIds
-          ?.split(/\s+/)
-          .filter(Boolean)
-          .includes(messageId) ?? false
-      );
-    },
-  );
+    return (
+      element.dataset.treeEntryIds
+        ?.split(/\s+/)
+        .filter(Boolean)
+        .includes(messageId) ?? false
+    );
+  });
   if (!target) return false;
 
   target.scrollIntoView({ block: "center", behavior: "smooth" });

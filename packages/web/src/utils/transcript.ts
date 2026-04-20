@@ -126,8 +126,7 @@ export type TranscriptDisplayItem =
   | TranscriptMessageDisplayItem
   | TranscriptSessionEventDisplayItem;
 
-interface TranscriptToolResultBlockWithSource
-  extends RpcTranscriptToolResultBlock {
+interface TranscriptToolResultBlockWithSource extends RpcTranscriptToolResultBlock {
   sourceMessageId?: string;
 }
 

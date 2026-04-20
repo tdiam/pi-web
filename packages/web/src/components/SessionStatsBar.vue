@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { GitBranch } from "lucide-vue-next";
 import { computed } from "vue";
-import type { RpcSessionStats } from "../shared-types";
+import type { RpcGitRepoState, RpcSessionStats } from "../shared-types";
+import GitBranchDropdown from "./GitBranchDropdown.vue";
 
 const props = defineProps<{
   stats: RpcSessionStats | null;
   gitBranch?: string | null;
+  gitRepoState: RpcGitRepoState | null;
+  gitRepoLoading: boolean;
+  gitBranchSwitching: boolean;
+  gitRepoError: string | null;
+  gitActionsDisabled?: boolean;
+  refreshGitRepoState: (force?: boolean) => Promise<RpcGitRepoState | null>;
+  switchGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
 }>();
 
 const contextPercent = computed(() => {
@@ -82,10 +89,16 @@ const barColor = computed(() => {
   <div v-if="hasVisibleContent" class="stats-bar">
     <div class="stats-inner">
       <div v-if="gitBranchLabel" class="stats-leading">
-        <div class="stat-chip branch-chip" :title="gitBranchLabel">
-          <GitBranch class="branch-icon" aria-hidden="true" />
-          <span class="stat-label">{{ gitBranchLabel }}</span>
-        </div>
+        <GitBranchDropdown
+          :label="gitBranchLabel"
+          :repo-state="gitRepoState"
+          :loading="gitRepoLoading"
+          :switching="gitBranchSwitching"
+          :error="gitRepoError"
+          :disabled="gitActionsDisabled"
+          :refresh="refreshGitRepoState"
+          :switch-branch="switchGitBranch"
+        />
       </div>
       <div v-if="hasStatsContent" class="stats-trailing">
         <div v-if="inputLabel" class="stat-chip token-chip">
@@ -170,17 +183,9 @@ const barColor = computed(() => {
   gap: 8px;
 }
 
-.branch-chip,
 .token-chip,
 .cost-chip {
   border-color: color-mix(in srgb, var(--border) 50%, transparent);
-}
-
-.branch-icon {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  color: var(--text-subtle);
 }
 
 .context-bar-track {

@@ -22,6 +22,23 @@ export interface RpcWorkspaceEntry {
   kind: "file" | "directory";
 }
 
+export interface RpcGitBranch {
+  name: string;
+  shortName: string;
+  kind: "local" | "remote";
+  remoteName?: string;
+  isCurrent: boolean;
+}
+
+export interface RpcGitRepoState {
+  repoRoot: string;
+  headLabel: string;
+  currentBranch?: string;
+  detached: boolean;
+  isDirty: boolean;
+  branches: RpcGitBranch[];
+}
+
 /** Map of RPC command types to their specific payload shapes. */
 export interface RpcModel {
   id: string;
@@ -260,6 +277,10 @@ export interface RpcCommandMap {
   list_sessions: {};
   list_tree_entries: { sessionPath?: string };
   list_workspace_entries: {};
+
+  /** Git */
+  list_git_branches: {};
+  switch_git_branch: { branchName: string };
 }
 
 /** All RPC command types that a browser client can send. */
@@ -554,6 +575,8 @@ export interface RpcResponseMap {
   };
   list_tree_entries: { entries: RpcTreeEntry[]; sessionPath?: string };
   list_workspace_entries: { entries: RpcWorkspaceEntry[] };
+  list_git_branches: RpcGitRepoState;
+  switch_git_branch: RpcGitRepoState;
 }
 
 type RpcResponseData<T> = [T] extends [void] ? {} : { data: T };

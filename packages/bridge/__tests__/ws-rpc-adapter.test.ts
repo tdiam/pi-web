@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -50,6 +51,20 @@ const createMockWebSocket = (): WebSocket => {
 };
 
 // Mock context
+function runGit(cwd: string, args: string[]) {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+
+  if (result.status !== 0) {
+    throw new Error(
+      result.stderr || result.stdout || `git ${args.join(" ")} failed`,
+    );
+  }
+}
+
 const createMockContext = (): WsRpcAdapterContext => {
   const sessionManager = {
     getCwd: vi.fn().mockReturnValue("/test/project"),
@@ -662,6 +677,129 @@ describe("WsRpcAdapter", () => {
           percent: 12.5,
         },
       });
+    });
+
+    it("should list git branches for the active repo", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-git-list-"));
+      fs.writeFileSync(path.join(tmpDir, "README.md"), "hello\n");
+      runGit(tmpDir, ["init"]);
+      runGit(tmpDir, ["config", "user.name", "Pi Web"]);
+      runGit(tmpDir, ["config", "user.email", "pi-web@example.com"]);
+      runGit(tmpDir, ["add", "README.md"]);
+      runGit(tmpDir, ["commit", "-m", "init"]);
+      runGit(tmpDir, ["branch", "-M", "main"]);
+      runGit(tmpDir, ["branch", "feature"]);
+
+      (
+        context.ctx.sessionManager.getCwd as ReturnType<typeof vi.fn>
+      ).mockReturnValue(tmpDir);
+      context.ctx.cwd = tmpDir;
+
+      const command: RpcCommand = {
+        id: "cmd-git-list",
+        type: "list_git_branches",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      const response = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "list_git_branches" &&
+          call.payload.success,
+      );
+
+      expect(response?.payload.data.headLabel).toBe("main");
+      expect(response?.payload.data.currentBranch).toBe("main");
+      expect(response?.payload.data.detached).toBe(false);
+      expect(response?.payload.data.branches).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "main",
+            shortName: "main",
+            kind: "local",
+            isCurrent: true,
+          }),
+          expect.objectContaining({
+            name: "feature",
+            shortName: "feature",
+            kind: "local",
+            isCurrent: false,
+          }),
+        ]),
+      );
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("should switch git branches for the active repo", async () => {
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-git-switch-"),
+      );
+      fs.writeFileSync(path.join(tmpDir, "README.md"), "hello\n");
+      runGit(tmpDir, ["init"]);
+      runGit(tmpDir, ["config", "user.name", "Pi Web"]);
+      runGit(tmpDir, ["config", "user.email", "pi-web@example.com"]);
+      runGit(tmpDir, ["add", "README.md"]);
+      runGit(tmpDir, ["commit", "-m", "init"]);
+      runGit(tmpDir, ["branch", "-M", "main"]);
+      runGit(tmpDir, ["branch", "feature"]);
+
+      (
+        context.ctx.sessionManager.getCwd as ReturnType<typeof vi.fn>
+      ).mockReturnValue(tmpDir);
+      context.ctx.cwd = tmpDir;
+
+      const command: RpcCommand = {
+        id: "cmd-git-switch",
+        type: "switch_git_branch",
+        branchName: "feature",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      const response = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "switch_git_branch" &&
+          call.payload.success,
+      );
+
+      expect(response?.payload.data.headLabel).toBe("feature");
+      expect(response?.payload.data.currentBranch).toBe("feature");
+      expect(response?.payload.data.branches).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "main", isCurrent: false }),
+          expect.objectContaining({ name: "feature", isCurrent: true }),
+        ]),
+      );
+
+      const currentBranch = spawnSync("git", ["branch", "--show-current"], {
+        cwd: tmpDir,
+        encoding: "utf8",
+        windowsHide: true,
+      }).stdout.trim();
+      expect(currentBranch).toBe("feature");
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
     it("should handle get_messages command", async () => {
@@ -3152,12 +3290,20 @@ describe("WsRpcAdapter", () => {
       expect(firstUnsubscribeSpy).not.toHaveBeenCalled();
       expect(firstDisposeSpy).not.toHaveBeenCalled();
       expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
-      expect(firstPromptSpy).toHaveBeenNthCalledWith(1, "Activate first detached session", {
-        source: "rpc",
-      });
-      expect(firstPromptSpy).toHaveBeenNthCalledWith(2, "Resume first detached session", {
-        source: "rpc",
-      });
+      expect(firstPromptSpy).toHaveBeenNthCalledWith(
+        1,
+        "Activate first detached session",
+        {
+          source: "rpc",
+        },
+      );
+      expect(firstPromptSpy).toHaveBeenNthCalledWith(
+        2,
+        "Resume first detached session",
+        {
+          source: "rpc",
+        },
+      );
 
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });

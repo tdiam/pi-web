@@ -30,6 +30,8 @@ import type {
   RpcCompactionStartEvent,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcGitBranch,
+  RpcGitRepoState,
   RpcImageContent,
   RpcModel,
   RpcModelSelectEvent,
@@ -537,24 +539,143 @@ function listWorkspaceEntries(cwd: string): RpcWorkspaceEntry[] {
   return collectWorkspaceEntries(filePaths);
 }
 
+function runGitCommand(
+  cwd: string,
+  args: string[],
+  timeout = 2000,
+): ReturnType<typeof spawnSync> {
+  return spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    timeout,
+    windowsHide: true,
+  });
+}
+
+function readSpawnText(value: string | Uint8Array | null | undefined): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (!value) {
+    return "";
+  }
+  return Buffer.from(value).toString("utf8");
+}
+
 function getCurrentGitBranch(
   cwd: string | null | undefined,
 ): string | undefined {
-  if (!cwd) return undefined;
+  return readGitRepoState(cwd)?.headLabel;
+}
 
-  const result = spawnSync("git", ["branch", "--show-current"], {
-    cwd,
-    encoding: "utf8",
-    timeout: 1000,
-    windowsHide: true,
-  });
+function readGitRepoState(
+  cwd: string | null | undefined,
+): RpcGitRepoState | null {
+  if (!cwd) return null;
 
-  if (result.error || result.status !== 0) {
-    return undefined;
+  const repoRootResult = runGitCommand(cwd, ["rev-parse", "--show-toplevel"]);
+  if (repoRootResult.error || repoRootResult.status !== 0) {
+    return null;
   }
 
-  const branch = result.stdout.trim();
-  return branch.length > 0 ? branch : undefined;
+  const repoRoot = readSpawnText(repoRootResult.stdout).trim();
+  if (!repoRoot) {
+    return null;
+  }
+
+  const currentBranchResult = runGitCommand(repoRoot, [
+    "symbolic-ref",
+    "--quiet",
+    "--short",
+    "HEAD",
+  ]);
+  const currentBranch =
+    currentBranchResult.error || currentBranchResult.status !== 0
+      ? undefined
+      : readSpawnText(currentBranchResult.stdout).trim() || undefined;
+
+  const headShaResult = runGitCommand(repoRoot, [
+    "rev-parse",
+    "--short",
+    "HEAD",
+  ]);
+  const headSha =
+    headShaResult.error || headShaResult.status !== 0
+      ? undefined
+      : readSpawnText(headShaResult.stdout).trim() || undefined;
+
+  const branchesResult = runGitCommand(repoRoot, [
+    "for-each-ref",
+    "--format=%(refname)\t%(refname:short)\t%(HEAD)",
+    "refs/heads",
+    "refs/remotes",
+  ]);
+  if (branchesResult.error || branchesResult.status !== 0) {
+    return null;
+  }
+
+  const branches: RpcGitBranch[] = readSpawnText(branchesResult.stdout)
+    .split(/\r?\n/)
+    .map((line: string) => line.trim())
+    .filter(Boolean)
+    .flatMap((line: string): RpcGitBranch[] => {
+      const [refName = "", shortName = "", headMarker = ""] = line.split("\t");
+      if (!refName || !shortName) return [];
+      if (refName.startsWith("refs/remotes/") && shortName.endsWith("/HEAD")) {
+        return [];
+      }
+
+      if (refName.startsWith("refs/heads/")) {
+        return [
+          {
+            name: shortName,
+            shortName,
+            kind: "local",
+            isCurrent: headMarker === "*",
+          },
+        ];
+      }
+
+      if (refName.startsWith("refs/remotes/")) {
+        const [remoteName, ...rest] = shortName.split("/");
+        const remoteShortName = rest.join("/");
+        return [
+          {
+            name: shortName,
+            shortName: remoteShortName || shortName,
+            kind: "remote",
+            remoteName,
+            isCurrent: headMarker === "*",
+          },
+        ];
+      }
+
+      return [];
+    })
+    .sort((left: RpcGitBranch, right: RpcGitBranch) => {
+      if (left.isCurrent !== right.isCurrent) {
+        return left.isCurrent ? -1 : 1;
+      }
+      if (left.kind !== right.kind) {
+        return left.kind === "local" ? -1 : 1;
+      }
+      return left.name.localeCompare(right.name);
+    });
+
+  const dirtyResult = runGitCommand(repoRoot, ["status", "--porcelain"]);
+  const isDirty =
+    !dirtyResult.error && dirtyResult.status === 0
+      ? readSpawnText(dirtyResult.stdout).trim().length > 0
+      : false;
+
+  return {
+    repoRoot,
+    headLabel: currentBranch ?? (headSha ? `detached@${headSha}` : "detached"),
+    currentBranch,
+    detached: !currentBranch,
+    isDirty,
+    branches,
+  };
 }
 
 function isTreeSettingsEntry(type: string): boolean {
@@ -1726,6 +1847,28 @@ class SessionRuntime {
     );
   }
 
+  currentGitCwd(): string {
+    if (this.selectedSessionPath) {
+      const activeSession = this.registry.getActiveSession(
+        this.selectedSessionPath,
+      );
+      const activeCwd = activeSession?.sessionManager.getCwd();
+      if (activeCwd) {
+        return activeCwd;
+      }
+
+      const storedSession = this.registry.getCachedSessionManager(
+        this.selectedSessionPath,
+      );
+      const storedCwd = storedSession?.getCwd();
+      if (storedCwd) {
+        return storedCwd;
+      }
+    }
+
+    return this.context.ctx.cwd;
+  }
+
   shouldHandleLiveSessionEvents(): boolean {
     return !this.selectedSessionPath || this.isViewingLiveSession();
   }
@@ -1739,7 +1882,10 @@ class SessionRuntime {
 
     if (this.selectedSessionPath) {
       return flattenMessagesForTranscript(
-        this.registry.openSession(this.selectedSessionPath).getSessionManager().getBranch(),
+        this.registry
+          .openSession(this.selectedSessionPath)
+          .getSessionManager()
+          .getBranch(),
       );
     }
 
@@ -1762,7 +1908,9 @@ class SessionRuntime {
 
   buildActiveState(): RpcSessionState {
     if (this.selectedSessionPath) {
-      const activeSession = this.registry.getActiveSession(this.selectedSessionPath);
+      const activeSession = this.registry.getActiveSession(
+        this.selectedSessionPath,
+      );
       if (activeSession) {
         return {
           model:
@@ -1793,7 +1941,9 @@ class SessionRuntime {
 
       if (!this.isViewingLiveSession()) {
         return buildStateFromStoredSession(
-          this.registry.openSession(this.selectedSessionPath).getSessionManager(),
+          this.registry
+            .openSession(this.selectedSessionPath)
+            .getSessionManager(),
           this.context.ctx.cwd,
         );
       }
@@ -1825,7 +1975,9 @@ class SessionRuntime {
     };
   }
 
-  async createDetachedSession(transcriptLimit?: number): Promise<SessionSummary> {
+  async createDetachedSession(
+    transcriptLimit?: number,
+  ): Promise<SessionSummary> {
     const { ctx } = this.context;
     const currentSessionFile =
       this.currentDetachedSessionPath() ?? ctx.sessionManager.getSessionFile();
@@ -1919,9 +2071,9 @@ class SessionRuntime {
     const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
     return Boolean(
       this.selectedSessionPath &&
-        liveSessionPath &&
-        this.selectedSessionPath === liveSessionPath &&
-        !this.registry.isSessionActive(this.selectedSessionPath),
+      liveSessionPath &&
+      this.selectedSessionPath === liveSessionPath &&
+      !this.registry.isSessionActive(this.selectedSessionPath),
     );
   }
 
@@ -1947,7 +2099,10 @@ class SessionRuntime {
     }
 
     if (this.selectedSessionPath) {
-      await this.registry.releaseViewer(this.selectedSessionPath, this.clientId);
+      await this.registry.releaseViewer(
+        this.selectedSessionPath,
+        this.clientId,
+      );
     }
 
     this.selectedSessionPath = sessionPath;
@@ -2589,7 +2744,9 @@ export class WsRpcAdapter {
             return;
           case "agent_end":
             this.sendEvent(toRpcAgentEndEvent(event, sessionPath));
-            if (this.sessionRuntime.currentDetachedSessionPath() === sessionPath) {
+            if (
+              this.sessionRuntime.currentDetachedSessionPath() === sessionPath
+            ) {
               this.sessionStatsPusher.queue(sessionPath);
             }
             return;
@@ -3420,7 +3577,10 @@ export class WsRpcAdapter {
           const cachedSessionManager = sessionPath
             ? this.sessionRuntime.getCachedSessionManager(sessionPath)
             : null;
-          if (!sessionPath || (!cachedSessionManager && !fs.existsSync(sessionPath))) {
+          if (
+            !sessionPath ||
+            (!cachedSessionManager && !fs.existsSync(sessionPath))
+          ) {
             return {
               id: correlationId,
               type: "response",
@@ -3835,7 +3995,9 @@ export class WsRpcAdapter {
 
       case "list_workspace_entries": {
         if (!this.workspaceEntriesCache) {
-          this.workspaceEntriesCache = listWorkspaceEntries(ctx.cwd);
+          this.workspaceEntriesCache = listWorkspaceEntries(
+            this.sessionRuntime.currentGitCwd(),
+          );
         }
 
         return {
@@ -3844,6 +4006,136 @@ export class WsRpcAdapter {
           command: "list_workspace_entries" as const,
           success: true as const,
           data: { entries: this.workspaceEntriesCache },
+        };
+      }
+
+      case "list_git_branches": {
+        const repoState = readGitRepoState(this.sessionRuntime.currentGitCwd());
+        if (!repoState) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "list_git_branches" as const,
+            success: false as const,
+            error: "No git repository found for the active session",
+          };
+        }
+
+        return {
+          id: correlationId,
+          type: "response" as const,
+          command: "list_git_branches" as const,
+          success: true as const,
+          data: repoState,
+        };
+      }
+
+      case "switch_git_branch": {
+        const branchName = command.branchName.trim();
+        if (!branchName) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error: "Branch name cannot be empty",
+          };
+        }
+
+        const activeState = this.sessionRuntime.buildActiveState();
+        if (activeState.isStreaming || activeState.isCompacting) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error: "Cannot switch branches while the active session is busy",
+          };
+        }
+
+        const repoState = readGitRepoState(this.sessionRuntime.currentGitCwd());
+        if (!repoState) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error: "No git repository found for the active session",
+          };
+        }
+
+        if (repoState.currentBranch === branchName) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: true as const,
+            data: repoState,
+          };
+        }
+
+        const targetBranch = repoState.branches.find(
+          branch => branch.name === branchName,
+        );
+        if (!targetBranch) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error: `Branch not found: ${branchName}`,
+          };
+        }
+
+        const localBranch = repoState.branches.find(
+          branch =>
+            branch.kind === "local" &&
+            branch.shortName === targetBranch.shortName,
+        );
+        const switchArgs =
+          targetBranch.kind === "local"
+            ? ["switch", targetBranch.name]
+            : localBranch
+              ? ["switch", localBranch.name]
+              : ["switch", "--track", targetBranch.name];
+        const switchResult = runGitCommand(
+          repoState.repoRoot,
+          switchArgs,
+          10000,
+        );
+        if (switchResult.error || switchResult.status !== 0) {
+          const failureOutput = [switchResult.stderr, switchResult.stdout]
+            .map(value => readSpawnText(value).trim())
+            .filter(Boolean)
+            .join("\n");
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error: failureOutput || `Failed to switch to ${branchName}`,
+          };
+        }
+
+        this.workspaceEntriesCache = null;
+        const nextRepoState = readGitRepoState(repoState.repoRoot);
+        if (!nextRepoState) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "switch_git_branch" as const,
+            success: false as const,
+            error:
+              "Branch switched, but the repository state could not be refreshed",
+          };
+        }
+
+        return {
+          id: correlationId,
+          type: "response" as const,
+          command: "switch_git_branch" as const,
+          success: true as const,
+          data: nextRepoState,
         };
       }
 

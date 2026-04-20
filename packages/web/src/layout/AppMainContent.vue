@@ -9,6 +9,7 @@ import type {
   TranscriptEntry,
 } from "../composables/useBridgeClient";
 import type {
+  RpcGitRepoState,
   RpcImageContent,
   RpcSessionState,
   RpcSessionStats,
@@ -41,6 +42,12 @@ defineProps<{
   autoCompactionEnabled: boolean;
   sessionStats: RpcSessionStats | null;
   sessionState: RpcSessionState | null;
+  gitRepoState: RpcGitRepoState | null;
+  gitRepoLoading: boolean;
+  gitBranchSwitching: boolean;
+  gitRepoError: string | null;
+  refreshGitRepoState: (force?: boolean) => Promise<RpcGitRepoState | null>;
+  switchGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
   prefillText: string | null;
   pendingRevision: {
     entryId: string;
@@ -119,6 +126,15 @@ defineExpose({ preserveTranscriptScroll, scrollToTranscriptEntry });
     <SessionStatsBar
       :stats="sessionStats"
       :git-branch="sessionState?.gitBranch ?? null"
+      :git-repo-state="gitRepoState"
+      :git-repo-loading="gitRepoLoading"
+      :git-branch-switching="gitBranchSwitching"
+      :git-repo-error="gitRepoError"
+      :git-actions-disabled="
+        connectionStatus !== 'connected' || isStreaming || isCompacting
+      "
+      :refresh-git-repo-state="refreshGitRepoState"
+      :switch-git-branch="switchGitBranch"
     />
     <ComposerBar
       :connection-status="connectionStatus"

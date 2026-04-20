@@ -544,6 +544,163 @@ describe("extension_ui_request handling", () => {
     expect(client.currentThinkingLevel.value).toBe("medium");
   });
 
+  it("loadGitRepoState sends the command and stores repo state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const pendingLoad = client.loadGitRepoState();
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"list_git_branches"'),
+    );
+
+    const listCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"list_git_branches"'),
+    );
+    expect(listCommandCall).toBeDefined();
+    const listCommand = JSON.parse(listCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: listCommand.payload.id,
+        type: "response",
+        command: "list_git_branches",
+        success: true,
+        data: {
+          repoRoot: "/tmp/repo",
+          headLabel: "main",
+          currentBranch: "main",
+          detached: false,
+          isDirty: false,
+          branches: [
+            {
+              name: "main",
+              shortName: "main",
+              kind: "local",
+              isCurrent: true,
+            },
+            {
+              name: "feature",
+              shortName: "feature",
+              kind: "local",
+              isCurrent: false,
+            },
+          ],
+        },
+      },
+    });
+
+    await pendingLoad;
+    expect(client.gitRepoState.value).toEqual({
+      repoRoot: "/tmp/repo",
+      headLabel: "main",
+      currentBranch: "main",
+      detached: false,
+      isDirty: false,
+      branches: [
+        {
+          name: "main",
+          shortName: "main",
+          kind: "local",
+          isCurrent: true,
+        },
+        {
+          name: "feature",
+          shortName: "feature",
+          kind: "local",
+          isCurrent: false,
+        },
+      ],
+    });
+    expect(client.gitRepoError.value).toBeNull();
+  });
+
+  it("switchGitBranch sends the command and updates local state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/session-1.jsonl",
+          sessionName: "Session 1",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    const pendingSwitch = client.switchGitBranch("feature");
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"switch_git_branch"'),
+    );
+
+    const switchCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"switch_git_branch"'),
+    );
+    expect(switchCommandCall).toBeDefined();
+    const switchCommand = JSON.parse(switchCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: switchCommand.payload.id,
+        type: "response",
+        command: "switch_git_branch",
+        success: true,
+        data: {
+          repoRoot: "/tmp/repo",
+          headLabel: "feature",
+          currentBranch: "feature",
+          detached: false,
+          isDirty: false,
+          branches: [
+            {
+              name: "main",
+              shortName: "main",
+              kind: "local",
+              isCurrent: false,
+            },
+            {
+              name: "feature",
+              shortName: "feature",
+              kind: "local",
+              isCurrent: true,
+            },
+          ],
+        },
+      },
+    });
+
+    await pendingSwitch;
+    expect(client.sessionState.value?.gitBranch).toBe("feature");
+    expect(client.gitRepoState.value?.currentBranch).toBe("feature");
+    expect(client.gitBranchSwitching.value).toBe(false);
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"list_workspace_entries"'),
+    );
+  });
+
   it("setThinkingLevel sends the command and updates local state", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();
@@ -1700,8 +1857,9 @@ describe("extension_ui_request handling", () => {
 
     expect(client.runningSessionPaths.value).toEqual(["/tmp/background.jsonl"]);
     expect(client.isStreaming.value).toBe(false);
-    expect(client.sessions.value.find(s => s.path === "/tmp/background.jsonl"))
-      .toMatchObject({ isRunning: true });
+    expect(
+      client.sessions.value.find(s => s.path === "/tmp/background.jsonl"),
+    ).toMatchObject({ isRunning: true });
 
     simulateMessage(ws, {
       type: "event",
@@ -1712,8 +1870,9 @@ describe("extension_ui_request handling", () => {
     });
 
     expect(client.runningSessionPaths.value).toEqual([]);
-    expect(client.sessions.value.find(s => s.path === "/tmp/background.jsonl"))
-      .toMatchObject({ isRunning: false });
+    expect(
+      client.sessions.value.find(s => s.path === "/tmp/background.jsonl"),
+    ).toMatchObject({ isRunning: false });
   });
 
   it("abortGeneration sends abort only while streaming", async () => {

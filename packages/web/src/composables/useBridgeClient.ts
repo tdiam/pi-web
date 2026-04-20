@@ -16,6 +16,8 @@ import type {
   RpcWorkspaceEntry,
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
+  RpcGitBranch,
+  RpcGitRepoState,
   RpcTranscriptMessage,
   RpcTranscriptPage,
   RpcTranscriptSnapshotEvent,
@@ -79,6 +81,50 @@ function normalizeSessionStats(value: unknown): RpcSessionStats | null {
   };
 }
 
+function normalizeGitBranch(value: unknown): RpcGitBranch | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Partial<RpcGitBranch>;
+  if (typeof data.name !== "string" || typeof data.shortName !== "string") {
+    return null;
+  }
+  if (data.kind !== "local" && data.kind !== "remote") {
+    return null;
+  }
+
+  return {
+    name: data.name,
+    shortName: data.shortName,
+    kind: data.kind,
+    remoteName:
+      typeof data.remoteName === "string" ? data.remoteName : undefined,
+    isCurrent: data.isCurrent === true,
+  };
+}
+
+function normalizeGitRepoState(value: unknown): RpcGitRepoState | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Partial<RpcGitRepoState>;
+  if (typeof data.repoRoot !== "string" || typeof data.headLabel !== "string") {
+    return null;
+  }
+
+  const branches = Array.isArray(data.branches)
+    ? data.branches
+        .map(branch => normalizeGitBranch(branch))
+        .filter((branch): branch is RpcGitBranch => branch !== null)
+    : [];
+
+  return {
+    repoRoot: data.repoRoot,
+    headLabel: data.headLabel,
+    currentBranch:
+      typeof data.currentBranch === "string" ? data.currentBranch : undefined,
+    detached: data.detached === true,
+    isDirty: data.isDirty === true,
+    branches,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // State refs
 // ---------------------------------------------------------------------------
@@ -117,6 +163,10 @@ const isCompacting = computed(
 
 // Session stats (context usage + cost)
 const sessionStats = ref<RpcSessionStats | null>(null);
+const gitRepoState = ref<RpcGitRepoState | null>(null);
+const gitRepoLoading = ref(false);
+const gitBranchSwitching = ref(false);
+const gitRepoError = ref<string | null>(null);
 
 // Reconnect diagnostics
 const reconnectCount = ref(0);
@@ -158,6 +208,7 @@ let disposed = false;
 let requestIdCounter = 0;
 let pendingTranscriptConfigEventCounter = 0;
 let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
+let gitRepoStateRequest: Promise<RpcGitRepoState | null> | null = null;
 
 /** Pending RPC requests keyed by correlation id. */
 const pendingRequests = new Map<
@@ -211,6 +262,14 @@ function updateAvailableModels(values: readonly unknown[]) {
 
 function getDisplayedSessionPath(): string | null {
   return activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null;
+}
+
+function resetGitRepoState() {
+  gitRepoState.value = null;
+  gitRepoError.value = null;
+  gitRepoLoading.value = false;
+  gitBranchSwitching.value = false;
+  gitRepoStateRequest = null;
 }
 
 function setSessionRunning(sessionPath: string | null, isRunning: boolean) {
@@ -498,6 +557,8 @@ function applySessionSnapshotResponse(
     return false;
   }
 
+  const previousSessionPath = getDisplayedSessionPath();
+
   applySessionTranscriptPage(data.transcript);
   if (data.sessionPath) {
     activeTreeSessionPath.value = data.sessionPath;
@@ -513,6 +574,9 @@ function applySessionSnapshotResponse(
       sessionName: data.sessionName,
       sessionFile: data.sessionPath ?? sessionState.value?.sessionFile,
     } as RpcSessionState;
+  }
+  if (previousSessionPath !== getDisplayedSessionPath()) {
+    resetGitRepoState();
   }
   if (options?.refreshState) {
     sendCommand({ type: "get_state" }).catch(() => {});
@@ -641,6 +705,94 @@ async function fetchWorkspaceEntries(
   return workspaceEntriesRequest;
 }
 
+async function loadGitRepoState(
+  force: boolean = false,
+): Promise<RpcGitRepoState | null> {
+  if (gitRepoState.value && !force) {
+    return gitRepoState.value;
+  }
+
+  if (gitRepoStateRequest && !force) {
+    return gitRepoStateRequest;
+  }
+
+  if (connectionStatus.value !== "connected") {
+    return gitRepoState.value;
+  }
+
+  gitRepoLoading.value = true;
+  gitRepoError.value = null;
+  gitRepoStateRequest = sendCommand({ type: "list_git_branches" })
+    .then(response => {
+      if (!response.success) {
+        gitRepoError.value = response.error ?? "Failed to load git branches";
+        return gitRepoState.value;
+      }
+
+      const state = normalizeGitRepoState(response.data);
+      gitRepoState.value = state;
+      gitRepoError.value = state ? null : "Failed to parse git branch data";
+      return state;
+    })
+    .catch(error => {
+      gitRepoError.value =
+        error instanceof Error ? error.message : "Failed to load git branches";
+      return gitRepoState.value;
+    })
+    .finally(() => {
+      gitRepoLoading.value = false;
+      gitRepoStateRequest = null;
+    });
+
+  return gitRepoStateRequest;
+}
+
+async function switchGitBranch(
+  branchName: string,
+): Promise<RpcGitRepoState | null> {
+  if (!branchName.trim() || connectionStatus.value !== "connected") {
+    return gitRepoState.value;
+  }
+
+  gitBranchSwitching.value = true;
+  gitRepoError.value = null;
+
+  try {
+    const response = await sendCommand({
+      type: "switch_git_branch",
+      branchName,
+    });
+    if (!response.success) {
+      gitRepoError.value = response.error ?? "Failed to switch git branch";
+      return gitRepoState.value;
+    }
+
+    const state = normalizeGitRepoState(response.data);
+    gitRepoState.value = state;
+    gitRepoError.value = state ? null : "Failed to parse git branch data";
+
+    if (state && sessionState.value) {
+      sessionState.value = {
+        ...sessionState.value,
+        gitBranch: state.headLabel,
+      };
+    }
+
+    workspaceEntriesLoaded.value = false;
+    workspaceEntries.value = [];
+    workspaceEntriesRequest = null;
+    void fetchWorkspaceEntries(true).catch(() => {});
+
+    return state;
+  } catch (error) {
+    gitRepoError.value =
+      error instanceof Error ? error.message : "Failed to switch git branch";
+    return gitRepoState.value;
+  } finally {
+    gitBranchSwitching.value = false;
+  }
+}
+
 function abortGeneration() {
   if (!isStreaming.value) return Promise.resolve(null);
   return sendCommand({ type: "abort" });
@@ -759,6 +911,7 @@ function handleResponse(payload: RpcResponse) {
       case "get_state": {
         const data = payload.data as RpcSessionState | undefined;
         if (data) {
+          const previousSessionPath = getDisplayedSessionPath();
           liveSessionPath.value = data.sessionFile ?? null;
           const isBrowsingDifferentSession = Boolean(
             activeTreeSessionPath.value &&
@@ -783,6 +936,9 @@ function handleResponse(payload: RpcResponse) {
           setCompactionState(data.isCompacting);
           if (!activeTreeSessionPath.value && data.sessionFile) {
             activeTreeSessionPath.value = data.sessionFile;
+          }
+          if (previousSessionPath !== getDisplayedSessionPath()) {
+            resetGitRepoState();
           }
         }
         break;
@@ -867,6 +1023,24 @@ function handleResponse(payload: RpcResponse) {
           : [];
         workspaceEntriesLoaded.value = true;
         workspaceEntriesLoading.value = false;
+        break;
+      }
+      case "list_git_branches": {
+        const state = normalizeGitRepoState(payload.data);
+        gitRepoState.value = state;
+        gitRepoError.value = state ? null : "Failed to parse git branch data";
+        break;
+      }
+      case "switch_git_branch": {
+        const state = normalizeGitRepoState(payload.data);
+        gitRepoState.value = state;
+        gitRepoError.value = state ? null : "Failed to parse git branch data";
+        if (state && sessionState.value) {
+          sessionState.value = {
+            ...sessionState.value,
+            gitBranch: state.headLabel,
+          };
+        }
         break;
       }
       case "set_model": {
@@ -1086,6 +1260,7 @@ function connect() {
     remoteCompactionActive.value = false;
     reconnectCount.value++;
     runningSessionPaths.value = [];
+    resetGitRepoState();
     sessions.value = sessions.value.map(session => ({
       ...session,
       isRunning: false,
@@ -1168,6 +1343,10 @@ export function useBridgeClient() {
     isStreaming: readonly(isStreaming),
     isCompacting: readonly(isCompacting),
     sessionStats: readonly(sessionStats),
+    gitRepoState: readonly(gitRepoState),
+    gitRepoLoading: readonly(gitRepoLoading),
+    gitBranchSwitching: readonly(gitBranchSwitching),
+    gitRepoError: readonly(gitRepoError),
     // Reconnect diagnostics
     isReconnecting,
     reconnectCount: readonly(reconnectCount),
@@ -1185,6 +1364,8 @@ export function useBridgeClient() {
     sendPrompt,
     loadOlderTranscriptPage,
     fetchWorkspaceEntries,
+    loadGitRepoState,
+    switchGitBranch,
     abortGeneration,
     compactSession,
     setThinkingLevel,

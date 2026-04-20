@@ -23,13 +23,13 @@ import {
   mergeSlashCommandOptions,
   parseCompactSlashCommand,
 } from "../utils/slashCommands";
+import { getNextThinkingLevel } from "../utils/thinkingLevels";
 import {
   applyWorkspaceMentionCompletion,
   getWorkspaceMentionContext,
   getWorkspaceMentionSuggestions,
   type WorkspaceMentionSuggestion,
 } from "../utils/workspaceMentions";
-import { getNextThinkingLevel } from "../utils/thinkingLevels";
 import CommandPalette from "./CommandPalette.vue";
 import ModelDropdown from "./ModelDropdown.vue";
 import ThinkingLevelDropdown from "./ThinkingLevelDropdown.vue";

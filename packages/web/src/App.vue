@@ -31,6 +31,10 @@ const {
   pendingTranscriptConfigEvent,
   sessionState,
   sessionStats,
+  gitRepoState,
+  gitRepoLoading,
+  gitBranchSwitching,
+  gitRepoError,
   sessions,
   treeEntries,
   activeTreeSessionPath,
@@ -53,6 +57,8 @@ const {
   compactSession,
   sendCommand,
   fetchWorkspaceEntries,
+  loadGitRepoState,
+  switchGitBranch,
   setThinkingLevel,
   setAutoCompactionEnabled,
   pendingExtensionRequest,
@@ -490,6 +496,12 @@ onBeforeUnmount(() => {
         :auto-compaction-enabled="sessionState?.autoCompactionEnabled ?? false"
         :session-stats="sessionStats"
         :session-state="sessionState"
+        :git-repo-state="gitRepoState"
+        :git-repo-loading="gitRepoLoading"
+        :git-branch-switching="gitBranchSwitching"
+        :git-repo-error="gitRepoError"
+        :refresh-git-repo-state="loadGitRepoState"
+        :switch-git-branch="switchGitBranch"
         :prefill-text="prefillText"
         :pending-revision="pendingRevision"
         :allow-revision="connectionStatus === 'connected'"

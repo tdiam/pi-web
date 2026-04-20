@@ -58,7 +58,9 @@ export class DetachedSessionHandle {
     public sessionPath: string,
     private sessionManager: SessionManager,
     private readonly fallbackCwd: string,
-    private readonly onSessionEvent: (event: DetachedSessionRegistryEvent) => void,
+    private readonly onSessionEvent: (
+      event: DetachedSessionRegistryEvent,
+    ) => void,
   ) {}
 
   getSessionManager(): SessionManager {
