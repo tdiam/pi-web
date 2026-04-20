@@ -114,7 +114,7 @@ export default class FailureOnlyReporter {
   printModuleFailures(testModule) {
     const moduleFailures = testModule.errors();
     const failedTests = collectTests(testModule.children).filter(
-      (test) => test.result().state === "failed",
+      test => test.result().state === "failed",
     );
 
     if (moduleFailures.length === 0 && failedTests.length === 0) {
