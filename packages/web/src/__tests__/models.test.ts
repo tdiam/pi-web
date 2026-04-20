@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterModels, normalizeRpcModel } from "../utils/models";
+import { filterModels } from "../utils/models";
 
 const models = [
   { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
@@ -8,28 +8,6 @@ const models = [
 ];
 
 describe("models utils", () => {
-  it("normalizes Pi model payloads", () => {
-    expect(
-      normalizeRpcModel({
-        provider: "openai",
-        id: "gpt-4.1",
-        name: "GPT-4.1",
-        api: "openai-responses",
-        reasoning: true,
-        contextWindow: 128000,
-        maxTokens: 32000,
-      }),
-    ).toEqual({
-      provider: "openai",
-      id: "gpt-4.1",
-      name: "GPT-4.1",
-      api: "openai-responses",
-      reasoning: true,
-      contextWindow: 128000,
-      maxTokens: 32000,
-    });
-  });
-
   it("matches provider and model ids with fuzzy search", () => {
     expect(filterModels(models, "claude s4")).toEqual([
       { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4" },
