@@ -52,7 +52,7 @@ const emit = defineEmits<{
 
 <style scoped>
 .right-rail {
-  grid-column: 3;
+  grid-column: 2;
   min-width: 0;
   height: 100%;
   background: var(--rail-bg);

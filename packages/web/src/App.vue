@@ -429,94 +429,96 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-shell" :data-theme="theme">
-    <AppHeader
-      :theme="theme"
-      :next-theme-label="nextThemeLabel"
-      :show-debug-toggle="debugModeAvailable"
-      :debug-mode="debugMode"
-      :debug-mode-label="debugModeLabel"
-      @toggle-sidebar="toggleSessionSidebar"
-      @toggle-theme="toggleTheme"
-      @toggle-debug-mode="toggleDebugMode"
+    <AppSidebar
+      :sessions="sessions"
+      :active-session-path="activeSessionPath"
+      :running-session-paths="runningSessionPaths"
+      :sidebar-open="sidebarOpen"
+      @close-sidebar="sidebarOpen = false"
+      @select-session="handleSessionSelect"
+      @refresh-sessions="handleRefreshSessions"
+      @new-session="handleNewSession"
     />
 
-    <ReconnectBanner
-      :visible="isReconnecting"
-      :reason="lastDisconnectReason"
-      :reconnect-count="reconnectCount"
-    />
-
-    <div
-      class="app-body"
-      :class="{
-        'has-right-rail': hasSessionOutline,
-        'right-rail-open': hasSessionOutline && outlineSidebarOpen,
-      }"
-    >
-      <AppSidebar
-        :sessions="sessions"
-        :active-session-path="activeSessionPath"
-        :running-session-paths="runningSessionPaths"
-        :sidebar-open="sidebarOpen"
-        @close-sidebar="sidebarOpen = false"
-        @select-session="handleSessionSelect"
-        @refresh-sessions="handleRefreshSessions"
-        @new-session="handleNewSession"
+    <div class="app-main-column">
+      <AppHeader
+        :theme="theme"
+        :next-theme-label="nextThemeLabel"
+        :show-debug-toggle="debugModeAvailable"
+        :debug-mode="debugMode"
+        :debug-mode-label="debugModeLabel"
+        @toggle-sidebar="toggleSessionSidebar"
+        @toggle-theme="toggleTheme"
+        @toggle-debug-mode="toggleDebugMode"
       />
 
-      <AppMainContent
-        ref="mainContentRef"
-        :compat-warning-visible="compatWarningVisible"
-        :status-entries="statusEntries"
-        :transcript="transcript"
-        :transcript-has-older="transcriptHasOlder"
-        :transcript-initial-loading="transcriptInitialLoading"
-        :transcript-page-loading="transcriptPageLoading"
-        :pending-transcript-config-event="pendingTranscriptConfigEvent"
-        :is-streaming="isStreaming"
-        :is-compacting="isCompacting"
-        :is-debug-mode="debugModeAvailable && debugMode"
-        :connection-status="connectionStatus"
-        :commands="commands"
-        :workspace-entries="workspaceEntries"
-        :workspace-entries-loading="workspaceEntriesLoading"
-        :ensure-workspace-entries="fetchWorkspaceEntries"
-        :available-models="availableModels"
-        :current-model="currentModel"
-        :current-thinking-level="currentThinkingLevel"
-        :auto-compaction-enabled="sessionState?.autoCompactionEnabled ?? false"
-        :session-stats="sessionStats"
-        :session-state="sessionState"
-        :git-repo-state="gitRepoState"
-        :git-repo-loading="gitRepoLoading"
-        :git-branch-switching="gitBranchSwitching"
-        :refresh-git-repo-state="loadGitRepoState"
-        :switch-git-branch="switchGitBranch"
-        :create-git-branch="createGitBranch"
-        :prefill-text="prefillText"
-        :pending-revision="pendingRevision"
-        :allow-revision="connectionStatus === 'connected'"
-        @submit="handlePrompt($event)"
-        @load-older-transcript="loadOlderTranscriptPage"
-        @abort="handleAbort"
-        @revise-message="handleReviseMessage"
-        @cancel-revision="handleCancelRevision"
-        @select-model="handleModelSelect"
-        @select-thinking-level="handleThinkingLevelSelect"
-        @toggle-auto-compaction="handleAutoCompactionToggle"
+      <ReconnectBanner
+        :visible="isReconnecting"
+        :reason="lastDisconnectReason"
+        :reconnect-count="reconnectCount"
       />
 
-      <AppRightSidebar
-        v-if="hasSessionOutline"
-        :tree-entries="treeEntries"
-        :sidebar-open="outlineSidebarOpen"
-        :session-label="activeSessionLabel"
-        :session-path="activeSessionPath"
-        @toggle-sidebar="toggleOutlineSidebar"
-        @close-sidebar="outlineSidebarOpen = false"
-        @select-tree-entry="handleTreeEntrySelect"
-        @refresh-tree="handleRefreshTree"
-      />
+      <div
+        class="app-body"
+        :class="{
+          'has-right-rail': hasSessionOutline,
+          'right-rail-open': hasSessionOutline && outlineSidebarOpen,
+        }"
+      >
+        <AppMainContent
+          ref="mainContentRef"
+          :compat-warning-visible="compatWarningVisible"
+          :status-entries="statusEntries"
+          :transcript="transcript"
+          :transcript-has-older="transcriptHasOlder"
+          :transcript-initial-loading="transcriptInitialLoading"
+          :transcript-page-loading="transcriptPageLoading"
+          :pending-transcript-config-event="pendingTranscriptConfigEvent"
+          :is-streaming="isStreaming"
+          :is-compacting="isCompacting"
+          :is-debug-mode="debugModeAvailable && debugMode"
+          :connection-status="connectionStatus"
+          :commands="commands"
+          :workspace-entries="workspaceEntries"
+          :workspace-entries-loading="workspaceEntriesLoading"
+          :ensure-workspace-entries="fetchWorkspaceEntries"
+          :available-models="availableModels"
+          :current-model="currentModel"
+          :current-thinking-level="currentThinkingLevel"
+          :auto-compaction-enabled="sessionState?.autoCompactionEnabled ?? false"
+          :session-stats="sessionStats"
+          :session-state="sessionState"
+          :git-repo-state="gitRepoState"
+          :git-repo-loading="gitRepoLoading"
+          :git-branch-switching="gitBranchSwitching"
+          :refresh-git-repo-state="loadGitRepoState"
+          :switch-git-branch="switchGitBranch"
+          :create-git-branch="createGitBranch"
+          :prefill-text="prefillText"
+          :pending-revision="pendingRevision"
+          :allow-revision="connectionStatus === 'connected'"
+          @submit="handlePrompt($event)"
+          @load-older-transcript="loadOlderTranscriptPage"
+          @abort="handleAbort"
+          @revise-message="handleReviseMessage"
+          @cancel-revision="handleCancelRevision"
+          @select-model="handleModelSelect"
+          @select-thinking-level="handleThinkingLevelSelect"
+          @toggle-auto-compaction="handleAutoCompactionToggle"
+        />
+
+        <AppRightSidebar
+          v-if="hasSessionOutline"
+          :tree-entries="treeEntries"
+          :sidebar-open="outlineSidebarOpen"
+          :session-label="activeSessionLabel"
+          :session-path="activeSessionPath"
+          @toggle-sidebar="toggleOutlineSidebar"
+          @close-sidebar="outlineSidebarOpen = false"
+          @select-tree-entry="handleTreeEntrySelect"
+          @refresh-tree="handleRefreshTree"
+        />
+      </div>
     </div>
 
     <AppNotifications
@@ -569,8 +571,8 @@ onBeforeUnmount(() => {
   --pi-font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: clamp(280px, 24vw, 360px) minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   width: 100vw;
@@ -579,6 +581,15 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-family: var(--pi-font-sans);
   color-scheme: dark;
+  position: relative;
+}
+
+.app-main-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .app-shell[data-theme="light"] {
@@ -617,7 +628,7 @@ onBeforeUnmount(() => {
 
 .app-body {
   display: grid;
-  grid-template-columns: clamp(280px, 24vw, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -628,13 +639,15 @@ onBeforeUnmount(() => {
 }
 
 .app-body.has-right-rail.right-rail-open {
-  grid-template-columns:
-    clamp(280px, 24vw, 360px)
-    minmax(0, 1fr)
-    clamp(280px, 22vw, 340px);
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 22vw, 340px);
 }
 
 @media (max-width: 900px) {
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+  }
+
   .app-body,
   .app-body.has-right-rail,
   .app-body.has-right-rail.right-rail-open {

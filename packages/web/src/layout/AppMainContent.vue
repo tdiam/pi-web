@@ -161,7 +161,7 @@ defineExpose({ preserveTranscriptScroll, scrollToTranscriptEntry });
 
 <style scoped>
 .center-column {
-  grid-column: 2;
+  grid-column: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;

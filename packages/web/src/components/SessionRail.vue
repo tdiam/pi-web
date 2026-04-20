@@ -53,7 +53,7 @@ const emit = defineEmits<{
 .session-rail {
   display: flex;
   flex-direction: column;
-  padding: 12px 10px 0;
+  padding: 0px 10px 0;
   overflow: hidden;
 }
 

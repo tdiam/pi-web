@@ -53,10 +53,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .left-rail {
-  grid-column: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--rail-bg);
   border-right: 1px solid var(--border);
   overflow: hidden;
