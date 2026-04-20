@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import { BridgeEventBus } from "./bridge-event-bus.js";
 import { getLanIps, isTailscaleIp } from "./network.js";
+import { DetachedSessionRegistry } from "./session-registry.js";
 import type { BridgeConfig, BridgeEvent, WsClient } from "./types.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "./ws-rpc-adapter.js";
 
@@ -36,6 +37,7 @@ export class BridgeServer {
   private context: WsRpcAdapterContext;
   private eventBus: BridgeEventBus;
   private emitEvent: (event: BridgeEvent) => void;
+  private sessionRegistry: DetachedSessionRegistry;
 
   private httpServer: http.Server | undefined;
   private wsServer: WebSocketServer | undefined;
@@ -55,6 +57,7 @@ export class BridgeServer {
     this.context = context;
     this.eventBus = eventBus;
     this.emitEvent = emitEvent;
+    this.sessionRegistry = new DetachedSessionRegistry(context.ctx.cwd);
   }
 
   /**
@@ -209,6 +212,7 @@ export class BridgeServer {
     this.adapters.clear();
 
     await Promise.all(openSockets.map(ws => this.closeWebSocketConnection(ws)));
+    this.sessionRegistry.dispose();
 
     // Close WebSocket server
     if (this.wsServer) {
@@ -385,6 +389,7 @@ export class BridgeServer {
       this.config,
       this.eventBus,
       this.emitEvent,
+      this.sessionRegistry,
     );
 
     this.adapters.set(client.id, adapter);

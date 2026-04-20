@@ -34,7 +34,7 @@ const {
   sessions,
   treeEntries,
   activeTreeSessionPath,
-  liveSessionPath,
+  runningSessionPaths,
   commands,
   workspaceEntries,
   workspaceEntriesLoading,
@@ -66,10 +66,6 @@ const {
 const activeSessionPath = computed(
   () => activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null,
 );
-const runningSessionPath = computed(() => {
-  if (!isStreaming.value) return null;
-  return liveSessionPath.value ?? sessionState.value?.sessionFile ?? null;
-});
 const hasSessionOutline = computed(
   () =>
     Boolean(activeSessionPath.value) ||
@@ -463,7 +459,7 @@ onBeforeUnmount(() => {
       <AppSidebar
         :sessions="sessions"
         :active-session-path="activeSessionPath"
-        :running-session-path="runningSessionPath"
+        :running-session-paths="runningSessionPaths"
         :sidebar-open="sidebarOpen"
         @close-sidebar="sidebarOpen = false"
         @select-session="handleSessionSelect"

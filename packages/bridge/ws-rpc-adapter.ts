@@ -16,6 +16,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { WebSocket } from "ws";
 import type { BridgeEventBus } from "./bridge-event-bus.js";
+import { DetachedSessionRegistry } from "./session-registry.js";
 import type {
   BridgeConfig,
   BridgeEvent,
@@ -114,20 +115,6 @@ interface TranscriptSyncState {
   openKeysByRole: Map<string, string[]>;
 }
 
-type SessionBinding =
-  | { kind: "live" }
-  | {
-      kind: "detached_pending";
-      path: string;
-      sessionManager: SessionManager;
-    }
-  | {
-      kind: "detached_active";
-      path: string;
-      session: AgentSession;
-      unsubscribe: () => void;
-    };
-
 interface SessionSummary {
   sessionManager: SessionManager;
   sessionPath: string;
@@ -141,19 +128,29 @@ interface SessionSummary {
  * Event and payload shaping
  * ========================================================================== */
 
-function toRpcAgentStartEvent(): RpcAgentStartEvent {
-  return { type: "agent_start" };
+function toRpcAgentStartEvent(sessionPath?: string | null): RpcAgentStartEvent {
+  return {
+    type: "agent_start",
+    sessionPath: sessionPath ?? undefined,
+  };
 }
 
-function toRpcAgentEndEvent(event: {
-  messages?: PiAgentEndEvent["messages"];
-}): RpcAgentEndEvent {
+function toRpcAgentEndEvent(
+  event: {
+    messages?: PiAgentEndEvent["messages"];
+  },
+  sessionPath?: string | null,
+): RpcAgentEndEvent {
   if (!Array.isArray(event.messages)) {
-    return { type: "agent_end" };
+    return {
+      type: "agent_end",
+      sessionPath: sessionPath ?? undefined,
+    };
   }
 
   return {
     type: "agent_end",
+    sessionPath: sessionPath ?? undefined,
     messages: event.messages.flatMap(message => {
       const shaped = toRpcAgentMessage(message);
       return shaped ? [shaped] : [];
@@ -1681,73 +1678,68 @@ function collapseWhitespace(value: string): string {
  * ========================================================================== */
 
 class SessionRuntime {
-  private binding: SessionBinding = { kind: "live" };
-  private readonly sessionManagersByPath = new Map<string, SessionManager>();
+  private selectedSessionPath: string | null = null;
+  private unsubscribeSelectedSession: (() => void) | undefined;
 
   constructor(
     private readonly context: WsRpcAdapterContext,
     private readonly clientId: string,
+    private readonly registry: DetachedSessionRegistry,
     private readonly createExtensionUIContext: () => ExtensionUIContext,
     private readonly onDetachedSessionEvent: (event: AgentSessionEvent) => void,
   ) {}
 
   hasDetachedSelection(): boolean {
-    return this.binding.kind !== "live";
+    return this.selectedSessionPath !== null;
   }
 
   getDetachedSession(): AgentSession | null {
-    return this.binding.kind === "detached_active"
-      ? this.binding.session
-      : null;
-  }
-
-  getPendingSessionManager(): SessionManager | null {
-    return this.binding.kind === "detached_pending"
-      ? this.binding.sessionManager
-      : null;
+    if (!this.selectedSessionPath) return null;
+    return this.registry.getActiveSession(this.selectedSessionPath);
   }
 
   getCachedSessionManager(sessionPath: string): SessionManager | null {
-    return this.sessionManagersByPath.get(sessionPath) ?? null;
+    return this.registry.getCachedSessionManager(sessionPath);
   }
 
   getCachedSessionManagers(): SessionManager[] {
-    return [...this.sessionManagersByPath.values()];
+    return this.registry.getCachedSessionManagers();
+  }
+
+  isSessionRunning(sessionPath: string): boolean {
+    const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
+    if (liveSessionPath && sessionPath === liveSessionPath) {
+      return !this.context.ctx.isIdle();
+    }
+    return this.registry.isSessionRunning(sessionPath);
   }
 
   currentDetachedSessionPath(): string | null {
-    return this.binding.kind === "live" ? null : this.binding.path;
+    return this.selectedSessionPath;
   }
 
   currentTranscriptSessionPath(): string | null {
     return (
-      this.currentDetachedSessionPath() ??
+      this.selectedSessionPath ??
       this.context.ctx.sessionManager.getSessionFile() ??
       null
     );
   }
 
   shouldHandleLiveSessionEvents(): boolean {
-    const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
-    if (this.binding.kind === "detached_active") {
-      return false;
-    }
-    if (this.binding.kind === "detached_pending") {
-      return this.binding.path === liveSessionPath;
-    }
-    return true;
+    return !this.selectedSessionPath || this.isViewingLiveSession();
   }
 
   buildCurrentTranscriptMessages(): RpcTranscriptMessage[] {
-    if (this.binding.kind === "detached_active") {
+    if (this.isViewingLiveSession()) {
       return flattenMessagesForTranscript(
-        this.binding.session.sessionManager.getBranch(),
+        this.context.ctx.sessionManager.getBranch(),
       );
     }
 
-    if (this.binding.kind === "detached_pending") {
+    if (this.selectedSessionPath) {
       return flattenMessagesForTranscript(
-        this.binding.sessionManager.getBranch(),
+        this.registry.openSession(this.selectedSessionPath).getSessionManager().getBranch(),
       );
     }
 
@@ -1769,37 +1761,42 @@ class SessionRuntime {
   }
 
   buildActiveState(): RpcSessionState {
-    if (this.binding.kind === "detached_active") {
-      const session = this.binding.session;
-      return {
-        model:
-          session.model ??
-          findLatestModelInfo(session.sessionManager.getBranch()) ??
-          undefined,
-        thinkingLevel: session.thinkingLevel,
-        isStreaming: session.isStreaming,
-        isCompacting: session.isCompacting,
-        steeringMode: session.steeringMode,
-        followUpMode: session.followUpMode,
-        sessionFile: session.sessionFile,
-        sessionId: session.sessionId,
-        sessionName:
-          session.sessionManager.getSessionName() ??
-          sessionDisplayName(session.sessionManager, session.sessionFile),
-        gitBranch: getCurrentGitBranch(
-          session.sessionManager.getCwd() ?? this.context.ctx.cwd,
-        ),
-        autoCompactionEnabled: session.autoCompactionEnabled,
-        messageCount: session.sessionManager.getEntries()?.length ?? 0,
-        pendingMessageCount: session.pendingMessageCount,
-      };
-    }
+    if (this.selectedSessionPath) {
+      const activeSession = this.registry.getActiveSession(this.selectedSessionPath);
+      if (activeSession) {
+        return {
+          model:
+            activeSession.model ??
+            findLatestModelInfo(activeSession.sessionManager.getBranch()) ??
+            undefined,
+          thinkingLevel: activeSession.thinkingLevel,
+          isStreaming: activeSession.isStreaming,
+          isCompacting: activeSession.isCompacting,
+          steeringMode: activeSession.steeringMode,
+          followUpMode: activeSession.followUpMode,
+          sessionFile: activeSession.sessionFile,
+          sessionId: activeSession.sessionId,
+          sessionName:
+            activeSession.sessionManager.getSessionName() ??
+            sessionDisplayName(
+              activeSession.sessionManager,
+              activeSession.sessionFile,
+            ),
+          gitBranch: getCurrentGitBranch(
+            activeSession.sessionManager.getCwd() ?? this.context.ctx.cwd,
+          ),
+          autoCompactionEnabled: activeSession.autoCompactionEnabled,
+          messageCount: activeSession.sessionManager.getEntries()?.length ?? 0,
+          pendingMessageCount: activeSession.pendingMessageCount,
+        };
+      }
 
-    if (this.binding.kind === "detached_pending") {
-      return buildStateFromStoredSession(
-        this.binding.sessionManager,
-        this.context.ctx.cwd,
-      );
+      if (!this.isViewingLiveSession()) {
+        return buildStateFromStoredSession(
+          this.registry.openSession(this.selectedSessionPath).getSessionManager(),
+          this.context.ctx.cwd,
+        );
+      }
     }
 
     const { pi, ctx } = this.context;
@@ -1828,7 +1825,7 @@ class SessionRuntime {
     };
   }
 
-  createDetachedSession(transcriptLimit?: number): SessionSummary {
+  async createDetachedSession(transcriptLimit?: number): Promise<SessionSummary> {
     const { ctx } = this.context;
     const currentSessionFile =
       this.currentDetachedSessionPath() ?? ctx.sessionManager.getSessionFile();
@@ -1836,67 +1833,24 @@ class SessionRuntime {
       ? path.dirname(currentSessionFile)
       : undefined;
 
-    this.disposeDetachedSelection();
-
-    const sessionManager = SessionManager.create(ctx.cwd, sessionDir);
-    const sessionFile = sessionManager.getSessionFile();
-    if (!sessionFile) {
-      throw new Error("Selected session file not found");
-    }
-
-    this.cacheSessionManager(sessionManager);
-    this.binding = {
-      kind: "detached_pending",
-      path: sessionFile,
-      sessionManager,
-    };
+    const handle = this.registry.createSession(sessionDir);
+    await this.selectSessionPath(handle.sessionPath);
 
     return this.buildSessionSummary(
-      sessionManager,
-      sessionFile,
+      handle.getSessionManager(),
+      handle.sessionPath,
       transcriptLimit,
     );
   }
 
-  switchToStoredSession(
+  async switchToStoredSession(
     sessionPath: string,
     transcriptLimit?: number,
-  ): SessionSummary {
-    if (
-      this.binding.kind === "detached_active" &&
-      this.binding.path === sessionPath
-    ) {
-      return this.buildSessionSummary(
-        this.binding.session.sessionManager,
-        sessionPath,
-        transcriptLimit,
-      );
-    }
-
-    if (
-      this.binding.kind === "detached_pending" &&
-      this.binding.path === sessionPath
-    ) {
-      return this.buildSessionSummary(
-        this.binding.sessionManager,
-        sessionPath,
-        transcriptLimit,
-      );
-    }
-
-    this.disposeDetachedSelection();
-
-    const sessionManager =
-      this.getCachedSessionManager(sessionPath) ?? openSessionManager(sessionPath);
-    this.cacheSessionManager(sessionManager);
-    this.binding = {
-      kind: "detached_pending",
-      path: sessionPath,
-      sessionManager,
-    };
-
+  ): Promise<SessionSummary> {
+    const handle = this.registry.openSession(sessionPath);
+    await this.selectSessionPath(sessionPath);
     return this.buildSessionSummary(
-      sessionManager,
+      handle.getSessionManager(),
       sessionPath,
       transcriptLimit,
     );
@@ -1905,73 +1859,41 @@ class SessionRuntime {
   async ensureDetachedSession(_options?: {
     skipInitialSnapshot?: boolean;
   }): Promise<AgentSession> {
-    if (this.binding.kind === "live") {
+    if (!this.selectedSessionPath) {
       throw new Error("Selected session file not found");
     }
 
-    if (this.binding.kind === "detached_active") {
-      return this.binding.session;
-    }
-
-    const { path: sessionPath, sessionManager } = this.binding;
-    if (!fs.existsSync(sessionPath) && !sessionManager) {
-      throw new Error("Selected session file not found");
-    }
-
-    const created = await createAgentSession({
-      cwd: sessionManager.getCwd() || this.context.ctx.cwd,
-      sessionManager,
-    });
-
-    await created.session.bindExtensions({
+    await this.registry.bindViewer(this.selectedSessionPath, {
+      clientId: this.clientId,
       uiContext: this.createExtensionUIContext(),
-      onError: error => {
-        console.error(
-          `WsRpcAdapter[${this.clientId}]: Detached session extension error:`,
-          error,
-        );
-      },
-      shutdownHandler: () => {},
     });
 
-    const unsubscribe = created.session.subscribe(event => {
-      this.onDetachedSessionEvent(event);
-    });
-
-    this.cacheSessionManager(created.session.sessionManager);
-    this.binding = {
-      kind: "detached_active",
-      path: sessionPath,
-      session: created.session,
-      unsubscribe,
-    };
-
-    return created.session;
+    return this.registry.ensureSession(this.selectedSessionPath);
   }
 
   async ensureDetachedSessionFromLive(options?: {
     skipInitialSnapshot?: boolean;
   }): Promise<AgentSession> {
-    if (this.binding.kind === "live") {
-      const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
-      if (!liveSessionPath || !fs.existsSync(liveSessionPath)) {
-        throw new Error("No session file available");
-      }
-      this.disposeDetachedSelection();
-      const sessionManager = openSessionManager(liveSessionPath);
-      this.cacheSessionManager(sessionManager);
-      this.binding = {
-        kind: "detached_pending",
-        path: liveSessionPath,
-        sessionManager,
-      };
+    const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
+    if (!liveSessionPath || !fs.existsSync(liveSessionPath)) {
+      throw new Error("No session file available");
     }
 
+    await this.selectSessionPath(liveSessionPath);
     return this.ensureDetachedSession(options);
   }
 
   dispose(): void {
-    this.disposeDetachedSelection();
+    if (this.unsubscribeSelectedSession) {
+      this.unsubscribeSelectedSession();
+      this.unsubscribeSelectedSession = undefined;
+    }
+
+    const selectedSessionPath = this.selectedSessionPath;
+    this.selectedSessionPath = null;
+    if (selectedSessionPath) {
+      void this.registry.releaseViewer(selectedSessionPath, this.clientId);
+    }
   }
 
   private buildSessionSummary(
@@ -1993,22 +1915,52 @@ class SessionRuntime {
     };
   }
 
-  private cacheSessionManager(sessionManager: SessionManager): void {
-    const sessionFile = sessionManager.getSessionFile();
-    if (!sessionFile) return;
-    this.sessionManagersByPath.set(sessionFile, sessionManager);
+  private isViewingLiveSession(): boolean {
+    const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
+    return Boolean(
+      this.selectedSessionPath &&
+        liveSessionPath &&
+        this.selectedSessionPath === liveSessionPath &&
+        !this.registry.isSessionActive(this.selectedSessionPath),
+    );
   }
 
-  private disposeDetachedSelection(): void {
-    if (this.binding.kind === "detached_active") {
-      this.cacheSessionManager(this.binding.session.sessionManager);
-      this.binding.unsubscribe();
-      this.binding.session.dispose();
+  private async selectSessionPath(sessionPath: string): Promise<void> {
+    if (this.selectedSessionPath === sessionPath) {
+      await this.registry.bindViewer(sessionPath, {
+        clientId: this.clientId,
+        uiContext: this.createExtensionUIContext(),
+      });
+      if (!this.unsubscribeSelectedSession) {
+        this.unsubscribeSelectedSession = this.registry
+          .openSession(sessionPath)
+          .subscribe(event => {
+            this.onDetachedSessionEvent(event);
+          });
+      }
+      return;
     }
-    if (this.binding.kind === "detached_pending") {
-      this.cacheSessionManager(this.binding.sessionManager);
+
+    if (this.unsubscribeSelectedSession) {
+      this.unsubscribeSelectedSession();
+      this.unsubscribeSelectedSession = undefined;
     }
-    this.binding = { kind: "live" };
+
+    if (this.selectedSessionPath) {
+      await this.registry.releaseViewer(this.selectedSessionPath, this.clientId);
+    }
+
+    this.selectedSessionPath = sessionPath;
+    this.unsubscribeSelectedSession = this.registry
+      .openSession(sessionPath)
+      .subscribe(event => {
+        this.onDetachedSessionEvent(event);
+      });
+
+    await this.registry.bindViewer(sessionPath, {
+      clientId: this.clientId,
+      uiContext: this.createExtensionUIContext(),
+    });
   }
 }
 
@@ -2477,8 +2429,8 @@ export class WsRpcAdapter {
   private readonly uiBridge: ExtensionUIBridge;
   private readonly sessionStatsPusher: SessionStatsPusher;
 
-  // Event subscription unsubscribe function.
-  private unsubscribeEvents: (() => void) | undefined;
+  // Detached-session registry subscription.
+  private unsubscribeRegistryEvents: (() => void) | undefined;
 
   // Track if adapter is disposed.
   private disposed = false;
@@ -2492,6 +2444,7 @@ export class WsRpcAdapter {
     config: BridgeConfig,
     eventBus: BridgeEventBus,
     emitEvent: (event: BridgeEvent) => void,
+    sessionRegistry?: DetachedSessionRegistry,
   ) {
     this.client = client;
     this.ws = ws;
@@ -2499,12 +2452,15 @@ export class WsRpcAdapter {
     this.config = config;
     this.eventBus = eventBus;
     this.emitEvent = emitEvent;
+    const detachedSessionRegistry =
+      sessionRegistry ?? new DetachedSessionRegistry(context.ctx.cwd);
     this.uiBridge = new ExtensionUIBridge(client.id, config, message => {
       this.sendResponse(message);
     });
     this.sessionRuntime = new SessionRuntime(
       context,
       client.id,
+      detachedSessionRegistry,
       () => this.uiBridge.createContext(),
       event => {
         this.handleSelectedSessionEvent(event);
@@ -2519,6 +2475,7 @@ export class WsRpcAdapter {
 
     this.setupWebSocket();
     this.subscribeToEvents();
+    this.subscribeToDetachedSessionEvents(detachedSessionRegistry);
     this.sendInitialTranscriptSnapshot();
     this.sessionStatsPusher.queue(
       this.sessionRuntime.currentTranscriptSessionPath(),
@@ -2557,13 +2514,15 @@ export class WsRpcAdapter {
     void this.eventBus;
 
     this.context.pi.on("agent_start", (_event: PiAgentStartEvent) => {
-      if (!this.sessionRuntime.shouldHandleLiveSessionEvents()) return;
-      this.sendEvent(toRpcAgentStartEvent());
+      this.sendEvent(
+        toRpcAgentStartEvent(this.context.ctx.sessionManager.getSessionFile()),
+      );
     });
 
     this.context.pi.on("agent_end", (event: PiAgentEndEvent) => {
+      const liveSessionPath = this.context.ctx.sessionManager.getSessionFile();
+      this.sendEvent(toRpcAgentEndEvent(event, liveSessionPath));
       if (!this.sessionRuntime.shouldHandleLiveSessionEvents()) return;
-      this.sendEvent(toRpcAgentEndEvent(event));
       this.sessionStatsPusher.queue(
         this.sessionRuntime.currentTranscriptSessionPath(),
       );
@@ -2613,6 +2572,32 @@ export class WsRpcAdapter {
         this.sessionRuntime.currentTranscriptSessionPath(),
       );
     });
+  }
+
+  private subscribeToDetachedSessionEvents(
+    sessionRegistry: DetachedSessionRegistry | null,
+  ): void {
+    if (!sessionRegistry) return;
+
+    this.unsubscribeRegistryEvents = sessionRegistry.subscribe(
+      ({ sessionPath, event }) => {
+        if (this.disposed) return;
+
+        switch (event.type) {
+          case "agent_start":
+            this.sendEvent(toRpcAgentStartEvent(sessionPath));
+            return;
+          case "agent_end":
+            this.sendEvent(toRpcAgentEndEvent(event, sessionPath));
+            if (this.sessionRuntime.currentDetachedSessionPath() === sessionPath) {
+              this.sessionStatsPusher.queue(sessionPath);
+            }
+            return;
+          default:
+            return;
+        }
+      },
+    );
   }
 
   private sendEvent(payload: RpcBridgeEvent): void {
@@ -2686,7 +2671,6 @@ export class WsRpcAdapter {
         return;
       }
       case "agent_start":
-        this.sendEvent(toRpcAgentStartEvent());
         return;
       case "agent_end":
         if (detachedSession) {
@@ -2701,7 +2685,6 @@ export class WsRpcAdapter {
             ),
           );
         }
-        this.sendEvent(toRpcAgentEndEvent(event));
         this.sessionStatsPusher.queue(sessionPath);
         return;
       case "compaction_start":
@@ -3036,7 +3019,7 @@ export class WsRpcAdapter {
         // the bridge's custom terminal view.
         let autoCreated: SessionSummary | null = null;
         if (!this.sessionRuntime.hasDetachedSelection()) {
-          autoCreated = this.sessionRuntime.createDetachedSession();
+          autoCreated = await this.sessionRuntime.createDetachedSession();
         }
 
         const session = await this.sessionRuntime.ensureDetachedSession();
@@ -3411,7 +3394,7 @@ export class WsRpcAdapter {
        * ================================================================== */
 
       case "new_session": {
-        const created = this.sessionRuntime.createDetachedSession(
+        const created = await this.sessionRuntime.createDetachedSession(
           command.limit,
         );
         this.transcriptProjector.syncPage(created.transcript);
@@ -3447,7 +3430,7 @@ export class WsRpcAdapter {
             };
           }
 
-          const selected = this.sessionRuntime.switchToStoredSession(
+          const selected = await this.sessionRuntime.switchToStoredSession(
             sessionPath,
             command.limit,
           );
@@ -3529,7 +3512,7 @@ export class WsRpcAdapter {
         }
 
         const selected =
-          this.sessionRuntime.switchToStoredSession(newSessionPath);
+          await this.sessionRuntime.switchToStoredSession(newSessionPath);
         const forkedSm = selected.sessionManager;
         const entry = forkedSm.getEntry(command.entryId);
         const text =
@@ -3740,6 +3723,7 @@ export class WsRpcAdapter {
             id: string;
             name: string;
             path: string;
+            isRunning?: boolean;
             timestamp?: string;
           }> = [];
           const seenSessionPaths = new Set<string>();
@@ -3762,6 +3746,10 @@ export class WsRpcAdapter {
               id: header.id,
               name: sessionDisplayName(sessionManager, sessionPath),
               path: sessionPath,
+              isRunning:
+                sessionPath === ctx.sessionManager.getSessionFile()
+                  ? !ctx.isIdle()
+                  : this.sessionRuntime.isSessionRunning(sessionPath),
               timestamp: header.timestamp,
             });
           };
@@ -3805,6 +3793,7 @@ export class WsRpcAdapter {
                 id: string;
                 name: string;
                 path: string;
+                isRunning?: boolean;
                 timestamp?: string;
               }>,
             },
@@ -3914,9 +3903,9 @@ export class WsRpcAdapter {
     this.uiBridge.dispose();
     this.sessionStatsPusher.dispose();
 
-    // Unsubscribe from events
-    if (this.unsubscribeEvents) {
-      this.unsubscribeEvents();
+    if (this.unsubscribeRegistryEvents) {
+      this.unsubscribeRegistryEvents();
+      this.unsubscribeRegistryEvents = undefined;
     }
 
     this.sessionRuntime.dispose();

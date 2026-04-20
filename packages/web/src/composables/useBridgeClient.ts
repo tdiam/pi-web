@@ -3,6 +3,8 @@ import type {
   ClientMessage,
   RpcBridgeEvent,
   RpcCommand,
+  RpcAgentEndEvent,
+  RpcAgentStartEvent,
   RpcImageContent,
   RpcResponse,
   RpcSessionState,
@@ -44,6 +46,7 @@ export interface SessionEntry {
   id: string;
   name: string;
   path: string;
+  isRunning?: boolean;
 }
 
 export type TreeTrackColumn = RpcTreeTrackColumn;
@@ -97,6 +100,7 @@ const sessions = ref<SessionEntry[]>([]);
 const treeEntries = ref<TreeEntry[]>([]);
 const activeTreeSessionPath = ref<string | null>(null);
 const liveSessionPath = ref<string | null>(null);
+const runningSessionPaths = ref<string[]>([]);
 const commands = ref<RpcSlashCommand[]>([]);
 const workspaceEntries = ref<RpcWorkspaceEntry[]>([]);
 const workspaceEntriesLoaded = ref(false);
@@ -203,6 +207,32 @@ function updateAvailableModels(values: readonly unknown[]) {
       currentModel.value,
     );
   }
+}
+
+function getDisplayedSessionPath(): string | null {
+  return activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null;
+}
+
+function setSessionRunning(sessionPath: string | null, isRunning: boolean) {
+  if (!sessionPath) return;
+
+  const next = new Set(runningSessionPaths.value);
+  if (isRunning) {
+    next.add(sessionPath);
+  } else {
+    next.delete(sessionPath);
+  }
+  runningSessionPaths.value = [...next];
+
+  sessions.value = sessions.value.map(session =>
+    session.path === sessionPath ? { ...session, isRunning } : session,
+  );
+}
+
+function syncRunningSessionsFromEntries(entries: readonly SessionEntry[]) {
+  runningSessionPaths.value = entries
+    .filter(session => session.isRunning)
+    .map(session => session.path);
 }
 
 function normalizeThinkingLevel(value: unknown): RpcThinkingLevel | null {
@@ -748,6 +778,7 @@ function handleResponse(payload: RpcResponse) {
           currentThinkingLevel.value = normalizeThinkingLevel(
             data.thinkingLevel,
           );
+          setSessionRunning(data.sessionFile ?? null, data.isStreaming);
           isStreaming.value = data.isStreaming;
           setCompactionState(data.isCompacting);
           if (!activeTreeSessionPath.value && data.sessionFile) {
@@ -758,7 +789,10 @@ function handleResponse(payload: RpcResponse) {
       }
       case "list_sessions": {
         const data = payload.data as { sessions: SessionEntry[] } | undefined;
-        if (data) sessions.value = data.sessions;
+        if (data) {
+          sessions.value = data.sessions;
+          syncRunningSessionsFromEntries(data.sessions);
+        }
         break;
       }
       case "switch_session": {
@@ -910,13 +944,23 @@ function handleEvent(payload: RpcBridgeEvent) {
       break;
     }
     case "agent_start": {
-      isStreaming.value = true;
+      const data = payload as RpcAgentStartEvent;
+      const sessionPath = data.sessionPath ?? liveSessionPath.value ?? null;
+      setSessionRunning(sessionPath, true);
+      if (!sessionPath || sessionPath === getDisplayedSessionPath()) {
+        isStreaming.value = true;
+      }
       break;
     }
     case "agent_end": {
-      isStreaming.value = false;
-      // Refresh state after agent completes
-      sendCommand({ type: "get_state" }).catch(() => {});
+      const data = payload as RpcAgentEndEvent;
+      const sessionPath = data.sessionPath ?? liveSessionPath.value ?? null;
+      setSessionRunning(sessionPath, false);
+      if (!sessionPath || sessionPath === getDisplayedSessionPath()) {
+        isStreaming.value = false;
+        // Refresh state after agent completes
+        sendCommand({ type: "get_state" }).catch(() => {});
+      }
       break;
     }
     case "model_select": {
@@ -1041,6 +1085,11 @@ function connect() {
     connectionStatus.value = "disconnected";
     remoteCompactionActive.value = false;
     reconnectCount.value++;
+    runningSessionPaths.value = [];
+    sessions.value = sessions.value.map(session => ({
+      ...session,
+      isRunning: false,
+    }));
     lastDisconnectReason.value = event?.reason
       ? `Connection lost: ${event.reason}`
       : "Connection lost";
@@ -1109,6 +1158,7 @@ export function useBridgeClient() {
     treeEntries: readonly(treeEntries),
     activeTreeSessionPath: readonly(activeTreeSessionPath),
     liveSessionPath: readonly(liveSessionPath),
+    runningSessionPaths: readonly(runningSessionPaths),
     commands: readonly(commands),
     workspaceEntries: readonly(workspaceEntries),
     workspaceEntriesLoading: readonly(workspaceEntriesLoading),

@@ -1638,6 +1638,84 @@ describe("extension_ui_request handling", () => {
     );
   });
 
+  it("tracks background running sessions without toggling the active transcript state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/live.jsonl",
+          sessionName: "Session 1",
+          thinkingLevel: "normal",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "list_sessions",
+        success: true,
+        data: {
+          sessions: [
+            {
+              id: "session-1",
+              name: "Session 1",
+              path: "/tmp/live.jsonl",
+              isRunning: false,
+            },
+            {
+              id: "session-2",
+              name: "Session 2",
+              path: "/tmp/background.jsonl",
+              isRunning: false,
+            },
+          ],
+        },
+      },
+    });
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "agent_start",
+        sessionPath: "/tmp/background.jsonl",
+      },
+    });
+
+    expect(client.runningSessionPaths.value).toEqual(["/tmp/background.jsonl"]);
+    expect(client.isStreaming.value).toBe(false);
+    expect(client.sessions.value.find(s => s.path === "/tmp/background.jsonl"))
+      .toMatchObject({ isRunning: true });
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "agent_end",
+        sessionPath: "/tmp/background.jsonl",
+      },
+    });
+
+    expect(client.runningSessionPaths.value).toEqual([]);
+    expect(client.sessions.value.find(s => s.path === "/tmp/background.jsonl"))
+      .toMatchObject({ isRunning: false });
+  });
+
   it("abortGeneration sends abort only while streaming", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

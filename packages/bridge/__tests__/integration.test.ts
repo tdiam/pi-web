@@ -894,6 +894,7 @@ describe("Bridge Integration", () => {
         expect(receivedEvents.length).toBeGreaterThanOrEqual(1);
         expect(receivedEvents[0]).toEqual({
           type: "agent_start",
+          sessionPath: "/test/session.json",
         });
 
         ws.close();

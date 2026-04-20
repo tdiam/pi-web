@@ -153,10 +153,12 @@ export type RpcAgentMessage =
 
 export interface RpcAgentStartEvent {
   type: "agent_start";
+  sessionPath?: string;
 }
 
 export interface RpcAgentEndEvent {
   type: "agent_end";
+  sessionPath?: string;
   messages?: RpcAgentMessage[];
 }
 
@@ -543,7 +545,12 @@ export interface RpcResponseMap {
   get_messages: RpcTranscriptPage & { direction: "latest" | "older" };
   get_commands: { commands: RpcSlashCommand[] };
   list_sessions: {
-    sessions: Array<{ id: string; name: string; path: string }>;
+    sessions: Array<{
+      id: string;
+      name: string;
+      path: string;
+      isRunning?: boolean;
+    }>;
   };
   list_tree_entries: { entries: RpcTreeEntry[]; sessionPath?: string };
   list_workspace_entries: { entries: RpcWorkspaceEntry[] };

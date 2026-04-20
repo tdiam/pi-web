@@ -4,7 +4,7 @@ import type { SessionEntry } from "../composables/useBridgeClient";
 defineProps<{
   sessions: readonly SessionEntry[];
   activeSessionPath: string | null;
-  runningSessionPath: string | null;
+  runningSessionPaths: readonly string[];
 }>();
 
 const emit = defineEmits<{
@@ -27,7 +27,7 @@ const emit = defineEmits<{
         class="rail-item"
         :class="{
           active: s.path === activeSessionPath,
-          running: s.path === runningSessionPath,
+          running: runningSessionPaths.includes(s.path),
         }"
         :title="s.path"
         @click="emit('select', s.path)"
@@ -35,7 +35,7 @@ const emit = defineEmits<{
         <span class="item-indicator"></span>
         <span class="item-label">{{ s.name }}</span>
         <span
-          v-if="s.path === runningSessionPath"
+          v-if="runningSessionPaths.includes(s.path)"
           class="item-status"
           role="status"
           aria-label="Agent running"

@@ -1224,7 +1224,10 @@ describe("WsRpcAdapter", () => {
       );
 
       expect(sendCalls).toHaveLength(1);
-      expect(sendCalls[0].payload).toEqual({ type: "agent_start" });
+      expect(sendCalls[0].payload).toEqual({
+        type: "agent_start",
+        sessionPath: "/path/to/session.json",
+      });
     });
 
     it("pushes shaped agent_end events and session stats", async () => {
@@ -1273,6 +1276,7 @@ describe("WsRpcAdapter", () => {
       expect(sendCalls).toHaveLength(2);
       expect(sendCalls[0].payload).toEqual({
         type: "agent_end",
+        sessionPath: "/path/to/session.json",
         messages: [
           {
             role: "assistant",
@@ -1669,12 +1673,14 @@ describe("WsRpcAdapter", () => {
           id: "current-id",
           name: "Current first prompt",
           path: currentSessionFile,
+          isRunning: false,
           timestamp: "2025-01-02T00:00:00Z",
         },
         {
           id: "older-id",
           name: "Older first prompt",
           path: olderSessionFile,
+          isRunning: false,
           timestamp: "2025-01-01T00:00:00Z",
         },
       ]);
@@ -2997,7 +3003,7 @@ describe("WsRpcAdapter", () => {
   });
 
   describe("responsibility boundaries", () => {
-    it("releases the active detached session before switching to another stored session", async () => {
+    it("keeps the active detached session alive when switching to another stored session", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-runtime-"));
       const firstManager = SessionManager.create(tmpDir, tmpDir);
       firstManager.appendMessage({
@@ -3108,9 +3114,50 @@ describe("WsRpcAdapter", () => {
       );
       await new Promise(r => setTimeout(r, 10));
 
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({
+            type: "command",
+            payload: {
+              id: "switch-back-first",
+              type: "switch_session",
+              sessionPath: firstSessionFile,
+            },
+          }),
+        ),
+      );
+      await new Promise(r => setTimeout(r, 10));
+
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({
+            type: "command",
+            payload: {
+              id: "prompt-first-again",
+              type: "prompt",
+              message: "Resume first detached session",
+            },
+          }),
+        ),
+      );
+      await new Promise(r => setTimeout(r, 20));
+
       expect(firstSubscribeSpy).toHaveBeenCalledTimes(1);
-      expect(firstUnsubscribeSpy).toHaveBeenCalledTimes(1);
-      expect(firstDisposeSpy).toHaveBeenCalledTimes(1);
+      expect(firstUnsubscribeSpy).not.toHaveBeenCalled();
+      expect(firstDisposeSpy).not.toHaveBeenCalled();
+      expect(createAgentSessionMock).toHaveBeenCalledTimes(1);
+      expect(firstPromptSpy).toHaveBeenNthCalledWith(1, "Activate first detached session", {
+        source: "rpc",
+      });
+      expect(firstPromptSpy).toHaveBeenNthCalledWith(2, "Resume first detached session", {
+        source: "rpc",
+      });
 
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
