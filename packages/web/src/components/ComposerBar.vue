@@ -1,11 +1,5 @@
 <script setup lang="ts">
-import {
-  ChevronDown,
-  CornerDownLeft,
-  ImagePlus,
-  Square,
-  X,
-} from "lucide-vue-next";
+import { CornerDownLeft, ImagePlus, Square, X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { ConnectionStatus } from "../composables/useBridgeClient";
 import type {
@@ -37,16 +31,8 @@ import {
 } from "../utils/workspaceMentions";
 import CommandPalette from "./CommandPalette.vue";
 import ModelDropdown from "./ModelDropdown.vue";
+import ThinkingLevelDropdown from "./ThinkingLevelDropdown.vue";
 import WorkspaceMentionPalette from "./WorkspaceMentionPalette.vue";
-
-const THINKING_LEVEL_OPTIONS = [
-  { value: "off", label: "Off" },
-  { value: "minimal", label: "Minimal" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "XHigh" },
-] as const;
 
 const props = defineProps<{
   connectionStatus: ConnectionStatus;
@@ -147,13 +133,6 @@ const currentModelText = computed(() => {
     return props.models.length > 0 ? "choose model" : "no models";
   return `${props.selectedModel.provider}/${props.selectedModel.id}`;
 });
-const selectedThinkingLevel = computed(() => props.thinkingLevel ?? "off");
-const selectedThinkingLabel = computed(
-  () =>
-    THINKING_LEVEL_OPTIONS.find(
-      option => option.value === selectedThinkingLevel.value,
-    )?.label ?? "Off",
-);
 const normalizedInputText = computed(() =>
   normalizeSubmittedText(inputText.value),
 );
@@ -490,9 +469,7 @@ function handleModelSelect(model: RpcModelInfo) {
   emit("selectModel", model);
 }
 
-function handleThinkingLevelChange(event: Event) {
-  const level = (event.target as HTMLSelectElement | null)?.value;
-  if (!level) return;
+function handleThinkingLevelSelect(level: RpcThinkingLevel) {
   emit("selectThinkingLevel", level);
 }
 
@@ -769,31 +746,11 @@ resizeTextarea();
               :disabled="isDisabled"
               @select="handleModelSelect"
             />
-            <label class="thinking-control" :class="{ disabled: isDisabled }">
-              <span class="sr-only">Thinking level</span>
-              <span class="thinking-control-label" aria-hidden="true"
-                >Thinking</span
-              >
-              <span class="thinking-control-value" aria-hidden="true">
-                {{ selectedThinkingLabel }}
-              </span>
-              <ChevronDown class="thinking-control-caret" aria-hidden="true" />
-              <select
-                class="thinking-select"
-                :value="selectedThinkingLevel"
-                :disabled="isDisabled"
-                aria-label="Thinking level"
-                @change="handleThinkingLevelChange"
-              >
-                <option
-                  v-for="option in THINKING_LEVEL_OPTIONS"
-                  :key="option.value"
-                  :value="option.value"
-                >
-                  {{ option.label }}
-                </option>
-              </select>
-            </label>
+            <ThinkingLevelDropdown
+              :value="thinkingLevel"
+              :disabled="isDisabled"
+              @select="handleThinkingLevelSelect"
+            />
             <label class="toggle-chip" :class="{ disabled: isDisabled }">
               <input
                 class="toggle-chip-input"
@@ -1192,86 +1149,6 @@ resizeTextarea();
   justify-content: flex-end;
 }
 
-.thinking-control {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  background: color-mix(in srgb, var(--panel) 70%, transparent);
-  cursor: pointer;
-  user-select: none;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease,
-    opacity 0.15s ease;
-}
-
-.thinking-control:hover:not(.disabled),
-.thinking-control:focus-within {
-  border-color: var(--border-strong);
-  background: var(--panel-2);
-}
-
-.thinking-control.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.thinking-control-label,
-.thinking-control-value,
-.thinking-control-caret {
-  pointer-events: none;
-}
-
-.thinking-control-label {
-  display: inline-flex;
-  align-items: center;
-  color: var(--text-subtle);
-  font-family: var(--pi-font-sans);
-  font-size: 0.66rem;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.thinking-control-value {
-  min-width: 0;
-  color: var(--text);
-  font-family: var(--pi-font-mono);
-  font-size: 0.66rem;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.thinking-control-caret {
-  width: 12px;
-  height: 12px;
-  flex-shrink: 0;
-  color: var(--text-subtle);
-}
-
-.thinking-select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  border: 0;
-  background: transparent;
-  color: transparent;
-  outline: none;
-  cursor: pointer;
-  opacity: 0;
-  appearance: none;
-}
-
-.thinking-select:disabled {
-  cursor: not-allowed;
-}
-
 .toggle-chip {
   display: inline-flex;
   align-items: center;
@@ -1417,17 +1294,5 @@ resizeTextarea();
     height: 32px;
     border-radius: 10px;
   }
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 </style>

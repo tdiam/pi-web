@@ -239,11 +239,11 @@ onBeforeUnmount(() => {
 .model-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  max-width: min(100%, 520px);
-  height: 26px;
-  padding: 0 10px;
+  max-width: min(100%, 440px);
+  height: 24px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
   background: color-mix(in srgb, var(--panel) 70%, transparent);
@@ -269,8 +269,8 @@ onBeforeUnmount(() => {
 }
 
 .model-trigger-icon {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
 }
 
@@ -280,17 +280,17 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--pi-font-mono);
-  font-size: 0.66rem;
+  font-size: 0.64rem;
 }
 
 .model-menu {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 12px);
-  width: min(360px, calc(100vw - 48px));
-  padding: 10px;
+  bottom: calc(100% + 10px);
+  width: min(332px, calc(100vw - 48px));
+  padding: 8px;
   border: 1px solid var(--border-strong);
-  border-radius: 16px;
+  border-radius: 14px;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--panel) 97%, transparent),
@@ -304,11 +304,11 @@ onBeforeUnmount(() => {
 .model-search {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 10px;
-  margin-bottom: 8px;
-  border-radius: 12px;
+  gap: 7px;
+  height: 34px;
+  padding: 0 9px;
+  margin-bottom: 6px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
 }
@@ -319,8 +319,8 @@ onBeforeUnmount(() => {
 }
 
 .model-search-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   color: var(--text-subtle);
   flex-shrink: 0;
 }
@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
   border: none;
   background: transparent;
   color: var(--text);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   outline: none;
 }
 
@@ -339,26 +339,27 @@ onBeforeUnmount(() => {
 }
 
 .model-list {
-  max-height: 280px;
+  max-height: 240px;
   margin: 0;
-  padding: 0;
+  padding: 0 6px 0 0;
   list-style: none;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .model-list-item + .model-list-item {
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .model-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  padding: 11px 12px;
+  padding: 5px 10px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -384,7 +385,7 @@ onBeforeUnmount(() => {
 .model-option-copy {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -397,20 +398,20 @@ onBeforeUnmount(() => {
 }
 
 .model-option-name {
-  font-size: 0.84rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
 }
 
 .model-option-meta {
   font-family: var(--pi-font-mono);
-  font-size: 0.66rem;
+  font-size: 0.62rem;
   color: var(--text-subtle);
 }
 
 .model-option-check {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
   color: var(--text-muted);
 }
@@ -419,20 +420,20 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 64px;
-  border-radius: 12px;
-  font-size: 0.78rem;
+  height: 54px;
+  border-radius: 10px;
+  font-size: 0.74rem;
   color: var(--text-subtle);
   background: color-mix(in srgb, var(--panel-2) 60%, transparent);
 }
 
 @media (max-width: 640px) {
   .model-trigger {
-    max-width: min(58vw, 220px);
+    max-width: min(56vw, 210px);
   }
 
   .model-menu {
-    width: min(320px, calc(100vw - 24px));
+    width: min(296px, calc(100vw - 24px));
   }
 }
 
