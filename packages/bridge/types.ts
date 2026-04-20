@@ -281,6 +281,7 @@ export interface RpcCommandMap {
   /** Git */
   list_git_branches: {};
   switch_git_branch: { branchName: string };
+  create_git_branch: { branchName: string };
 }
 
 /** All RPC command types that a browser client can send. */
@@ -577,6 +578,7 @@ export interface RpcResponseMap {
   list_workspace_entries: { entries: RpcWorkspaceEntry[] };
   list_git_branches: RpcGitRepoState;
   switch_git_branch: RpcGitRepoState;
+  create_git_branch: RpcGitRepoState;
 }
 
 type RpcResponseData<T> = [T] extends [void] ? {} : { data: T };

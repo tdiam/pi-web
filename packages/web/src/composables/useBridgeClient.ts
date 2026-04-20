@@ -166,7 +166,6 @@ const sessionStats = ref<RpcSessionStats | null>(null);
 const gitRepoState = ref<RpcGitRepoState | null>(null);
 const gitRepoLoading = ref(false);
 const gitBranchSwitching = ref(false);
-const gitRepoError = ref<string | null>(null);
 
 // Reconnect diagnostics
 const reconnectCount = ref(0);
@@ -266,7 +265,6 @@ function getDisplayedSessionPath(): string | null {
 
 function resetGitRepoState() {
   gitRepoState.value = null;
-  gitRepoError.value = null;
   gitRepoLoading.value = false;
   gitBranchSwitching.value = false;
   gitRepoStateRequest = null;
@@ -705,6 +703,26 @@ async function fetchWorkspaceEntries(
   return workspaceEntriesRequest;
 }
 
+function pushNotification(message: string, notifyType?: string) {
+  notifications.value = [
+    ...notifications.value,
+    {
+      message,
+      notifyType,
+      id: `local-notify:${createRequestId()}`,
+    },
+  ];
+}
+
+function summarizeErrorMessage(message: string, fallback: string): string {
+  const line = message
+    .split(/\r?\n/)
+    .map(part => part.trim())
+    .find(Boolean);
+  if (!line) return fallback;
+  return line.length > 220 ? `${line.slice(0, 217)}...` : line;
+}
+
 async function loadGitRepoState(
   force: boolean = false,
 ): Promise<RpcGitRepoState | null> {
@@ -721,22 +739,36 @@ async function loadGitRepoState(
   }
 
   gitRepoLoading.value = true;
-  gitRepoError.value = null;
   gitRepoStateRequest = sendCommand({ type: "list_git_branches" })
     .then(response => {
       if (!response.success) {
-        gitRepoError.value = response.error ?? "Failed to load git branches";
+        pushNotification(
+          summarizeErrorMessage(
+            response.error ?? "Failed to load git branches",
+            "Failed to load git branches",
+          ),
+          "error",
+        );
         return gitRepoState.value;
       }
 
       const state = normalizeGitRepoState(response.data);
       gitRepoState.value = state;
-      gitRepoError.value = state ? null : "Failed to parse git branch data";
+      if (!state) {
+        pushNotification("Failed to parse git branch data", "error");
+      }
       return state;
     })
     .catch(error => {
-      gitRepoError.value =
-        error instanceof Error ? error.message : "Failed to load git branches";
+      pushNotification(
+        summarizeErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Failed to load git branches",
+          "Failed to load git branches",
+        ),
+        "error",
+      );
       return gitRepoState.value;
     })
     .finally(() => {
@@ -747,15 +779,30 @@ async function loadGitRepoState(
   return gitRepoStateRequest;
 }
 
+function applyGitRepoMutation(state: RpcGitRepoState | null) {
+  gitRepoState.value = state;
+
+  if (state && sessionState.value) {
+    sessionState.value = {
+      ...sessionState.value,
+      gitBranch: state.headLabel,
+    };
+  }
+
+  workspaceEntriesLoaded.value = false;
+  workspaceEntries.value = [];
+  workspaceEntriesRequest = null;
+  void fetchWorkspaceEntries(true).catch(() => {});
+}
+
 async function switchGitBranch(
   branchName: string,
 ): Promise<RpcGitRepoState | null> {
   if (!branchName.trim() || connectionStatus.value !== "connected") {
-    return gitRepoState.value;
+    return null;
   }
 
   gitBranchSwitching.value = true;
-  gitRepoError.value = null;
 
   try {
     const response = await sendCommand({
@@ -763,31 +810,78 @@ async function switchGitBranch(
       branchName,
     });
     if (!response.success) {
-      gitRepoError.value = response.error ?? "Failed to switch git branch";
-      return gitRepoState.value;
+      pushNotification(
+        summarizeErrorMessage(
+          response.error ?? "Failed to switch git branch",
+          "Failed to switch git branch",
+        ),
+        "error",
+      );
+      return null;
     }
 
     const state = normalizeGitRepoState(response.data);
-    gitRepoState.value = state;
-    gitRepoError.value = state ? null : "Failed to parse git branch data";
-
-    if (state && sessionState.value) {
-      sessionState.value = {
-        ...sessionState.value,
-        gitBranch: state.headLabel,
-      };
+    if (!state) {
+      pushNotification("Failed to parse git branch data", "error");
+      return null;
     }
-
-    workspaceEntriesLoaded.value = false;
-    workspaceEntries.value = [];
-    workspaceEntriesRequest = null;
-    void fetchWorkspaceEntries(true).catch(() => {});
-
+    applyGitRepoMutation(state);
     return state;
   } catch (error) {
-    gitRepoError.value =
-      error instanceof Error ? error.message : "Failed to switch git branch";
-    return gitRepoState.value;
+    pushNotification(
+      summarizeErrorMessage(
+        error instanceof Error ? error.message : "Failed to switch git branch",
+        "Failed to switch git branch",
+      ),
+      "error",
+    );
+    return null;
+  } finally {
+    gitBranchSwitching.value = false;
+  }
+}
+
+async function createGitBranch(
+  branchName: string,
+): Promise<RpcGitRepoState | null> {
+  if (!branchName.trim() || connectionStatus.value !== "connected") {
+    return null;
+  }
+
+  gitBranchSwitching.value = true;
+
+  try {
+    const response = await sendCommand({
+      type: "create_git_branch",
+      branchName,
+    });
+    if (!response.success) {
+      pushNotification(
+        summarizeErrorMessage(
+          response.error ?? "Failed to create git branch",
+          "Failed to create git branch",
+        ),
+        "error",
+      );
+      return null;
+    }
+
+    const state = normalizeGitRepoState(response.data);
+    if (!state) {
+      pushNotification("Failed to parse git branch data", "error");
+      return null;
+    }
+    applyGitRepoMutation(state);
+    return state;
+  } catch (error) {
+    pushNotification(
+      summarizeErrorMessage(
+        error instanceof Error ? error.message : "Failed to create git branch",
+        "Failed to create git branch",
+      ),
+      "error",
+    );
+    return null;
   } finally {
     gitBranchSwitching.value = false;
   }
@@ -1028,19 +1122,19 @@ function handleResponse(payload: RpcResponse) {
       case "list_git_branches": {
         const state = normalizeGitRepoState(payload.data);
         gitRepoState.value = state;
-        gitRepoError.value = state ? null : "Failed to parse git branch data";
+        if (!state) {
+          pushNotification("Failed to parse git branch data", "error");
+        }
         break;
       }
       case "switch_git_branch": {
         const state = normalizeGitRepoState(payload.data);
-        gitRepoState.value = state;
-        gitRepoError.value = state ? null : "Failed to parse git branch data";
-        if (state && sessionState.value) {
-          sessionState.value = {
-            ...sessionState.value,
-            gitBranch: state.headLabel,
-          };
-        }
+        applyGitRepoMutation(state);
+        break;
+      }
+      case "create_git_branch": {
+        const state = normalizeGitRepoState(payload.data);
+        applyGitRepoMutation(state);
         break;
       }
       case "set_model": {
@@ -1346,7 +1440,6 @@ export function useBridgeClient() {
     gitRepoState: readonly(gitRepoState),
     gitRepoLoading: readonly(gitRepoLoading),
     gitBranchSwitching: readonly(gitBranchSwitching),
-    gitRepoError: readonly(gitRepoError),
     // Reconnect diagnostics
     isReconnecting,
     reconnectCount: readonly(reconnectCount),
@@ -1366,6 +1459,7 @@ export function useBridgeClient() {
     fetchWorkspaceEntries,
     loadGitRepoState,
     switchGitBranch,
+    createGitBranch,
     abortGeneration,
     compactSession,
     setThinkingLevel,

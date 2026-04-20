@@ -34,7 +34,6 @@ const {
   gitRepoState,
   gitRepoLoading,
   gitBranchSwitching,
-  gitRepoError,
   sessions,
   treeEntries,
   activeTreeSessionPath,
@@ -59,6 +58,7 @@ const {
   fetchWorkspaceEntries,
   loadGitRepoState,
   switchGitBranch,
+  createGitBranch,
   setThinkingLevel,
   setAutoCompactionEnabled,
   pendingExtensionRequest,
@@ -499,9 +499,9 @@ onBeforeUnmount(() => {
         :git-repo-state="gitRepoState"
         :git-repo-loading="gitRepoLoading"
         :git-branch-switching="gitBranchSwitching"
-        :git-repo-error="gitRepoError"
         :refresh-git-repo-state="loadGitRepoState"
         :switch-git-branch="switchGitBranch"
+        :create-git-branch="createGitBranch"
         :prefill-text="prefillText"
         :pending-revision="pendingRevision"
         :allow-revision="connectionStatus === 'connected'"

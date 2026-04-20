@@ -4139,6 +4139,109 @@ export class WsRpcAdapter {
         };
       }
 
+      case "create_git_branch": {
+        const branchName = command.branchName.trim();
+        if (!branchName) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: "Branch name cannot be empty",
+          };
+        }
+
+        const activeState = this.sessionRuntime.buildActiveState();
+        if (activeState.isStreaming || activeState.isCompacting) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: "Cannot create branches while the active session is busy",
+          };
+        }
+
+        const repoState = readGitRepoState(this.sessionRuntime.currentGitCwd());
+        if (!repoState) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: "No git repository found for the active session",
+          };
+        }
+
+        const branchNameCheck = runGitCommand(repoState.repoRoot, [
+          "check-ref-format",
+          "--branch",
+          branchName,
+        ]);
+        if (branchNameCheck.error || branchNameCheck.status !== 0) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: `Invalid branch name: ${branchName}`,
+          };
+        }
+
+        const branchExists = repoState.branches.some(
+          branch => branch.kind === "local" && branch.name === branchName,
+        );
+        if (branchExists) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: `Branch already exists: ${branchName}`,
+          };
+        }
+
+        const createResult = runGitCommand(
+          repoState.repoRoot,
+          ["switch", "-c", branchName],
+          10000,
+        );
+        if (createResult.error || createResult.status !== 0) {
+          const failureOutput = [createResult.stderr, createResult.stdout]
+            .map(value => readSpawnText(value).trim())
+            .filter(Boolean)
+            .join("\n");
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error: failureOutput || `Failed to create ${branchName}`,
+          };
+        }
+
+        this.workspaceEntriesCache = null;
+        const nextRepoState = readGitRepoState(repoState.repoRoot);
+        if (!nextRepoState) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "create_git_branch" as const,
+            success: false as const,
+            error:
+              "Branch created, but the repository state could not be refreshed",
+          };
+        }
+
+        return {
+          id: correlationId,
+          type: "response" as const,
+          command: "create_git_branch" as const,
+          success: true as const,
+          data: nextRepoState,
+        };
+      }
+
       default: {
         const unknownCommand = command as { type: string };
         return {

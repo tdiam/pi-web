@@ -616,7 +616,6 @@ describe("extension_ui_request handling", () => {
         },
       ],
     });
-    expect(client.gitRepoError.value).toBeNull();
   });
 
   it("switchGitBranch sends the command and updates local state", async () => {
@@ -695,6 +694,123 @@ describe("extension_ui_request handling", () => {
     await pendingSwitch;
     expect(client.sessionState.value?.gitBranch).toBe("feature");
     expect(client.gitRepoState.value?.currentBranch).toBe("feature");
+    expect(client.gitBranchSwitching.value).toBe(false);
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"list_workspace_entries"'),
+    );
+  });
+
+  it("switchGitBranch pushes an error notification on failure", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const pendingSwitch = client.switchGitBranch("feature");
+    const switchCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"switch_git_branch"'),
+    );
+    expect(switchCommandCall).toBeDefined();
+    const switchCommand = JSON.parse(switchCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: switchCommand.payload.id,
+        type: "response",
+        command: "switch_git_branch",
+        success: false,
+        error:
+          "error: Your local changes to the following files would be overwritten by checkout:\nfile-a.ts\nAborting",
+      },
+    });
+
+    await pendingSwitch;
+    expect(client.notifications.value.at(-1)).toMatchObject({
+      notifyType: "error",
+      message:
+        "error: Your local changes to the following files would be overwritten by checkout:",
+    });
+  });
+
+  it("createGitBranch sends the command and updates local state", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-1",
+          sessionFile: "/tmp/session-1.jsonl",
+          sessionName: "Session 1",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    const pendingCreate = client.createGitBranch("feature/new-ui");
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"create_git_branch"'),
+    );
+
+    const createCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"create_git_branch"'),
+    );
+    expect(createCommandCall).toBeDefined();
+    const createCommand = JSON.parse(createCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: createCommand.payload.id,
+        type: "response",
+        command: "create_git_branch",
+        success: true,
+        data: {
+          repoRoot: "/tmp/repo",
+          headLabel: "feature/new-ui",
+          currentBranch: "feature/new-ui",
+          detached: false,
+          isDirty: false,
+          branches: [
+            {
+              name: "main",
+              shortName: "main",
+              kind: "local",
+              isCurrent: false,
+            },
+            {
+              name: "feature/new-ui",
+              shortName: "feature/new-ui",
+              kind: "local",
+              isCurrent: true,
+            },
+          ],
+        },
+      },
+    });
+
+    await pendingCreate;
+    expect(client.sessionState.value?.gitBranch).toBe("feature/new-ui");
+    expect(client.gitRepoState.value?.currentBranch).toBe("feature/new-ui");
     expect(client.gitBranchSwitching.value).toBe(false);
     expect(ws.send).toHaveBeenCalledWith(
       expect.stringContaining('"type":"list_workspace_entries"'),

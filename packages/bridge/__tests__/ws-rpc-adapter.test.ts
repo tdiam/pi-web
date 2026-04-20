@@ -802,6 +802,71 @@ describe("WsRpcAdapter", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    it("should create and switch to a new git branch", async () => {
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-git-create-"),
+      );
+      fs.writeFileSync(path.join(tmpDir, "README.md"), "hello\n");
+      runGit(tmpDir, ["init"]);
+      runGit(tmpDir, ["config", "user.name", "Pi Web"]);
+      runGit(tmpDir, ["config", "user.email", "pi-web@example.com"]);
+      runGit(tmpDir, ["add", "README.md"]);
+      runGit(tmpDir, ["commit", "-m", "init"]);
+      runGit(tmpDir, ["branch", "-M", "main"]);
+
+      (
+        context.ctx.sessionManager.getCwd as ReturnType<typeof vi.fn>
+      ).mockReturnValue(tmpDir);
+      context.ctx.cwd = tmpDir;
+
+      const command: RpcCommand = {
+        id: "cmd-git-create",
+        type: "create_git_branch",
+        branchName: "feature/new-ui",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      const response = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "create_git_branch" &&
+          call.payload.success,
+      );
+
+      expect(response?.payload.data.headLabel).toBe("feature/new-ui");
+      expect(response?.payload.data.currentBranch).toBe("feature/new-ui");
+      expect(response?.payload.data.branches).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "main", isCurrent: false }),
+          expect.objectContaining({
+            name: "feature/new-ui",
+            shortName: "feature/new-ui",
+            kind: "local",
+            isCurrent: true,
+          }),
+        ]),
+      );
+
+      const currentBranch = spawnSync("git", ["branch", "--show-current"], {
+        cwd: tmpDir,
+        encoding: "utf8",
+        windowsHide: true,
+      }).stdout.trim();
+      expect(currentBranch).toBe("feature/new-ui");
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
     it("should handle get_messages command", async () => {
       const command: RpcCommand = { id: "cmd-1", type: "get_messages" };
       (

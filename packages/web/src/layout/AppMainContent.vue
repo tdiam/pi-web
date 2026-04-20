@@ -45,9 +45,9 @@ defineProps<{
   gitRepoState: RpcGitRepoState | null;
   gitRepoLoading: boolean;
   gitBranchSwitching: boolean;
-  gitRepoError: string | null;
   refreshGitRepoState: (force?: boolean) => Promise<RpcGitRepoState | null>;
   switchGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
+  createGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
   prefillText: string | null;
   pendingRevision: {
     entryId: string;
@@ -129,12 +129,12 @@ defineExpose({ preserveTranscriptScroll, scrollToTranscriptEntry });
       :git-repo-state="gitRepoState"
       :git-repo-loading="gitRepoLoading"
       :git-branch-switching="gitBranchSwitching"
-      :git-repo-error="gitRepoError"
       :git-actions-disabled="
         connectionStatus !== 'connected' || isStreaming || isCompacting
       "
       :refresh-git-repo-state="refreshGitRepoState"
       :switch-git-branch="switchGitBranch"
+      :create-git-branch="createGitBranch"
     />
     <ComposerBar
       :connection-status="connectionStatus"

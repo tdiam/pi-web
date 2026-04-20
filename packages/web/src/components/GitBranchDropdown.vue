@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import {
-  AlertCircle,
   Check,
   ChevronDown,
   GitBranch,
   LoaderCircle,
+  Plus,
   RefreshCw,
 } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
@@ -15,10 +15,10 @@ const props = defineProps<{
   repoState: RpcGitRepoState | null;
   loading: boolean;
   switching: boolean;
-  error: string | null;
   disabled?: boolean;
   refresh: (force?: boolean) => Promise<RpcGitRepoState | null>;
   switchBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
+  createBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
 }>();
 
 const rootRef = ref<HTMLElement | null>(null);
@@ -35,9 +35,10 @@ const displayLabel = computed(() => {
   return branch ? branch : null;
 });
 const isBusy = computed(() => props.loading || props.switching);
+const normalizedQuery = computed(() => searchText.value.trim());
 const filteredBranches = computed(() => {
   if (!props.repoState) return [];
-  const query = searchText.value.trim().toLowerCase();
+  const query = normalizedQuery.value.toLowerCase();
   if (!query) return props.repoState.branches;
   return props.repoState.branches.filter(branch => {
     const haystack = [branch.name, branch.shortName, branch.remoteName]
@@ -47,6 +48,19 @@ const filteredBranches = computed(() => {
     return haystack.includes(query);
   });
 });
+const exactBranchMatch = computed(() => {
+  const query = normalizedQuery.value;
+  if (!query || !props.repoState) return null;
+  return props.repoState.branches.find(branch => branch.name === query) ?? null;
+});
+const canCreateBranch = computed(() => {
+  const query = normalizedQuery.value;
+  return Boolean(query) && !exactBranchMatch.value;
+});
+const createButtonLabel = computed(() => {
+  if (!normalizedQuery.value) return "Create branch";
+  return `Create ${normalizedQuery.value}`;
+});
 const triggerTitle = computed(() => {
   if (!displayLabel.value) return "Git branch";
   if (props.repoState?.isDirty) {
@@ -54,13 +68,23 @@ const triggerTitle = computed(() => {
   }
   return displayLabel.value;
 });
-const showSearch = computed(
-  () => filteredBranches.value.length > 8 || searchText.value.length > 0,
+const showSearch = computed(() =>
+  props.repoState?.branches.length
+    ? props.repoState.branches.length > 8 || searchText.value.length > 0
+    : searchText.value.length > 0,
 );
 
 function syncHighlightedIndex() {
   if (filteredBranches.value.length === 0) {
     highlightedIndex.value = 0;
+    return;
+  }
+
+  const exactMatchIndex = filteredBranches.value.findIndex(
+    branch => branch.name === normalizedQuery.value,
+  );
+  if (exactMatchIndex >= 0) {
+    highlightedIndex.value = exactMatchIndex;
     return;
   }
 
@@ -91,7 +115,7 @@ async function openDropdown() {
   searchText.value = "";
   syncHighlightedIndex();
   await nextTick();
-  if (showSearch.value && (props.repoState || props.loading)) {
+  if (props.repoState || props.loading) {
     searchInputRef.value?.focus();
   } else {
     listRef.value?.focus();
@@ -140,6 +164,15 @@ async function selectBranch(branch: RpcGitBranch) {
   }
 
   const nextState = await props.switchBranch(branch.name);
+  if (nextState) {
+    closeDropdown({ focusTrigger: true });
+  }
+}
+
+async function handleCreateBranch() {
+  if (!canCreateBranch.value || props.switching) return;
+
+  const nextState = await props.createBranch(normalizedQuery.value);
   if (nextState) {
     closeDropdown({ focusTrigger: true });
   }
@@ -195,8 +228,11 @@ function handleSearchKeydown(event: KeyboardEvent) {
       }
       break;
     case "Enter": {
-      if (filteredBranches.value.length === 0) return;
       event.preventDefault();
+      if (canCreateBranch.value) {
+        void handleCreateBranch();
+        return;
+      }
       const branch = filteredBranches.value[highlightedIndex.value];
       if (branch) {
         void selectBranch(branch);
@@ -244,11 +280,7 @@ watch(
     syncHighlightedIndex();
     await nextTick();
     if (repoState && !props.loading) {
-      if (showSearch.value) {
-        searchInputRef.value?.focus();
-      } else {
-        listRef.value?.focus();
-      }
+      searchInputRef.value?.focus();
     }
     scrollToHighlighted();
   },
@@ -292,7 +324,7 @@ onBeforeUnmount(() => {
     <div v-if="isOpen" class="git-menu">
       <div class="git-menu-header">
         <div class="git-menu-copy">
-          <span class="git-menu-title">Switch branch</span>
+          <span class="git-menu-title">Switch or create branch</span>
           <span v-if="repoState" class="git-menu-meta">{{
             repoState.repoRoot
           }}</span>
@@ -318,21 +350,30 @@ onBeforeUnmount(() => {
       <div v-else-if="repoState?.isDirty" class="git-note git-note-warning">
         Working tree has local changes. Git may refuse some switches.
       </div>
-      <div v-if="error" class="git-error" role="alert">
-        <AlertCircle class="git-error-icon" aria-hidden="true" />
-        <span>{{ error }}</span>
-      </div>
-
-      <label v-if="showSearch" class="git-search">
+      <label class="git-search">
         <input
           ref="searchInputRef"
           v-model="searchText"
           class="git-search-input"
           type="text"
-          placeholder="Filter branches"
+          placeholder="Find or create branch"
           @keydown="handleSearchKeydown"
         />
       </label>
+
+      <button
+        v-if="repoState && canCreateBranch"
+        class="git-create"
+        :type="'button'"
+        :disabled="switching"
+        @click="handleCreateBranch"
+      >
+        <Plus class="git-create-icon" aria-hidden="true" />
+        <span class="git-create-label">{{ createButtonLabel }}</span>
+      </button>
+      <div v-else-if="repoState && exactBranchMatch" class="git-match-note">
+        Branch already exists. Press Enter to switch.
+      </div>
 
       <div v-if="loading && !repoState" class="git-empty">
         Loading branches...
@@ -527,8 +568,8 @@ onBeforeUnmount(() => {
 }
 
 .git-refresh-icon,
-.git-error-icon,
-.git-option-check {
+.git-option-check,
+.git-create-icon {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
@@ -556,8 +597,9 @@ onBeforeUnmount(() => {
   border-color: var(--border-strong);
 }
 
+.git-create,
+.git-match-note,
 .git-note,
-.git-error,
 .git-empty {
   display: flex;
   align-items: flex-start;
@@ -569,6 +611,33 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 
+.git-create {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 84%, transparent);
+  background: color-mix(in srgb, var(--panel-2) 82%, var(--button-bg));
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.git-create:hover:not(:disabled),
+.git-create:focus-visible {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.git-create:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.git-create-label {
+  font-family: var(--pi-font-mono);
+  font-size: 0.68rem;
+}
+
+.git-match-note,
 .git-note {
   background: color-mix(in srgb, var(--panel-2) 86%, transparent);
   color: var(--text-muted);
@@ -577,11 +646,6 @@ onBeforeUnmount(() => {
 .git-note-warning {
   background: color-mix(in srgb, #f59e0b 12%, var(--panel-2));
   color: var(--text);
-}
-
-.git-error {
-  background: var(--error-bg);
-  color: var(--error-text);
 }
 
 .git-empty {

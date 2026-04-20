@@ -9,10 +9,10 @@ const props = defineProps<{
   gitRepoState: RpcGitRepoState | null;
   gitRepoLoading: boolean;
   gitBranchSwitching: boolean;
-  gitRepoError: string | null;
   gitActionsDisabled?: boolean;
   refreshGitRepoState: (force?: boolean) => Promise<RpcGitRepoState | null>;
   switchGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
+  createGitBranch: (branchName: string) => Promise<RpcGitRepoState | null>;
 }>();
 
 const contextPercent = computed(() => {
@@ -94,10 +94,10 @@ const barColor = computed(() => {
           :repo-state="gitRepoState"
           :loading="gitRepoLoading"
           :switching="gitBranchSwitching"
-          :error="gitRepoError"
           :disabled="gitActionsDisabled"
           :refresh="refreshGitRepoState"
           :switch-branch="switchGitBranch"
+          :create-branch="createGitBranch"
         />
       </div>
       <div v-if="hasStatsContent" class="stats-trailing">
