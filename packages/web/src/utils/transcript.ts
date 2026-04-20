@@ -110,6 +110,15 @@ export interface PendingTranscriptSessionEvent {
     id: string;
   };
   thinkingLevel?: string;
+  insertAfterMessageKey?: string | null;
+}
+
+export interface TranscriptConfigState {
+  model?: {
+    provider?: string;
+    id: string;
+  };
+  thinkingLevel?: string;
 }
 
 export type TranscriptDisplayItem =
@@ -270,6 +279,28 @@ export function normalizeTranscript(
   return normalized;
 }
 
+export function transcriptConfigState(
+  messages: readonly TranscriptEntryLike[],
+): TranscriptConfigState {
+  const state: TranscriptConfigState = {};
+
+  for (const message of messages) {
+    const block = configSystemBlock(message);
+    if (!block) continue;
+
+    if (block.type === "model_change") {
+      state.model = {
+        provider: normalizeOptionalText(block.provider),
+        id: normalizeText(block.modelId, "Unknown model"),
+      };
+    } else {
+      state.thinkingLevel = normalizeText(block.thinkingLevel, "Unknown");
+    }
+  }
+
+  return state;
+}
+
 export function buildTranscriptDisplayItems(
   messages: readonly TranscriptEntryLike[],
   options?: {
@@ -278,13 +309,6 @@ export function buildTranscriptDisplayItems(
 ): TranscriptDisplayItem[] {
   const items: TranscriptDisplayItem[] = [];
   let hasSeenNonConfigMessage = false;
-  let lastModel:
-    | {
-        provider?: string;
-        id: string;
-      }
-    | undefined;
-  let lastThinkingLevel: string | undefined;
   let index = 0;
 
   while (index < messages.length) {
@@ -331,13 +355,6 @@ export function buildTranscriptDisplayItems(
       ? normalizeText(thinking.thinkingLevel, "Unknown")
       : undefined;
 
-    if (normalizedModel) {
-      lastModel = normalizedModel;
-    }
-    if (normalizedThinkingLevel) {
-      lastThinkingLevel = normalizedThinkingLevel;
-    }
-
     items.push({
       kind: "session_event",
       key: sessionEventKey(messages, startIndex, index - 1),
@@ -352,40 +369,121 @@ export function buildTranscriptDisplayItems(
     });
   }
 
-  const pendingEvent = options?.pendingSessionEvent;
-  if (pendingEvent && hasSeenNonConfigMessage) {
-    const pendingModel = pendingEvent.model
-      ? normalizePendingSessionEventModel(pendingEvent.model)
-      : undefined;
-    const pendingThinkingLevel = normalizeOptionalText(
-      pendingEvent.thinkingLevel,
-    );
-    const nextModel =
-      pendingModel && !sameTranscriptModel(lastModel, pendingModel)
-        ? pendingModel
-        : undefined;
-    const nextThinkingLevel =
-      pendingThinkingLevel && pendingThinkingLevel !== lastThinkingLevel
-        ? pendingThinkingLevel
-        : undefined;
+  return insertPendingSessionEvent(items, options?.pendingSessionEvent);
+}
 
-    if (nextModel || nextThinkingLevel) {
-      items.push({
-        kind: "session_event",
-        key: pendingEvent.key,
-        label: sessionEventLabel(
-          true,
-          Boolean(nextModel),
-          Boolean(nextThinkingLevel),
-        ),
-        model: nextModel,
-        thinkingLevel: nextThinkingLevel,
-        sourceMessageIds: [],
-      });
+interface TranscriptDisplayState extends TranscriptConfigState {
+  hasSeenNonConfigMessage: boolean;
+}
+
+function insertPendingSessionEvent(
+  items: TranscriptDisplayItem[],
+  pendingEvent: PendingTranscriptSessionEvent | null | undefined,
+): TranscriptDisplayItem[] {
+  if (!pendingEvent || items.length === 0) return items;
+
+  const insertIndex = pendingSessionEventInsertIndex(items, pendingEvent);
+  const insertionState = displayStateBeforeIndex(items, insertIndex);
+  const finalState = displayStateBeforeIndex(items, items.length);
+  const pendingModel = pendingEvent.model
+    ? normalizePendingSessionEventModel(pendingEvent.model)
+    : undefined;
+  const pendingThinkingLevel = normalizeOptionalText(
+    pendingEvent.thinkingLevel,
+  );
+  const nextModel =
+    pendingModel &&
+    !sameTranscriptModel(insertionState.model, pendingModel) &&
+    !sameTranscriptModel(finalState.model, pendingModel)
+      ? pendingModel
+      : undefined;
+  const nextThinkingLevel =
+    pendingThinkingLevel &&
+    pendingThinkingLevel !== insertionState.thinkingLevel &&
+    pendingThinkingLevel !== finalState.thinkingLevel
+      ? pendingThinkingLevel
+      : undefined;
+
+  if (!nextModel && !nextThinkingLevel) return items;
+
+  const item: TranscriptSessionEventDisplayItem = {
+    kind: "session_event",
+    key: pendingEvent.key,
+    label: sessionEventLabel(
+      insertionState.hasSeenNonConfigMessage,
+      Boolean(nextModel),
+      Boolean(nextThinkingLevel),
+    ),
+    model: nextModel,
+    thinkingLevel: nextThinkingLevel,
+    sourceMessageIds: [],
+  };
+
+  return [...items.slice(0, insertIndex), item, ...items.slice(insertIndex)];
+}
+
+function pendingSessionEventInsertIndex(
+  items: readonly TranscriptDisplayItem[],
+  pendingEvent: PendingTranscriptSessionEvent,
+): number {
+  const anchorKey = pendingEvent.insertAfterMessageKey;
+
+  if (anchorKey === null) {
+    return leadingSessionEventCount(items);
+  }
+  if (typeof anchorKey !== "string" || !anchorKey.trim()) {
+    return items.length;
+  }
+
+  const anchoredIndex = items.findIndex(item =>
+    displayItemContainsMessageKey(item, anchorKey),
+  );
+  return anchoredIndex >= 0 ? anchoredIndex + 1 : items.length;
+}
+
+function leadingSessionEventCount(
+  items: readonly TranscriptDisplayItem[],
+): number {
+  let index = 0;
+  while (items[index]?.kind === "session_event") {
+    index += 1;
+  }
+  return index;
+}
+
+function displayItemContainsMessageKey(
+  item: TranscriptDisplayItem,
+  messageKey: string,
+): boolean {
+  if (item.kind === "session_event") {
+    return item.sourceMessageIds.includes(messageKey);
+  }
+  return transcriptMessageKey(item.message, item.messageIndex) === messageKey;
+}
+
+function displayStateBeforeIndex(
+  items: readonly TranscriptDisplayItem[],
+  index: number,
+): TranscriptDisplayState {
+  const state: TranscriptDisplayState = { hasSeenNonConfigMessage: false };
+
+  for (let itemIndex = 0; itemIndex < index; itemIndex++) {
+    const item = items[itemIndex];
+    if (!item) continue;
+
+    if (item.kind === "message") {
+      state.hasSeenNonConfigMessage = true;
+      continue;
+    }
+    if (item.model) {
+      state.model = item.model;
+    }
+    if (item.thinkingLevel) {
+      state.thinkingLevel = item.thinkingLevel;
     }
   }
 
-  return items;
+  return state;
 }
 
 function appendToolResultToPreviousAssistant(

@@ -586,6 +586,140 @@ describe("extension_ui_request handling", () => {
     ).toBe(initialGetStateCount);
   });
 
+  it("anchors pending thinking-level changes to their transcript position", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const pendingStartSet = client.setThinkingLevel("high");
+    const startSetCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"set_thinking_level"'),
+    );
+    expect(startSetCommandCall).toBeDefined();
+    const startSetCommand = JSON.parse(startSetCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: startSetCommand.payload.id,
+        type: "response",
+        command: "set_thinking_level",
+        success: true,
+      },
+    });
+
+    await pendingStartSet;
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBeNull();
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+      },
+    });
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        message: {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+      },
+    });
+
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBeNull();
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        message: {
+          id: "s1",
+          role: "system",
+          content: [
+            {
+              type: "thinking_level_change",
+              thinkingLevel: "high",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(client.pendingTranscriptConfigEvent.value).toBeNull();
+  });
+
+  it("keeps a pending thinking-level anchor fixed as new messages arrive", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+      },
+    });
+
+    const pendingSet = client.setThinkingLevel("high");
+    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"set_thinking_level"'),
+    );
+    expect(setCommandCall).toBeDefined();
+    const setCommand = JSON.parse(setCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: setCommand.payload.id,
+        type: "response",
+        command: "set_thinking_level",
+        success: true,
+      },
+    });
+
+    await pendingSet;
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBe("u1");
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        message: {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+      },
+    });
+
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBe("u1");
+  });
+
   it("setAutoCompactionEnabled sends the command and updates local state", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

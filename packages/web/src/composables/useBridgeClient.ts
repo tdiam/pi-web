@@ -28,6 +28,7 @@ import {
 } from "../utils/models";
 import {
   normalizeTranscript,
+  transcriptConfigState,
   type PendingTranscriptSessionEvent,
 } from "../utils/transcript";
 
@@ -224,27 +225,57 @@ function clearPendingTranscriptConfigEvent() {
   pendingTranscriptConfigEvent.value = null;
 }
 
+function pendingTranscriptAnchorKey(): string | null {
+  const message = transcript.value.at(-1);
+  return message?.transcriptKey ?? message?.id ?? null;
+}
+
+function samePendingTranscriptModel(
+  left: PendingTranscriptSessionEvent["model"] | undefined,
+  right: PendingTranscriptSessionEvent["model"] | undefined,
+): boolean {
+  if (!left || !right) return false;
+  return left.id === right.id && left.provider === right.provider;
+}
+
+function reconcilePendingTranscriptConfigEvent() {
+  const pending = pendingTranscriptConfigEvent.value;
+  if (!pending || pending.sessionPath !== transcriptSessionPath.value) return;
+
+  const configState = transcriptConfigState(rawTranscript.value);
+  const next = { ...pending };
+  if (samePendingTranscriptModel(next.model, configState.model)) {
+    next.model = undefined;
+  }
+  if (next.thinkingLevel && next.thinkingLevel === configState.thinkingLevel) {
+    next.thinkingLevel = undefined;
+  }
+
+  pendingTranscriptConfigEvent.value =
+    next.model || next.thinkingLevel ? next : null;
+}
+
 function updatePendingTranscriptConfigEvent(change: {
   model?: RpcModelInfo | null;
   thinkingLevel?: RpcThinkingLevel | null;
 }) {
+  reconcilePendingTranscriptConfigEvent();
+
   const sessionPath = transcriptSessionPath.value;
   const existing = pendingTranscriptConfigEvent.value;
-  const nextKey =
-    existing && existing.sessionPath === sessionPath
-      ? existing.key
-      : `pending-session-event:${++pendingTranscriptConfigEventCounter}`;
+  const existingForSession =
+    existing && existing.sessionPath === sessionPath ? existing : null;
+  const nextKey = existingForSession
+    ? existingForSession.key
+    : `pending-session-event:${++pendingTranscriptConfigEventCounter}`;
   const next: PendingTranscriptSessionEvent & { sessionPath: string | null } = {
     key: nextKey,
     sessionPath,
-    model:
-      existing && existing.sessionPath === sessionPath
-        ? existing.model
-        : undefined,
-    thinkingLevel:
-      existing && existing.sessionPath === sessionPath
-        ? existing.thinkingLevel
-        : undefined,
+    model: existingForSession?.model,
+    thinkingLevel: existingForSession?.thinkingLevel,
+    insertAfterMessageKey: existingForSession
+      ? existingForSession.insertAfterMessageKey
+      : pendingTranscriptAnchorKey(),
   };
 
   if ("model" in change) {
@@ -272,6 +303,7 @@ const visiblePendingTranscriptConfigEvent =
           key: pending.key,
           model: pending.model,
           thinkingLevel: pending.thinkingLevel,
+          insertAfterMessageKey: pending.insertAfterMessageKey,
         }
       : null;
   });
@@ -344,6 +376,7 @@ function replaceTranscript(
     clearPendingTranscriptConfigEvent();
   }
   transcriptSessionPath.value = sessionPath;
+  reconcilePendingTranscriptConfigEvent();
 }
 
 function applyTranscriptPage(
@@ -376,6 +409,7 @@ function applyTranscriptPage(
   transcriptNewestCursor.value = page.newestCursor ?? null;
   transcriptInitialLoading.value = false;
   transcriptPageLoading.value = false;
+  reconcilePendingTranscriptConfigEvent();
 }
 
 function shouldReplaceSessionTranscript(sessionPath: string | null): boolean {
@@ -500,10 +534,12 @@ function upsertTranscriptMessage(
     const updated = [...rawTranscript.value];
     updated[index] = { ...updated[index], ...normalized };
     rawTranscript.value = updated;
+    reconcilePendingTranscriptConfigEvent();
     return;
   }
 
   rawTranscript.value = [...rawTranscript.value, normalized];
+  reconcilePendingTranscriptConfigEvent();
 }
 
 function appendCompactErrorMessage(message: string) {

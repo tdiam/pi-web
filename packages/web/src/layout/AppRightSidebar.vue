@@ -19,7 +19,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <aside class="right-rail" :class="{ open: sidebarOpen, collapsed: !sidebarOpen }">
+  <aside
+    class="right-rail"
+    :class="{ open: sidebarOpen, collapsed: !sidebarOpen }"
+  >
     <div v-if="sidebarOpen" class="rail-panel">
       <SessionTreeRail
         :entries="treeEntries"

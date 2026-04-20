@@ -453,6 +453,110 @@ describe("normalizeTranscript", () => {
     ]);
   });
 
+  it("anchors a pending session-start config event before later messages", () => {
+    const items = buildTranscriptDisplayItems(
+      [
+        {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+      ],
+      {
+        pendingSessionEvent: {
+          key: "pending:1",
+          thinkingLevel: "high",
+          insertAfterMessageKey: null,
+        },
+      },
+    );
+
+    expect(items).toEqual([
+      {
+        kind: "session_event",
+        key: "pending:1",
+        label: "Session configured",
+        thinkingLevel: "high",
+        sourceMessageIds: [],
+      },
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 0,
+      },
+      {
+        kind: "message",
+        message: {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+        messageIndex: 1,
+      },
+    ]);
+  });
+
+  it("anchors a pending mid-session config event after the captured message", () => {
+    const items = buildTranscriptDisplayItems(
+      [
+        {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+      ],
+      {
+        pendingSessionEvent: {
+          key: "pending:1",
+          thinkingLevel: "high",
+          insertAfterMessageKey: "u1",
+        },
+      },
+    );
+
+    expect(items).toEqual([
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "Inspect terminal-log-view.ts",
+        },
+        messageIndex: 0,
+      },
+      {
+        kind: "session_event",
+        key: "pending:1",
+        label: "Thinking changed",
+        thinkingLevel: "high",
+        sourceMessageIds: [],
+      },
+      {
+        kind: "message",
+        message: {
+          id: "a1",
+          role: "assistant",
+          content: "I will inspect it.",
+        },
+        messageIndex: 1,
+      },
+    ]);
+  });
+
   it("does not duplicate a pending config event once the transcript reflects it", () => {
     const items = buildTranscriptDisplayItems(
       [
@@ -476,6 +580,7 @@ describe("normalizeTranscript", () => {
         pendingSessionEvent: {
           key: "pending:1",
           thinkingLevel: "high",
+          insertAfterMessageKey: "u1",
         },
       },
     );

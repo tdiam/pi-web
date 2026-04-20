@@ -37,7 +37,9 @@ const selectedLabel = computed(
       ?.label ?? "Off",
 );
 const selectedIndex = computed(() =>
-  THINKING_LEVEL_OPTIONS.findIndex(option => option.value === selectedLevel.value),
+  THINKING_LEVEL_OPTIONS.findIndex(
+    option => option.value === selectedLevel.value,
+  ),
 );
 
 function syncHighlightedIndex() {
@@ -124,7 +126,9 @@ function handleListKeydown(event: KeyboardEvent) {
   switch (event.key) {
     case "ArrowDown":
       event.preventDefault();
-      updateHighlight((highlightedIndex.value + 1) % THINKING_LEVEL_OPTIONS.length);
+      updateHighlight(
+        (highlightedIndex.value + 1) % THINKING_LEVEL_OPTIONS.length,
+      );
       break;
     case "ArrowUp":
       event.preventDefault();
