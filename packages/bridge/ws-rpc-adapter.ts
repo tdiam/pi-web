@@ -1718,7 +1718,9 @@ class SessionRuntime {
     }
 
     if (this.binding.kind === "detached_pending") {
-      return flattenMessagesForTranscript(this.binding.sessionManager.getBranch());
+      return flattenMessagesForTranscript(
+        this.binding.sessionManager.getBranch(),
+      );
     }
 
     return flattenMessagesForTranscript(
@@ -1742,7 +1744,10 @@ class SessionRuntime {
     if (this.binding.kind === "detached_active") {
       const session = this.binding.session;
       return {
-        model: session.model ?? findLatestModelInfo(session.sessionManager.getBranch()) ?? undefined,
+        model:
+          session.model ??
+          findLatestModelInfo(session.sessionManager.getBranch()) ??
+          undefined,
         thinkingLevel: session.thinkingLevel,
         isStreaming: session.isStreaming,
         isCompacting: session.isCompacting,
@@ -1817,7 +1822,11 @@ class SessionRuntime {
       sessionManager,
     };
 
-    return this.buildSessionSummary(sessionManager, sessionFile, transcriptLimit);
+    return this.buildSessionSummary(
+      sessionManager,
+      sessionFile,
+      transcriptLimit,
+    );
   }
 
   switchToStoredSession(
@@ -1855,7 +1864,11 @@ class SessionRuntime {
       sessionManager,
     };
 
-    return this.buildSessionSummary(sessionManager, sessionPath, transcriptLimit);
+    return this.buildSessionSummary(
+      sessionManager,
+      sessionPath,
+      transcriptLimit,
+    );
   }
 
   async ensureDetachedSession(_options?: {
@@ -2463,7 +2476,9 @@ export class WsRpcAdapter {
     this.setupWebSocket();
     this.subscribeToEvents();
     this.sendInitialTranscriptSnapshot();
-    this.sessionStatsPusher.queue(this.sessionRuntime.currentTranscriptSessionPath());
+    this.sessionStatsPusher.queue(
+      this.sessionRuntime.currentTranscriptSessionPath(),
+    );
   }
 
   /* ------------------------------------------------------------------------
@@ -2505,13 +2520,19 @@ export class WsRpcAdapter {
     this.context.pi.on("agent_end", (event: PiAgentEndEvent) => {
       if (!this.sessionRuntime.shouldHandleLiveSessionEvents()) return;
       this.sendEvent(toRpcAgentEndEvent(event));
-      this.sessionStatsPusher.queue(this.sessionRuntime.currentTranscriptSessionPath());
+      this.sessionStatsPusher.queue(
+        this.sessionRuntime.currentTranscriptSessionPath(),
+      );
     });
 
     this.context.pi.on("session_compact", () => {
       if (!this.sessionRuntime.shouldHandleLiveSessionEvents()) return;
-      this.sendTranscriptSnapshot(this.sessionRuntime.buildCurrentTranscriptPage());
-      this.sessionStatsPusher.queue(this.sessionRuntime.currentTranscriptSessionPath());
+      this.sendTranscriptSnapshot(
+        this.sessionRuntime.buildCurrentTranscriptPage(),
+      );
+      this.sessionStatsPusher.queue(
+        this.sessionRuntime.currentTranscriptSessionPath(),
+      );
     });
 
     this.context.pi.on("message_start", (event: object) => {
@@ -2544,7 +2565,9 @@ export class WsRpcAdapter {
     this.context.pi.on("model_select", event => {
       if (!this.sessionRuntime.shouldHandleLiveSessionEvents()) return;
       this.sendEvent(toRpcModelSelectEvent(event));
-      this.sessionStatsPusher.queue(this.sessionRuntime.currentTranscriptSessionPath());
+      this.sessionStatsPusher.queue(
+        this.sessionRuntime.currentTranscriptSessionPath(),
+      );
     });
   }
 
@@ -2564,7 +2587,9 @@ export class WsRpcAdapter {
   }
 
   private sendInitialTranscriptSnapshot(): void {
-    this.sendTranscriptSnapshot(this.sessionRuntime.buildCurrentTranscriptPage());
+    this.sendTranscriptSnapshot(
+      this.sessionRuntime.buildCurrentTranscriptPage(),
+    );
   }
 
   private handleTranscriptLifecycleEvent(
@@ -2595,7 +2620,9 @@ export class WsRpcAdapter {
     const eventType: string = event.type;
 
     if (eventType === "session_compact") {
-      this.sendTranscriptSnapshot(this.sessionRuntime.buildCurrentTranscriptPage());
+      this.sendTranscriptSnapshot(
+        this.sessionRuntime.buildCurrentTranscriptPage(),
+      );
       this.sessionStatsPusher.queue(sessionPath);
       return;
     }
@@ -2637,7 +2664,9 @@ export class WsRpcAdapter {
         this.sendEvent(toRpcCompactionStartEvent(event));
         return;
       case "compaction_end":
-        this.sendTranscriptSnapshot(this.sessionRuntime.buildCurrentTranscriptPage());
+        this.sendTranscriptSnapshot(
+          this.sessionRuntime.buildCurrentTranscriptPage(),
+        );
         this.sendEvent(toRpcCompactionEndEvent(event));
         this.sessionStatsPusher.queue(sessionPath);
         return;
@@ -2701,9 +2730,11 @@ export class WsRpcAdapter {
     targetPath?: string | null,
   ): Promise<RpcSessionStats> {
     const { ctx } = this.context;
-    const selectedSessionPath = this.sessionRuntime.currentDetachedSessionPath();
+    const selectedSessionPath =
+      this.sessionRuntime.currentDetachedSessionPath();
     const detachedSession = this.sessionRuntime.getDetachedSession();
-    const pendingSessionManager = this.sessionRuntime.getPendingSessionManager();
+    const pendingSessionManager =
+      this.sessionRuntime.getPendingSessionManager();
     const liveSessionPath = ctx.sessionManager.getSessionFile();
     const resolvedTargetPath =
       targetPath === undefined
@@ -2905,7 +2936,9 @@ export class WsRpcAdapter {
           command.type === "new_session" ||
           command.type === "select_tree_entry")
       ) {
-        this.sessionStatsPusher.queue(this.sessionRuntime.currentTranscriptSessionPath());
+        this.sessionStatsPusher.queue(
+          this.sessionRuntime.currentTranscriptSessionPath(),
+        );
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -3334,7 +3367,9 @@ export class WsRpcAdapter {
        * ================================================================== */
 
       case "new_session": {
-        const created = this.sessionRuntime.createDetachedSession(command.limit);
+        const created = this.sessionRuntime.createDetachedSession(
+          command.limit,
+        );
         this.transcriptProjector.syncPage(created.transcript);
         return {
           id: correlationId,
@@ -3446,7 +3481,8 @@ export class WsRpcAdapter {
           };
         }
 
-        const selected = this.sessionRuntime.switchToStoredSession(newSessionPath);
+        const selected =
+          this.sessionRuntime.switchToStoredSession(newSessionPath);
         const forkedSm = selected.sessionManager;
         const entry = forkedSm.getEntry(command.entryId);
         const text =

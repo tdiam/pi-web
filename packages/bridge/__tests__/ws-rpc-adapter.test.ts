@@ -2884,7 +2884,10 @@ describe("WsRpcAdapter", () => {
         throw new Error("expected persisted session files");
       }
 
-      const persistSession = (sessionManager: SessionManager, sessionFile: string) => {
+      const persistSession = (
+        sessionManager: SessionManager,
+        sessionFile: string,
+      ) => {
         const header = {
           type: "session",
           version: 3,
@@ -2979,7 +2982,9 @@ describe("WsRpcAdapter", () => {
     });
 
     it("resets transcript key allocation after switching transcript baselines", async () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-transcript-"));
+      const tmpDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-transcript-"),
+      );
       const sessionManager = SessionManager.create(tmpDir, tmpDir);
       sessionManager.appendMessage({
         role: "user",
@@ -3071,7 +3076,8 @@ describe("WsRpcAdapter", () => {
         call => JSON.parse(call[0] as string),
       );
       const transcriptUpserts = sendCalls.filter(
-        call => call.type === "event" && call.payload.type === "transcript_upsert",
+        call =>
+          call.type === "event" && call.payload.type === "transcript_upsert",
       );
       const liveUpsert = transcriptUpserts.find(
         call => call.payload.message.content === "Live before switch",
@@ -3132,12 +3138,11 @@ describe("WsRpcAdapter", () => {
       expect(buildStatsSpy).toHaveBeenNthCalledWith(1, "session-a");
       expect(buildStatsSpy).toHaveBeenNthCalledWith(2, "session-c");
 
-      const statsEvents = (
-        ws.send as ReturnType<typeof vi.fn>
-      ).mock.calls
+      const statsEvents = (ws.send as ReturnType<typeof vi.fn>).mock.calls
         .map(call => JSON.parse(call[0] as string))
         .filter(
-          call => call.type === "event" && call.payload.type === "session_stats",
+          call =>
+            call.type === "event" && call.payload.type === "session_stats",
         );
       expect(statsEvents).toHaveLength(2);
       expect(statsEvents.map(call => call.payload.sessionPath)).toEqual([
