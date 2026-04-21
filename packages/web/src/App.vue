@@ -97,6 +97,7 @@ const activeSessionLabel = computed(() => {
   );
 });
 const sidebarOpen = ref(false);
+const leftSidebarCollapsed = ref(false);
 const outlineSidebarOpen = ref(false);
 const mainContentRef = ref<InstanceType<typeof AppMainContent> | null>(null);
 const pendingRevision = ref<{
@@ -191,6 +192,10 @@ function toggleSessionSidebar() {
   if (nextOpen && isCompactLayout()) {
     outlineSidebarOpen.value = false;
   }
+}
+
+function toggleLeftSidebarCollapse() {
+  leftSidebarCollapsed.value = !leftSidebarCollapsed.value;
 }
 
 function toggleDebugMode() {
@@ -428,12 +433,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :data-theme="theme">
+  <div
+    class="app-shell"
+    :class="{ 'left-rail-collapsed': leftSidebarCollapsed }"
+    :data-theme="theme"
+  >
     <AppSidebar
       :sessions="sessions"
       :active-session-path="activeSessionPath"
       :running-session-paths="runningSessionPaths"
       :sidebar-open="sidebarOpen"
+      :collapsed="leftSidebarCollapsed"
       @close-sidebar="sidebarOpen = false"
       @select-session="handleSessionSelect"
       @refresh-sessions="handleRefreshSessions"
@@ -447,7 +457,12 @@ onBeforeUnmount(() => {
         :show-debug-toggle="debugModeAvailable"
         :debug-mode="debugMode"
         :debug-mode-label="debugModeLabel"
+        :sidebar-collapsed="leftSidebarCollapsed"
+        :show-outline-toggle="hasSessionOutline"
+        :outline-sidebar-open="outlineSidebarOpen"
         @toggle-sidebar="toggleSessionSidebar"
+        @toggle-sidebar-collapse="toggleLeftSidebarCollapse"
+        @toggle-outline-sidebar="toggleOutlineSidebar"
         @toggle-theme="toggleTheme"
         @toggle-debug-mode="toggleDebugMode"
       />
@@ -508,12 +523,11 @@ onBeforeUnmount(() => {
         />
 
         <AppRightSidebar
-          v-if="hasSessionOutline"
+          v-if="hasSessionOutline && outlineSidebarOpen"
           :tree-entries="treeEntries"
           :sidebar-open="outlineSidebarOpen"
           :session-label="activeSessionLabel"
           :session-path="activeSessionPath"
-          @toggle-sidebar="toggleOutlineSidebar"
           @close-sidebar="outlineSidebarOpen = false"
           @select-tree-entry="handleTreeEntrySelect"
           @refresh-tree="handleRefreshTree"
@@ -582,6 +596,10 @@ onBeforeUnmount(() => {
   font-family: var(--pi-font-sans);
   color-scheme: dark;
   position: relative;
+}
+
+.app-shell.left-rail-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .app-main-column {

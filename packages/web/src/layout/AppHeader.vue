@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { Bug, Menu, Moon, Sun } from "lucide-vue-next";
+import {
+  Bug,
+  Menu,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Sun,
+} from "lucide-vue-next";
 
 defineProps<{
   theme: "dark" | "light";
@@ -7,10 +16,15 @@ defineProps<{
   showDebugToggle: boolean;
   debugMode: boolean;
   debugModeLabel: string;
+  sidebarCollapsed: boolean;
+  showOutlineToggle: boolean;
+  outlineSidebarOpen: boolean;
 }>();
 
 const emit = defineEmits<{
   toggleSidebar: [];
+  toggleSidebarCollapse: [];
+  toggleOutlineSidebar: [];
   toggleTheme: [];
   toggleDebugMode: [];
 }>();
@@ -26,11 +40,60 @@ const emit = defineEmits<{
       >
         <Menu class="hamburger-icon" aria-hidden="true" />
       </button>
+      <button
+        class="sidebar-collapse"
+        type="button"
+        :aria-label="
+          sidebarCollapsed
+            ? 'Expand sessions sidebar'
+            : 'Collapse sessions sidebar'
+        "
+        :title="
+          sidebarCollapsed
+            ? 'Expand sessions sidebar'
+            : 'Collapse sessions sidebar'
+        "
+        @click="emit('toggleSidebarCollapse')"
+      >
+        <PanelLeftOpen
+          v-if="sidebarCollapsed"
+          class="sidebar-collapse-icon"
+          aria-hidden="true"
+        />
+        <PanelLeftClose
+          v-else
+          class="sidebar-collapse-icon"
+          aria-hidden="true"
+        />
+      </button>
       <div class="header-brand">
         <h1 class="app-title">Pi</h1>
       </div>
     </div>
     <div class="header-status">
+      <button
+        v-if="showOutlineToggle"
+        class="outline-toggle"
+        type="button"
+        :aria-label="
+          outlineSidebarOpen ? 'Collapse session outline' : 'Expand session outline'
+        "
+        :title="
+          outlineSidebarOpen ? 'Collapse session outline' : 'Expand session outline'
+        "
+        @click="emit('toggleOutlineSidebar')"
+      >
+        <PanelRightClose
+          v-if="outlineSidebarOpen"
+          class="outline-toggle-icon"
+          aria-hidden="true"
+        />
+        <PanelRightOpen
+          v-else
+          class="outline-toggle-icon"
+          aria-hidden="true"
+        />
+      </button>
       <button
         v-if="showDebugToggle"
         class="debug-toggle"
@@ -117,6 +180,8 @@ const emit = defineEmits<{
   flex-shrink: 0;
 }
 
+.sidebar-collapse,
+.outline-toggle,
 .debug-toggle,
 .theme-toggle {
   display: inline-flex;
@@ -141,6 +206,8 @@ const emit = defineEmits<{
   padding-right: 12px;
 }
 
+.sidebar-collapse:hover,
+.outline-toggle:hover,
 .debug-toggle:hover,
 .theme-toggle:hover {
   background: var(--panel-2);
@@ -155,6 +222,8 @@ const emit = defineEmits<{
   background: var(--panel-2);
 }
 
+.sidebar-collapse,
+.outline-toggle,
 .theme-toggle {
   justify-content: center;
   width: 32px;
@@ -162,6 +231,8 @@ const emit = defineEmits<{
   padding: 0;
 }
 
+.sidebar-collapse-icon,
+.outline-toggle-icon,
 .debug-icon,
 .theme-icon {
   width: 16px;
@@ -171,6 +242,10 @@ const emit = defineEmits<{
 @media (max-width: 900px) {
   .hamburger {
     display: flex;
+  }
+
+  .sidebar-collapse {
+    display: none;
   }
 
   .app-header {
@@ -202,6 +277,7 @@ const emit = defineEmits<{
   }
 
   .hamburger,
+  .outline-toggle,
   .theme-toggle {
     width: 30px;
     height: 30px;

@@ -8,6 +8,7 @@ defineProps<{
   activeSessionPath: string | null;
   runningSessionPaths: readonly string[];
   sidebarOpen: boolean;
+  collapsed: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -19,8 +20,9 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <aside class="left-rail" :class="{ open: sidebarOpen }">
+  <aside class="left-rail" :class="{ open: sidebarOpen, collapsed }">
     <SessionRail
+      class="expanded-rail"
       :sessions="sessions"
       :active-session-path="activeSessionPath"
       :running-session-paths="runningSessionPaths"
@@ -60,6 +62,10 @@ const emit = defineEmits<{
   background: var(--rail-bg);
   border-right: 1px solid var(--border);
   overflow: hidden;
+}
+
+.left-rail.collapsed {
+  display: none;
 }
 
 .rail-button {
@@ -106,6 +112,10 @@ const emit = defineEmits<{
     transform: translateX(-100%);
     transition: transform 0.2s ease;
     z-index: 15;
+  }
+
+  .left-rail.collapsed {
+    display: flex;
   }
 
   .left-rail.open {
