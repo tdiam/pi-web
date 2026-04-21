@@ -4,7 +4,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   SessionManager,
-  createAgentSession,
   type AgentEndEvent as PiAgentEndEvent,
   type AgentSession,
   type AgentSessionEvent,
@@ -35,6 +34,8 @@ import type {
   RpcImageContent,
   RpcModel,
   RpcModelSelectEvent,
+  RpcQueuedMessage,
+  RpcQueueUpdateEvent,
   RpcResponse,
   RpcSessionState,
   RpcSessionStats,
@@ -1224,13 +1225,7 @@ function transcriptMessageFromSessionEntry(
         ],
       };
     case "session_info":
-      return {
-        transcriptKey: id ?? fallbackKey,
-        id,
-        role: "system",
-        timestamp,
-        content: [{ type: "session_info", name: entry.name }],
-      };
+      return null;
     default:
       return null;
   }
@@ -1727,6 +1722,130 @@ function buildUserMessageContent(
   return content;
 }
 
+function queuedMessageTimestamp(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : Date.now();
+}
+
+function extractMessageImages(message: { content?: unknown }): RpcImageContent[] {
+  if (!Array.isArray(message.content)) return [];
+
+  return message.content.flatMap(item => {
+    if (typeof item !== "object" || item === null) return [];
+
+    const typedItem = item as {
+      type?: unknown;
+      data?: unknown;
+      mimeType?: unknown;
+    };
+    if (
+      typedItem.type !== "image" ||
+      typeof typedItem.data !== "string" ||
+      typeof typedItem.mimeType !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        type: "image" as const,
+        data: typedItem.data,
+        mimeType: typedItem.mimeType,
+      },
+    ];
+  });
+}
+
+function toRpcQueuedMessage(message: {
+  content?: unknown;
+  text?: string;
+  timestamp?: unknown;
+}): RpcQueuedMessage {
+  return {
+    text: extractMessageText(message),
+    images: extractMessageImages(message),
+    timestamp: queuedMessageTimestamp(message.timestamp),
+  };
+}
+
+function queuedAgentMessages(
+  session: AgentSession,
+  queueName: "steeringQueue" | "followUpQueue",
+): unknown[] {
+  const agent = session.agent as unknown as
+    | {
+        steeringQueue?: { messages?: unknown[] };
+        followUpQueue?: { messages?: unknown[] };
+      }
+    | undefined;
+  const queue = agent?.[queueName];
+  return Array.isArray(queue?.messages) ? queue.messages : [];
+}
+
+function buildQueueUpdateEvent(
+  session: AgentSession,
+  sessionPath: string | null,
+): RpcQueueUpdateEvent {
+  return {
+    type: "queue_update",
+    sessionPath: sessionPath ?? undefined,
+    steering: queuedAgentMessages(session, "steeringQueue").map(message =>
+      toRpcQueuedMessage(
+        message as {
+          content?: unknown;
+          text?: string;
+          timestamp?: unknown;
+        },
+      ),
+    ),
+    followUp: queuedAgentMessages(session, "followUpQueue").map(message =>
+      toRpcQueuedMessage(
+        message as {
+          content?: unknown;
+          text?: string;
+          timestamp?: unknown;
+        },
+      ),
+    ),
+  };
+}
+
+function dequeueFollowUpMessage(
+  session: AgentSession,
+  index: number,
+): RpcQueuedMessage {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error("Queued message index must be a non-negative integer");
+  }
+
+  const followUpQueue = queuedAgentMessages(session, "followUpQueue");
+  if (index >= followUpQueue.length) {
+    throw new Error(`Queued message not found at index ${index}`);
+  }
+
+  const sessionWithQueue = session as unknown as {
+    _followUpMessages?: string[];
+    _emitQueueUpdate?: () => void;
+  };
+  const trackedMessages = sessionWithQueue._followUpMessages;
+  if (!Array.isArray(trackedMessages)) {
+    throw new Error("Detached follow-up queue is unavailable");
+  }
+
+  const [removed] = followUpQueue.splice(index, 1);
+  trackedMessages.splice(index, 1);
+  sessionWithQueue._emitQueueUpdate?.();
+
+  return toRpcQueuedMessage(
+    removed as {
+      content?: unknown;
+      text?: string;
+      timestamp?: unknown;
+    },
+  );
+}
+
 function describeMessage(message: {
   role?: string;
   content?: unknown;
@@ -2035,7 +2154,7 @@ class SessionRuntime {
     return this.ensureDetachedSession(options);
   }
 
-  dispose(): void {
+  clearSelection(): void {
     if (this.unsubscribeSelectedSession) {
       this.unsubscribeSelectedSession();
       this.unsubscribeSelectedSession = undefined;
@@ -2046,6 +2165,10 @@ class SessionRuntime {
     if (selectedSessionPath) {
       void this.registry.releaseViewer(selectedSessionPath, this.clientId);
     }
+  }
+
+  dispose(): void {
+    this.clearSelection();
   }
 
   private buildSessionSummary(
@@ -2583,6 +2706,7 @@ export class WsRpcAdapter {
   private readonly transcriptProjector = new TranscriptProjector();
   private readonly uiBridge: ExtensionUIBridge;
   private readonly sessionStatsPusher: SessionStatsPusher;
+  private readonly detachedSessionRegistry: DetachedSessionRegistry;
 
   // Detached-session registry subscription.
   private unsubscribeRegistryEvents: (() => void) | undefined;
@@ -2607,7 +2731,7 @@ export class WsRpcAdapter {
     this.config = config;
     this.eventBus = eventBus;
     this.emitEvent = emitEvent;
-    const detachedSessionRegistry =
+    this.detachedSessionRegistry =
       sessionRegistry ?? new DetachedSessionRegistry(context.ctx.cwd);
     this.uiBridge = new ExtensionUIBridge(client.id, config, message => {
       this.sendResponse(message);
@@ -2615,7 +2739,7 @@ export class WsRpcAdapter {
     this.sessionRuntime = new SessionRuntime(
       context,
       client.id,
-      detachedSessionRegistry,
+      this.detachedSessionRegistry,
       () => this.uiBridge.createContext(),
       event => {
         this.handleSelectedSessionEvent(event);
@@ -2630,7 +2754,7 @@ export class WsRpcAdapter {
 
     this.setupWebSocket();
     this.subscribeToEvents();
-    this.subscribeToDetachedSessionEvents(detachedSessionRegistry);
+    this.subscribeToDetachedSessionEvents(this.detachedSessionRegistry);
     this.sendInitialTranscriptSnapshot();
     this.sessionStatsPusher.queue(
       this.sessionRuntime.currentTranscriptSessionPath(),
@@ -2800,6 +2924,14 @@ export class WsRpcAdapter {
    * Detached session event handling
    * ---------------------------------------------------------------------- */
 
+  private sendSelectedSessionQueueUpdate(): void {
+    const sessionPath = this.sessionRuntime.currentTranscriptSessionPath();
+    const detachedSession = this.sessionRuntime.getDetachedSession();
+    if (!detachedSession) return;
+
+    this.sendEvent(buildQueueUpdateEvent(detachedSession, sessionPath));
+  }
+
   private handleSelectedSessionEvent(event: AgentSessionEvent): void {
     const sessionPath = this.sessionRuntime.currentTranscriptSessionPath();
     const detachedSession = this.sessionRuntime.getDetachedSession();
@@ -2843,6 +2975,11 @@ export class WsRpcAdapter {
           );
         }
         this.sessionStatsPusher.queue(sessionPath);
+        return;
+      case "queue_update":
+        if (detachedSession) {
+          this.sendEvent(buildQueueUpdateEvent(detachedSession, sessionPath));
+        }
         return;
       case "compaction_start":
         this.sendEvent(toRpcCompactionStartEvent(event));
@@ -3123,6 +3260,7 @@ export class WsRpcAdapter {
         this.sessionStatsPusher.queue(
           this.sessionRuntime.currentTranscriptSessionPath(),
         );
+        this.sendSelectedSessionQueueUpdate();
       }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
@@ -3445,6 +3583,38 @@ export class WsRpcAdapter {
         };
       }
 
+      case "dequeue_follow_up_message": {
+        if (!this.sessionRuntime.hasDetachedSelection()) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "dequeue_follow_up_message",
+            success: false,
+            error: "Queued follow-up editing requires an active detached session",
+          };
+        }
+
+        const session = await this.sessionRuntime.ensureDetachedSession();
+        try {
+          const removed = dequeueFollowUpMessage(session, command.index);
+          return {
+            id: correlationId,
+            type: "response",
+            command: "dequeue_follow_up_message",
+            success: true,
+            data: { removed },
+          };
+        } catch (error) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "dequeue_follow_up_message",
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }
+
       /* --------------------------------------------------------------------
        * Compaction and retry behavior
        * ------------------------------------------------------------------ */
@@ -3631,7 +3801,10 @@ export class WsRpcAdapter {
             error: "Session name cannot be empty",
           };
         }
-        if (this.sessionRuntime.hasDetachedSelection()) {
+        if (command.sessionPath) {
+          const sm = openSessionManager(command.sessionPath);
+          sm.appendSessionInfo(name);
+        } else if (this.sessionRuntime.hasDetachedSelection()) {
           const session = await this.sessionRuntime.ensureDetachedSession();
           session.sessionManager.appendSessionInfo(name);
         } else {
@@ -3641,6 +3814,50 @@ export class WsRpcAdapter {
           id: correlationId,
           type: "response",
           command: "set_session_name",
+          success: true,
+        };
+      }
+
+      case "delete_session": {
+        const sessionPath = command.sessionPath as string;
+        if (!sessionPath || !fs.existsSync(sessionPath)) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "delete_session",
+            success: false,
+            error: "Session file not found",
+          };
+        }
+
+        if (this.sessionRuntime.isSessionRunning(sessionPath)) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "delete_session",
+            success: false,
+            error: "Cannot delete a running session",
+          };
+        }
+
+        if (this.sessionRuntime.currentDetachedSessionPath() === sessionPath) {
+          this.sessionRuntime.clearSelection();
+          this.sendTranscriptSnapshot({
+            sessionPath: undefined,
+            messages: [],
+            hasOlder: false,
+            hasNewer: false,
+          });
+          this.sessionStatsPusher.queue(null);
+        }
+
+        this.detachedSessionRegistry.removeSession(sessionPath);
+        fs.unlinkSync(sessionPath);
+
+        return {
+          id: correlationId,
+          type: "response",
+          command: "delete_session",
           success: true,
         };
       }

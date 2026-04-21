@@ -36,22 +36,63 @@ const displayLabel = computed(() => {
 });
 const isBusy = computed(() => props.loading || props.switching);
 const normalizedQuery = computed(() => searchText.value.trim());
+
+/** Merge local and remote branches that share the same shortName.
+ *  Local branch takes precedence; remote-only branches are kept separately. */
+const mergedBranches = computed((): RpcGitBranch[] => {
+  if (!props.repoState) return [];
+
+  const byShortName = new Map<
+    string,
+    { local?: RpcGitBranch; remotes: RpcGitBranch[] }
+  >();
+
+  for (const branch of props.repoState.branches) {
+    const group = byShortName.get(branch.shortName) ?? { remotes: [] };
+    if (branch.kind === "local") {
+      group.local = branch;
+    } else {
+      group.remotes.push(branch);
+    }
+    byShortName.set(branch.shortName, group);
+  }
+
+  const result: RpcGitBranch[] = [];
+  const seen = new Set<string>();
+
+  // Preserve original order (current first, then local, then remote)
+  for (const branch of props.repoState.branches) {
+    const group = byShortName.get(branch.shortName);
+    if (!group || seen.has(branch.shortName)) continue;
+    seen.add(branch.shortName);
+
+    if (group.local) {
+      result.push(group.local);
+    } else if (group.remotes.length > 0) {
+      result.push(group.remotes[0]);
+    }
+  }
+
+  return result;
+});
+
 const filteredBranches = computed(() => {
   if (!props.repoState) return [];
   const query = normalizedQuery.value.toLowerCase();
-  if (!query) return props.repoState.branches;
-  return props.repoState.branches.filter(branch => {
-    const haystack = [branch.name, branch.shortName, branch.remoteName]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
+  if (!query) return mergedBranches.value;
+  return mergedBranches.value.filter(branch => {
+    const display =
+      branch.kind === "remote" && branch.remoteName
+        ? `${branch.remoteName}/${branch.shortName}`
+        : branch.shortName;
+    const haystack = [branch.name, display].join(" ").toLowerCase();
     return haystack.includes(query);
   });
 });
 const exactBranchMatch = computed(() => {
   const query = normalizedQuery.value;
-  if (!query || !props.repoState) return null;
-  return props.repoState.branches.find(branch => branch.name === query) ?? null;
+  if (!query) return null;
+  return mergedBranches.value.find(branch => branch.name === query) ?? null;
 });
 const canCreateBranch = computed(() => {
   const query = normalizedQuery.value;
@@ -69,10 +110,17 @@ const triggerTitle = computed(() => {
   return displayLabel.value;
 });
 const showSearch = computed(() =>
-  props.repoState?.branches.length
-    ? props.repoState.branches.length > 8 || searchText.value.length > 0
+  mergedBranches.value.length
+    ? mergedBranches.value.length > 8 || searchText.value.length > 0
     : searchText.value.length > 0,
 );
+
+function branchDisplayName(branch: RpcGitBranch): string {
+  if (branch.kind === "remote" && branch.remoteName) {
+    return `${branch.remoteName}/${branch.shortName}`;
+  }
+  return branch.shortName;
+}
 
 function syncHighlightedIndex() {
   if (filteredBranches.value.length === 0) {
@@ -308,11 +356,6 @@ onBeforeUnmount(() => {
     >
       <GitBranch class="git-trigger-icon" aria-hidden="true" />
       <span class="git-trigger-text">{{ displayLabel }}</span>
-      <span
-        v-if="repoState?.isDirty"
-        class="git-trigger-dirty"
-        aria-label="Working tree has uncommitted changes"
-      />
       <LoaderCircle
         v-if="isBusy"
         class="git-trigger-spinner spin"
@@ -322,12 +365,6 @@ onBeforeUnmount(() => {
     </button>
 
     <div v-if="isOpen" class="git-menu">
-      <!-- <div v-if="repoState?.detached" class="git-note">
-        HEAD is detached. Switching to a branch will reattach it.
-      </div>
-      <div v-else-if="repoState?.isDirty" class="git-note git-note-warning">
-        Working tree has local changes. Git may refuse some switches.
-      </div> -->
       <div class="git-search-row">
         <label class="git-search">
           <input
@@ -400,15 +437,7 @@ onBeforeUnmount(() => {
             @click="selectBranch(branch)"
             @mouseenter="highlightedIndex = index"
           >
-            <div class="git-option-copy">
-              <span class="git-option-name">{{ branch.shortName }}</span>
-              <span class="git-option-meta">
-                {{ branch.kind
-                }}<template v-if="branch.remoteName">
-                  · {{ branch.remoteName }}</template
-                >
-              </span>
-            </div>
+            <span class="git-option-name">{{ branchDisplayName(branch) }}</span>
             <Check
               v-if="branch.isCurrent"
               class="git-option-check"
@@ -475,15 +504,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   font-family: var(--pi-font-mono);
   font-size: 0.64rem;
-}
-
-.git-trigger-dirty {
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  background: #f59e0b;
-  box-shadow: 0 0 0 3px color-mix(in srgb, #f59e0b 18%, transparent);
 }
 
 .git-menu {
@@ -579,7 +599,6 @@ onBeforeUnmount(() => {
 
 .git-create,
 .git-match-note,
-.git-note,
 .git-empty {
   display: flex;
   align-items: flex-start;
@@ -617,15 +636,9 @@ onBeforeUnmount(() => {
   font-size: 0.68rem;
 }
 
-.git-match-note,
-.git-note {
+.git-match-note {
   background: color-mix(in srgb, var(--panel-2) 86%, transparent);
   color: var(--text-muted);
-}
-
-.git-note-warning {
-  background: color-mix(in srgb, #f59e0b 12%, var(--panel-2));
-  color: var(--text);
 }
 
 .git-empty {
@@ -657,7 +670,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 5px 10px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   border-radius: 10px;
   background: transparent;
@@ -686,26 +699,20 @@ onBeforeUnmount(() => {
   cursor: wait;
 }
 
-.git-option-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .git-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--pi-font-mono);
   font-size: 0.8rem;
   color: var(--text);
 }
 
-.git-option-meta {
-  font-family: var(--pi-font-sans);
-  font-size: 0.62rem;
-  color: var(--text-subtle);
-}
-
 .git-option-check {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
   color: var(--text-muted);
 }
 

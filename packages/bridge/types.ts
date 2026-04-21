@@ -17,6 +17,12 @@ export interface RpcImageContent {
   mimeType: string;
 }
 
+export interface RpcQueuedMessage {
+  text: string;
+  images: RpcImageContent[];
+  timestamp: number;
+}
+
 export interface RpcWorkspaceEntry {
   path: string;
   kind: "file" | "directory";
@@ -262,7 +268,8 @@ export interface RpcCommandMap {
   fork: { entryId: string };
   get_fork_messages: {};
   get_last_assistant_text: {};
-  set_session_name: { name: string };
+  set_session_name: { name: string; sessionPath?: string };
+  delete_session: { sessionPath: string };
 
   /** Messages / Commands */
   get_messages: {
@@ -282,6 +289,9 @@ export interface RpcCommandMap {
   list_git_branches: {};
   switch_git_branch: { branchName: string };
   create_git_branch: { branchName: string };
+
+  /** Detached follow-up queue */
+  dequeue_follow_up_message: { index: number };
 }
 
 /** All RPC command types that a browser client can send. */
@@ -506,6 +516,13 @@ export interface RpcSessionStatsEvent {
   stats: RpcSessionStats;
 }
 
+export interface RpcQueueUpdateEvent {
+  type: "queue_update";
+  sessionPath?: string;
+  steering: RpcQueuedMessage[];
+  followUp: RpcQueuedMessage[];
+}
+
 // ============================================================================
 // RPC Responses (server → client)
 // ============================================================================
@@ -564,6 +581,7 @@ export interface RpcResponseMap {
   get_fork_messages: { messages: Array<{ entryId: string; text: string }> };
   get_last_assistant_text: { text: string | null };
   set_session_name: void;
+  delete_session: void;
   get_messages: RpcTranscriptPage & { direction: "latest" | "older" };
   get_commands: { commands: RpcSlashCommand[] };
   list_sessions: {
@@ -579,6 +597,7 @@ export interface RpcResponseMap {
   list_git_branches: RpcGitRepoState;
   switch_git_branch: RpcGitRepoState;
   create_git_branch: RpcGitRepoState;
+  dequeue_follow_up_message: { removed: RpcQueuedMessage };
 }
 
 type RpcResponseData<T> = [T] extends [void] ? {} : { data: T };
@@ -769,6 +788,7 @@ export type RpcBridgeEvent =
   | RpcTranscriptSnapshotEvent
   | RpcTranscriptUpsertEvent
   | RpcSessionStatsEvent
+  | RpcQueueUpdateEvent
   | RpcAgentStartEvent
   | RpcAgentEndEvent
   | RpcModelSelectEvent
