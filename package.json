@@ -48,6 +48,9 @@
   "engines": {
     "node": ">=20.6.0"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "pi": {
     "extensions": [
       "./packages/bin/index.ts"
