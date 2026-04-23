@@ -656,8 +656,11 @@ function handleInputKeydown(e: KeyboardEvent) {
 
   if (e.key === "Enter") {
     if (composing) return;
+    if (e.shiftKey && !props.isStreaming) {
+      return;
+    }
     e.preventDefault();
-    handleSubmit(e.shiftKey);
+    handleSubmit(e.shiftKey && props.isStreaming);
   }
 }
 
