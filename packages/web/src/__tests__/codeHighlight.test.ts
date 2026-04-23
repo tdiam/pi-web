@@ -8,6 +8,7 @@ describe("detectLanguageFromPath", () => {
     expect(detectLanguageFromPath("Dockerfile")).toBe("docker");
     expect(detectLanguageFromPath("scripts/build.sh")).toBe("bash");
     expect(detectLanguageFromPath("patches/fix.diff")).toBe("diff");
+    expect(detectLanguageFromPath("js")).toBe("javascript");
     expect(detectLanguageFromPath("app/main.py")).toBe("python");
     expect(detectLanguageFromPath("cmd/server.go")).toBe("go");
     expect(detectLanguageFromPath("src/lib.rs")).toBe("rust");

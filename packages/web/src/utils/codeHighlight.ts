@@ -102,13 +102,17 @@ const createReadHighlighter = createBundledHighlighter<
 
 const { codeToHtml } = createSingletonShorthands(createReadHighlighter);
 
+function isSupportedLanguage(value: string): value is SupportedLanguage {
+  return Object.hasOwn(LANGUAGE_LOADERS, value);
+}
+
 export async function highlightCodeHtml(
   code: string,
-  path?: string,
+  pathOrLanguage?: string,
   themeMode: ThemeMode = "dark",
 ): Promise<string> {
   const html = await codeToHtml(code, {
-    lang: detectLanguageFromPath(path),
+    lang: detectLanguageFromPath(pathOrLanguage),
     theme: themeMode === "light" ? LIGHT_THEME : DARK_THEME,
   });
   return DOMPurify.sanitize(html, {
@@ -121,13 +125,14 @@ export function detectLanguageFromPath(
   path?: string,
 ): SupportedLanguage | "text" {
   if (!path) return "text";
-  const cleanPath = path.split(/[?#]/, 1)[0] ?? path;
+  const cleanPath = path.trim().split(/[?#]/, 1)[0] ?? path;
   const fileName = cleanPath.split(/[\\/]/).pop()?.toLowerCase() ?? "";
   if (fileName === "dockerfile") return "docker";
   if (fileName === "makefile") return "make";
+  if (isSupportedLanguage(fileName)) return fileName;
   const extension = fileName.includes(".")
     ? (fileName.split(".").pop() ?? "")
-    : "";
+    : fileName;
   return LANGUAGE_ALIASES[extension] ?? "text";
 }
 
