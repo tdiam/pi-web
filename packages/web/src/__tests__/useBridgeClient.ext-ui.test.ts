@@ -27,12 +27,51 @@ class MockWebSocket {
   }
 }
 
-// Mock location for connect()
-vi.stubGlobal("location", {
+const mockLocation = {
   protocol: "http:",
   host: "localhost:8080",
+  pathname: "/",
   search: "",
+  hash: "",
+};
+
+const windowEventListeners = new Map<string, Set<(event?: unknown) => void>>();
+
+function updateMockLocation(url: string) {
+  const next = new URL(url, `${mockLocation.protocol}//${mockLocation.host}`);
+  mockLocation.protocol = next.protocol;
+  mockLocation.host = next.host;
+  mockLocation.pathname = next.pathname;
+  mockLocation.search = next.search;
+  mockLocation.hash = next.hash;
+}
+
+// Mock location for connect()
+vi.stubGlobal("location", mockLocation);
+vi.stubGlobal("history", {
+  pushState: vi.fn((_state: unknown, _title: string, url?: string | URL | null) => {
+    if (typeof url === "string") updateMockLocation(url);
+  }),
+  replaceState: vi.fn(
+    (_state: unknown, _title: string, url?: string | URL | null) => {
+      if (typeof url === "string") updateMockLocation(url);
+    },
+  ),
 });
+vi.stubGlobal(
+  "addEventListener",
+  vi.fn((type: string, listener: (event?: unknown) => void) => {
+    const listeners = windowEventListeners.get(type) ?? new Set();
+    listeners.add(listener);
+    windowEventListeners.set(type, listeners);
+  }),
+);
+vi.stubGlobal(
+  "removeEventListener",
+  vi.fn((type: string, listener: (event?: unknown) => void) => {
+    windowEventListeners.get(type)?.delete(listener);
+  }),
+);
 
 // Provide a minimal document mock so Vue's runtime-dom can initialize.
 // Vue's runtime-dom calls doc.createElement("div") at module load time.
@@ -58,12 +97,17 @@ beforeEach(() => {
   originalWebSocket = globalThis.WebSocket;
   // @ts-expect-error mock
   globalThis.WebSocket = MockWebSocket;
-  vi.stubGlobal("location", {
-    protocol: "http:",
-    host: "localhost:8080",
-    search: "",
-  });
+  mockLocation.protocol = "http:";
+  mockLocation.host = "localhost:8080";
+  mockLocation.pathname = "/";
+  mockLocation.search = "";
+  mockLocation.hash = "";
   mockWsInstances.length = 0;
+  windowEventListeners.clear();
+  vi.mocked(history.pushState).mockClear();
+  vi.mocked(history.replaceState).mockClear();
+  vi.mocked(globalThis.addEventListener).mockClear();
+  vi.mocked(globalThis.removeEventListener).mockClear();
 });
 
 afterEach(() => {
@@ -101,6 +145,20 @@ function simulateOpen(ws: MockWebSocket) {
   if (handler) handler();
 }
 
+function simulatePopState() {
+  for (const listener of windowEventListeners.get("popstate") ?? []) {
+    listener();
+  }
+}
+
+function getLastSentCommand(ws: MockWebSocket): { payload: { id?: string } } {
+  const message = ws.send.mock.calls.at(-1)?.[0];
+  if (typeof message !== "string") {
+    throw new Error("No command was sent");
+  }
+  return JSON.parse(message) as { payload: { id?: string } };
+}
+
 describe("extension_ui_request handling", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -131,6 +189,125 @@ describe("extension_ui_request handling", () => {
       type => type === "list_tree_entries",
     );
     expect(treeRequests).toHaveLength(0);
+  });
+
+  it("restores the routed session on initial connect", async () => {
+    mockLocation.search = "?session=%2Ftmp%2Frouted.jsonl&debug=1";
+
+    await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
+      const payload = JSON.parse(message) as { payload?: { type?: string } };
+      return payload.payload?.type;
+    });
+
+    expect(sentCommandTypes).toEqual(
+      expect.arrayContaining([
+        "switch_session",
+        "list_sessions",
+        "get_available_models",
+        "get_commands",
+      ]),
+    );
+    expect(sentCommandTypes).not.toContain("get_messages");
+  });
+
+  it("writes the active session into the URL while preserving other query params", async () => {
+    mockLocation.search = "?debug=1";
+
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "live-session",
+          sessionFile: "/tmp/live.jsonl",
+          sessionName: "Live",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    await Promise.resolve();
+
+    expect(client.activeTreeSessionPath.value).toBe("/tmp/live.jsonl");
+    expect(history.replaceState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/?debug=1&session=%2Ftmp%2Flive.jsonl",
+    );
+    expect(mockLocation.search).toBe("?debug=1&session=%2Ftmp%2Flive.jsonl");
+  });
+
+  it("pushes a history entry after a user-driven session switch", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    const switching = client.switchSession("/tmp/session-2.jsonl");
+    const command = getLastSentCommand(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: command.payload.id,
+        type: "response",
+        command: "switch_session",
+        success: true,
+        data: {
+          transcript: {
+            messages: [],
+            hasOlder: false,
+            hasNewer: false,
+          },
+          sessionId: "session-2",
+          sessionName: "Session 2",
+          sessionPath: "/tmp/session-2.jsonl",
+        },
+      },
+    });
+
+    await switching;
+    await Promise.resolve();
+
+    expect(history.pushState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/?session=%2Ftmp%2Fsession-2.jsonl",
+    );
+  });
+
+  it("reacts to browser history navigation by switching sessions", async () => {
+    await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+    ws.send.mockClear();
+
+    updateMockLocation("/?session=%2Ftmp%2Fsession-3.jsonl");
+    simulatePopState();
+
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"switch_session"'),
+    );
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"sessionPath":"/tmp/session-3.jsonl"'),
+    );
   });
 
   it("updates tree entries from switch_session responses", async () => {

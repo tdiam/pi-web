@@ -56,6 +56,8 @@ const {
   abortGeneration,
   compactSession,
   sendCommand,
+  switchSession,
+  newSession,
   fetchWorkspaceEntries,
   loadWorkspaceSessions,
   refreshWorkspaceSessions,
@@ -463,7 +465,7 @@ function toggleDebugMode() {
 async function handleSessionSelect(sessionPath: string) {
   pendingRevision.value = null;
   try {
-    const response = await sendCommand({ type: "switch_session", sessionPath });
+    const response = await switchSession(sessionPath);
     if (response.success) {
       sidebarOpen.value = false;
     }
@@ -491,10 +493,7 @@ function handleLoadOlderSessions(payload: {
 async function handleNewSession(workspacePath: string) {
   pendingRevision.value = null;
   try {
-    const response = await sendCommand({
-      type: "new_session",
-      workspacePath,
-    });
+    const response = await newSession(workspacePath);
     if (response.success) {
       sidebarOpen.value = false;
     }

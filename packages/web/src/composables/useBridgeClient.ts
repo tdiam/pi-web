@@ -1,4 +1,4 @@
-import { ref, readonly, computed, onUnmounted } from "vue";
+import { ref, readonly, computed, onUnmounted, watch } from "vue";
 import type {
   ClientMessage,
   RpcBridgeEvent,
@@ -246,6 +246,8 @@ let requestIdCounter = 0;
 let pendingTranscriptConfigEventCounter = 0;
 let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
 let gitRepoStateRequest: Promise<RpcGitRepoState | null> | null = null;
+let stopDisplayedSessionRouteSync: (() => void) | null = null;
+let popStateListenerInstalled = false;
 
 /** Pending RPC requests keyed by correlation id. */
 const pendingRequests = new Map<
@@ -299,6 +301,134 @@ function updateAvailableModels(values: readonly unknown[]) {
 
 function getDisplayedSessionPath(): string | null {
   return activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null;
+}
+
+const SESSION_ROUTE_PARAM = "session";
+const displayedSessionPath = computed(() => getDisplayedSessionPath());
+
+type HistoryMode = "push" | "replace";
+
+function readSessionRoutePath(): string | null {
+  const search = globalThis.location?.search;
+  if (typeof search !== "string") return null;
+  const value = new URLSearchParams(search).get(SESSION_ROUTE_PARAM);
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function buildSessionRouteUrl(sessionPath: string | null): string | null {
+  const currentLocation = globalThis.location;
+  if (!currentLocation) return null;
+
+  const params = new URLSearchParams(currentLocation.search ?? "");
+  if (sessionPath) {
+    params.set(SESSION_ROUTE_PARAM, sessionPath);
+  } else {
+    params.delete(SESSION_ROUTE_PARAM);
+  }
+
+  const pathname = currentLocation.pathname ?? "/";
+  const search = params.toString();
+  const hash = currentLocation.hash ?? "";
+  return `${pathname}${search ? `?${search}` : ""}${hash}`;
+}
+
+function writeSessionRoutePath(
+  sessionPath: string | null,
+  mode: HistoryMode = "replace",
+) {
+  const historyApi = globalThis.history;
+  const nextUrl = buildSessionRouteUrl(sessionPath);
+  if (!historyApi || !nextUrl) return;
+  if (readSessionRoutePath() === sessionPath) return;
+
+  if (mode === "push" && typeof historyApi.pushState === "function") {
+    historyApi.pushState(null, "", nextUrl);
+    return;
+  }
+
+  if (typeof historyApi.replaceState === "function") {
+    historyApi.replaceState(null, "", nextUrl);
+  }
+}
+
+function syncDisplayedSessionRoute(mode: HistoryMode = "replace") {
+  writeSessionRoutePath(getDisplayedSessionPath(), mode);
+}
+
+async function restoreLiveSessionState() {
+  activeTreeSessionPath.value = null;
+  treeEntries.value = [];
+  sessionStats.value = null;
+
+  await Promise.all([
+    sendCommand({ type: "get_messages", direction: "latest", limit: 40 }),
+    sendCommand({ type: "get_state" }),
+  ]);
+}
+
+async function applySessionRouteFromLocation() {
+  const routeSessionPath = readSessionRoutePath();
+  const currentSessionPath = getDisplayedSessionPath();
+  if (routeSessionPath === currentSessionPath) {
+    return;
+  }
+
+  try {
+    if (!routeSessionPath) {
+      await restoreLiveSessionState();
+      return;
+    }
+
+    const response = await sendCommand({
+      type: "switch_session",
+      sessionPath: routeSessionPath,
+    });
+    if (!response.success) {
+      pushNotification(
+        summarizeErrorMessage(
+          response.error ?? "Failed to open session from URL",
+          "Failed to open session from URL",
+        ),
+        "error",
+      );
+      syncDisplayedSessionRoute("replace");
+    }
+  } catch {
+    // Leave the current selection unchanged if the browser navigates mid-reconnect.
+  }
+}
+
+function handleSessionRoutePopState() {
+  if (connectionStatus.value !== "connected") {
+    return;
+  }
+
+  void applySessionRouteFromLocation();
+}
+
+function startSessionRouteSync() {
+  if (!stopDisplayedSessionRouteSync) {
+    stopDisplayedSessionRouteSync = watch(displayedSessionPath, sessionPath => {
+      writeSessionRoutePath(sessionPath, "replace");
+    });
+  }
+
+  if (!popStateListenerInstalled) {
+    globalThis.addEventListener?.("popstate", handleSessionRoutePopState);
+    popStateListenerInstalled = true;
+  }
+}
+
+function stopSessionRouteSync() {
+  stopDisplayedSessionRouteSync?.();
+  stopDisplayedSessionRouteSync = null;
+
+  if (popStateListenerInstalled) {
+    globalThis.removeEventListener?.("popstate", handleSessionRoutePopState);
+    popStateListenerInstalled = false;
+  }
 }
 
 function shouldApplyQueueUpdate(sessionPath: string | null): boolean {
@@ -1078,6 +1208,24 @@ async function refreshWorkspaceSessions(): Promise<RpcResponse> {
   });
 }
 
+async function switchSession(sessionPath: string): Promise<RpcResponse> {
+  const response = await sendCommand({ type: "switch_session", sessionPath });
+  if (response.success) {
+    const data = response.data as { sessionPath?: string } | undefined;
+    writeSessionRoutePath(data?.sessionPath ?? sessionPath, "push");
+  }
+  return response;
+}
+
+async function newSession(workspacePath: string): Promise<RpcResponse> {
+  const response = await sendCommand({ type: "new_session", workspacePath });
+  if (response.success) {
+    const data = response.data as { sessionPath?: string } | undefined;
+    writeSessionRoutePath(data?.sessionPath ?? null, "push");
+  }
+  return response;
+}
+
 async function compactSession(customInstructions?: string) {
   compactingRequestCount.value += 1;
 
@@ -1547,10 +1695,10 @@ function handleExtensionUIRequest(payload: RpcExtensionUIRequest) {
 
 async function fetchInitialState() {
   transcriptInitialLoading.value = true;
+  const routeSessionPath = readSessionRoutePath();
+
   try {
-    await Promise.all([
-      sendCommand({ type: "get_messages", direction: "latest", limit: 40 }),
-      sendCommand({ type: "get_state" }),
+    const bootstrapRequests = [
       sendCommand({
         type: "list_sessions",
         scope: "workspaces",
@@ -1559,6 +1707,31 @@ async function fetchInitialState() {
       }),
       sendCommand({ type: "get_available_models" }),
       sendCommand({ type: "get_commands" }),
+    ];
+
+    if (routeSessionPath) {
+      const response = await sendCommand({
+        type: "switch_session",
+        sessionPath: routeSessionPath,
+      });
+      await Promise.all(bootstrapRequests);
+      if (!response.success) {
+        pushNotification(
+          summarizeErrorMessage(
+            response.error ?? "Failed to restore session from URL",
+            "Failed to restore session from URL",
+          ),
+          "error",
+        );
+        writeSessionRoutePath(null, "replace");
+        await restoreLiveSessionState();
+      }
+      return;
+    }
+
+    await Promise.all([
+      restoreLiveSessionState(),
+      ...bootstrapRequests,
     ]);
   } catch {
     transcriptInitialLoading.value = false;
@@ -1622,6 +1795,7 @@ function connect() {
 
 function disconnect() {
   disposed = true;
+  stopSessionRouteSync();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -1643,7 +1817,10 @@ export function useBridgeClient() {
 
   // Auto-connect on first use if not already connected
   if (!ws && !disposed) {
+    startSessionRouteSync();
     connect();
+  } else if (!disposed) {
+    startSessionRouteSync();
   }
 
   const isReconnecting = computed(
@@ -1706,6 +1883,8 @@ export function useBridgeClient() {
     loadGitRepoState,
     switchGitBranch,
     createGitBranch,
+    switchSession,
+    newSession,
     abortGeneration,
     compactSession,
     setThinkingLevel,
