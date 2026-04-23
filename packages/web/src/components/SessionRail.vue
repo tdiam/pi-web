@@ -7,6 +7,7 @@ const props = defineProps<{
   sessions: readonly SessionEntry[];
   activeSessionPath: string | null;
   runningSessionPaths: readonly string[];
+  workspaceSessionCursors: Readonly<Record<string, string | null>>;
 }>();
 
 const emit = defineEmits<{
@@ -14,6 +15,9 @@ const emit = defineEmits<{
   rename: [payload: { sessionPath: string; name: string }];
   delete: [sessionPath: string];
   newSession: [workspacePath: string];
+  loadOlderSessions: [
+    payload: { workspacePath: string; cursor?: string | null },
+  ];
 }>();
 
 const RECENT_SESSION_LIMIT = 10;
@@ -33,6 +37,7 @@ interface WorkspaceGroup {
   recentSessions: SessionEntry[];
   remainingSessions: SessionEntry[];
   filteredRemainingSessions: SessionEntry[];
+  nextCursor: string | null;
 }
 
 interface MenuState {
@@ -169,6 +174,7 @@ const workspaceGroups = computed<WorkspaceGroup[]>(() => {
       const sessions = [...group.sessions].sort(compareSessionsByActivity);
       const query = workspaceQueries.value[group.id] ?? "";
       const remainingSessions = sessions.slice(RECENT_SESSION_LIMIT);
+      const nextCursor = props.workspaceSessionCursors[group.path] ?? null;
 
       return {
         ...group,
@@ -183,6 +189,7 @@ const workspaceGroups = computed<WorkspaceGroup[]>(() => {
         filteredRemainingSessions: remainingSessions.filter(session =>
           sessionMatchesQuery(session, query),
         ),
+        nextCursor,
       };
     })
     .sort((left, right) => {
@@ -225,6 +232,23 @@ function toggleWorkspace(workspaceId: string) {
 function openOlderSessions(workspaceId: string) {
   workspaceQueries.value[workspaceId] ??= "";
   activeOlderWorkspaceId.value = workspaceId;
+  const workspace = workspaceGroups.value.find(
+    group => group.id === workspaceId,
+  );
+  if (workspace?.nextCursor && workspace.remainingSessions.length === 0) {
+    emit("loadOlderSessions", {
+      workspacePath: workspace.path,
+      cursor: workspace.nextCursor,
+    });
+  }
+}
+
+function loadMoreOlderSessions(workspace: WorkspaceGroup) {
+  if (!workspace.nextCursor) return;
+  emit("loadOlderSessions", {
+    workspacePath: workspace.path,
+    cursor: workspace.nextCursor,
+  });
 }
 
 function closeOlderSessions() {
@@ -414,7 +438,9 @@ watch(
           </div>
 
           <div
-            v-if="workspace.remainingSessions.length > 0"
+            v-if="
+              workspace.remainingSessions.length > 0 || workspace.nextCursor
+            "
             class="older-sessions"
           >
             <button
@@ -423,9 +449,7 @@ watch(
               aria-haspopup="dialog"
               @click="openOlderSessions(workspace.id)"
             >
-              <span>
-                Show {{ workspace.remainingSessions.length }} older sessions
-              </span>
+              <span>Browse older sessions</span>
             </button>
           </div>
         </div>
@@ -516,6 +540,15 @@ watch(
             <span class="item-status-dot" aria-hidden="true"></span>
           </span>
         </div>
+
+        <button
+          v-if="activeOlderWorkspace.nextCursor"
+          class="modal-load-more"
+          type="button"
+          @click="loadMoreOlderSessions(activeOlderWorkspace)"
+        >
+          Load more
+        </button>
 
         <p
           v-if="activeOlderWorkspace.filteredRemainingSessions.length === 0"
@@ -1052,6 +1085,23 @@ watch(
   width: 100%;
   flex: 0 0 auto;
   font-size: 0.86rem;
+}
+
+.modal-load-more {
+  margin: 8px 10px 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.modal-load-more:hover {
+  background: var(--panel-3);
+  color: var(--text);
 }
 
 .modal-empty {

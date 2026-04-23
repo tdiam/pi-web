@@ -181,6 +181,7 @@ const treeEntries = ref<TreeEntry[]>([]);
 const activeTreeSessionPath = ref<string | null>(null);
 const liveSessionPath = ref<string | null>(null);
 const runningSessionPaths = ref<string[]>([]);
+const workspaceSessionCursors = ref<Record<string, string | null>>({});
 const commands = ref<RpcSlashCommand[]>([]);
 const workspaceEntries = ref<RpcWorkspaceEntry[]>([]);
 const workspaceEntriesLoaded = ref(false);
@@ -354,6 +355,28 @@ function syncRunningSessionsFromEntries(entries: readonly SessionEntry[]) {
   runningSessionPaths.value = entries
     .filter(session => session.isRunning)
     .map(session => session.path);
+}
+
+function workspaceKeyForSession(session: SessionEntry): string | null {
+  return session.workspacePath ?? session.workspaceId ?? null;
+}
+
+function mergeSessionEntries(
+  current: readonly SessionEntry[],
+  incoming: readonly SessionEntry[],
+): SessionEntry[] {
+  const nextByPath = new Map(current.map(session => [session.path, session]));
+  for (const session of incoming) {
+    nextByPath.set(session.path, session);
+  }
+  return [...nextByPath.values()].sort((left, right) => {
+    const leftTime = Date.parse(left.updatedAt ?? left.timestamp ?? "");
+    const rightTime = Date.parse(right.updatedAt ?? right.timestamp ?? "");
+    const timeDelta =
+      (Number.isFinite(rightTime) ? rightTime : Number.NEGATIVE_INFINITY) -
+      (Number.isFinite(leftTime) ? leftTime : Number.NEGATIVE_INFINITY);
+    return timeDelta || right.path.localeCompare(left.path);
+  });
 }
 
 function normalizeThinkingLevel(value: unknown): RpcThinkingLevel | null {
@@ -1027,6 +1050,34 @@ function abortGeneration() {
   return sendCommand({ type: "abort" });
 }
 
+async function loadWorkspaceSessions(options: {
+  workspacePath: string;
+  cursor?: string | null;
+  limit?: number;
+  query?: string;
+  merge?: "replace" | "append";
+}): Promise<RpcResponse> {
+  return sendCommand({
+    type: "list_sessions",
+    scope: "workspace",
+    workspacePath: options.workspacePath,
+    cursor: options.cursor ?? undefined,
+    limit: options.limit ?? 50,
+    query: options.query,
+    includeActive: true,
+    merge: options.merge ?? "append",
+  });
+}
+
+async function refreshWorkspaceSessions(): Promise<RpcResponse> {
+  return sendCommand({
+    type: "list_sessions",
+    scope: "workspaces",
+    limit: 10,
+    includeActive: true,
+  });
+}
+
 async function compactSession(customInstructions?: string) {
   compactingRequestCount.value += 1;
 
@@ -1173,10 +1224,38 @@ function handleResponse(payload: RpcResponse) {
         break;
       }
       case "list_sessions": {
-        const data = payload.data as { sessions: SessionEntry[] } | undefined;
-        if (data) {
-          sessions.value = data.sessions;
-          syncRunningSessionsFromEntries(data.sessions);
+        const data = payload.data as
+          | {
+              sessions?: SessionEntry[];
+              workspacePath?: string;
+              nextCursor?: string;
+              workspaceCursors?: Record<string, string | null>;
+              merge?: "replace" | "append";
+            }
+          | undefined;
+        if (Array.isArray(data?.sessions)) {
+          sessions.value =
+            data.merge === "append"
+              ? mergeSessionEntries(sessions.value, data.sessions)
+              : data.sessions;
+          syncRunningSessionsFromEntries(sessions.value);
+
+          if (data.workspaceCursors) {
+            workspaceSessionCursors.value = {
+              ...workspaceSessionCursors.value,
+              ...data.workspaceCursors,
+            };
+          } else {
+            const workspacePath =
+              data.workspacePath ??
+              data.sessions.map(workspaceKeyForSession).find(Boolean);
+            if (workspacePath) {
+              workspaceSessionCursors.value = {
+                ...workspaceSessionCursors.value,
+                [workspacePath]: data.nextCursor ?? null,
+              };
+            }
+          }
         }
         break;
       }
@@ -1472,7 +1551,12 @@ async function fetchInitialState() {
     await Promise.all([
       sendCommand({ type: "get_messages", direction: "latest", limit: 40 }),
       sendCommand({ type: "get_state" }),
-      sendCommand({ type: "list_sessions" }),
+      sendCommand({
+        type: "list_sessions",
+        scope: "workspaces",
+        limit: 10,
+        includeActive: true,
+      }),
       sendCommand({ type: "get_available_models" }),
       sendCommand({ type: "get_commands" }),
     ]);
@@ -1582,6 +1666,7 @@ export function useBridgeClient() {
     activeTreeSessionPath: readonly(activeTreeSessionPath),
     liveSessionPath: readonly(liveSessionPath),
     runningSessionPaths: readonly(runningSessionPaths),
+    workspaceSessionCursors: readonly(workspaceSessionCursors),
     commands: readonly(commands),
     workspaceEntries: readonly(workspaceEntries),
     workspaceEntriesLoading: readonly(workspaceEntriesLoading),
@@ -1616,6 +1701,8 @@ export function useBridgeClient() {
     sendPrompt,
     loadOlderTranscriptPage,
     fetchWorkspaceEntries,
+    loadWorkspaceSessions,
+    refreshWorkspaceSessions,
     loadGitRepoState,
     switchGitBranch,
     createGitBranch,

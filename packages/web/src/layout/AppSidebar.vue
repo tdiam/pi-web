@@ -7,6 +7,7 @@ defineProps<{
   sessions: readonly SessionEntry[];
   activeSessionPath: string | null;
   runningSessionPaths: readonly string[];
+  workspaceSessionCursors: Readonly<Record<string, string | null>>;
   sidebarOpen: boolean;
   collapsed: boolean;
 }>();
@@ -15,6 +16,9 @@ const emit = defineEmits<{
   closeSidebar: [];
   selectSession: [sessionPath: string];
   refreshSessions: [];
+  loadOlderSessions: [
+    payload: { workspacePath: string; cursor?: string | null },
+  ];
   newSession: [workspacePath: string];
   renameSession: [sessionPath: string, name: string];
   deleteSession: [sessionPath: string];
@@ -28,10 +32,12 @@ const emit = defineEmits<{
       :sessions="sessions"
       :active-session-path="activeSessionPath"
       :running-session-paths="runningSessionPaths"
+      :workspace-session-cursors="workspaceSessionCursors"
       @select="emit('selectSession', $event)"
       @rename="emit('renameSession', $event.sessionPath, $event.name)"
       @delete="emit('deleteSession', $event)"
       @new-session="emit('newSession', $event)"
+      @load-older-sessions="emit('loadOlderSessions', $event)"
     >
       <template #header-actions>
         <button

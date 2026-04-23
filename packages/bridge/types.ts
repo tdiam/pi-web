@@ -285,7 +285,15 @@ export interface RpcCommandMap {
   get_commands: {};
 
   /** Discovery */
-  list_sessions: {};
+  list_sessions: {
+    workspacePath?: string;
+    limit?: number;
+    cursor?: string;
+    query?: string;
+    scope?: "active_workspace" | "workspace" | "workspaces";
+    includeActive?: boolean;
+    merge?: "replace" | "append";
+  };
   list_tree_entries: { sessionPath?: string };
   list_workspace_entries: {};
 
@@ -600,6 +608,10 @@ export interface RpcResponseMap {
       workspaceName?: string;
       workspacePath?: string;
     }>;
+    workspacePath?: string;
+    nextCursor?: string;
+    workspaceCursors?: Record<string, string | null>;
+    merge?: "replace" | "append";
   };
   list_tree_entries: { entries: RpcTreeEntry[]; sessionPath?: string };
   list_workspace_entries: { entries: RpcWorkspaceEntry[] };

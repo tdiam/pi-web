@@ -38,6 +38,7 @@ const {
   treeEntries,
   activeTreeSessionPath,
   runningSessionPaths,
+  workspaceSessionCursors,
   commands,
   workspaceEntries,
   workspaceEntriesLoading,
@@ -56,6 +57,8 @@ const {
   compactSession,
   sendCommand,
   fetchWorkspaceEntries,
+  loadWorkspaceSessions,
+  refreshWorkspaceSessions,
   loadGitRepoState,
   switchGitBranch,
   createGitBranch,
@@ -226,7 +229,19 @@ async function handleSessionSelect(sessionPath: string) {
 }
 
 function handleRefreshSessions() {
-  sendCommand({ type: "list_sessions" }).catch(() => {});
+  refreshWorkspaceSessions().catch(() => {});
+}
+
+function handleLoadOlderSessions(payload: {
+  workspacePath: string;
+  cursor?: string | null;
+}) {
+  loadWorkspaceSessions({
+    workspacePath: payload.workspacePath,
+    cursor: payload.cursor,
+    limit: 50,
+    merge: "append",
+  }).catch(() => {});
 }
 
 async function handleNewSession(workspacePath: string) {
@@ -492,11 +507,13 @@ onBeforeUnmount(() => {
       :sessions="sessions"
       :active-session-path="activeSessionPath"
       :running-session-paths="runningSessionPaths"
+      :workspace-session-cursors="workspaceSessionCursors"
       :sidebar-open="sidebarOpen"
       :collapsed="leftSidebarCollapsed"
       @close-sidebar="sidebarOpen = false"
       @select-session="handleSessionSelect"
       @refresh-sessions="handleRefreshSessions"
+      @load-older-sessions="handleLoadOlderSessions"
       @new-session="handleNewSession"
       @rename-session="handleRenameSession"
       @delete-session="handleDeleteSession"

@@ -146,6 +146,11 @@ interface WorkspaceMetadata {
   workspacePath: string;
 }
 
+interface SessionListCursor {
+  updatedAt?: string;
+  path: string;
+}
+
 interface SessionListManager {
   getHeader: () => { id: string; timestamp: string; cwd?: string } | null;
   getCwd: () => string | undefined;
@@ -468,10 +473,15 @@ function listSessionFilesInDir(sessionDir: string): string[] {
   }
 }
 
-function listStoredSessionFiles(): string[] {
-  const sessionsRoot =
+function getSessionsRoot(): string {
+  return (
     process.env.PI_WEB_SESSIONS_ROOT ??
-    path.join(os.homedir(), ".pi", "agent", "sessions");
+    path.join(os.homedir(), ".pi", "agent", "sessions")
+  );
+}
+
+function listStoredSessionFiles(): string[] {
+  const sessionsRoot = getSessionsRoot();
   if (!fs.existsSync(sessionsRoot)) return [];
 
   const sessionFiles: string[] = [];
@@ -483,6 +493,182 @@ function listStoredSessionFiles(): string[] {
   }
 
   return sessionFiles;
+}
+
+function workspaceSessionDirName(workspacePath: string): string {
+  return `--${workspacePath.replace(/^[\/\\]/, "").replace(/[\/\\:]/g, "-")}--`;
+}
+
+function listWorkspaceSessionFiles(workspacePath: string): string[] {
+  return listSessionFilesInDir(
+    path.join(getSessionsRoot(), workspaceSessionDirName(workspacePath)),
+  );
+}
+
+function readFileChunk(
+  filePath: string,
+  start: number,
+  length: number,
+): string | null {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const safeStart = Math.max(0, Math.min(start, stat.size));
+    const safeLength = Math.max(0, Math.min(length, stat.size - safeStart));
+    const buffer = Buffer.alloc(safeLength);
+    fs.readSync(fd, buffer, 0, safeLength, safeStart);
+    return buffer.toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
+function readSessionFilePrefix(filePath: string, maxBytes = 64 * 1024): string {
+  return readFileChunk(filePath, 0, maxBytes) ?? "";
+}
+
+function readSessionFileSuffix(
+  filePath: string,
+  maxBytes = 128 * 1024,
+): string {
+  try {
+    const size = fs.statSync(filePath).size;
+    return (
+      readFileChunk(filePath, Math.max(0, size - maxBytes), maxBytes) ?? ""
+    );
+  } catch {
+    return "";
+  }
+}
+
+function parseJsonLine(line: string): Record<string, unknown> | null {
+  try {
+    const value = JSON.parse(line) as unknown;
+    return value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function findFirstUserMessageText(chunk: string): string | undefined {
+  for (const line of chunk.split("\n")) {
+    const entry = parseJsonLine(line);
+    if (entry?.type !== "message") continue;
+    const message = entry.message as { role?: unknown; content?: unknown };
+    if (message?.role !== "user") continue;
+    const text = collapseWhitespace(extractMessageText(message));
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function findLatestSessionInfoName(chunk: string): string | undefined {
+  const lines = chunk.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const entry = parseJsonLine(lines[i]);
+    if (entry?.type !== "session_info") continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    return name || undefined;
+  }
+  return undefined;
+}
+
+function encodeSessionCursor(session: WorkspaceSessionEntry): string {
+  const cursor: SessionListCursor = {
+    updatedAt: session.updatedAt ?? session.timestamp,
+    path: session.path,
+  };
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodeSessionCursor(value?: string): SessionListCursor | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8"),
+    ) as Partial<SessionListCursor>;
+    return typeof parsed.path === "string"
+      ? { updatedAt: parsed.updatedAt, path: parsed.path }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isAfterSessionCursor(
+  session: WorkspaceSessionEntry,
+  cursor: SessionListCursor | null,
+): boolean {
+  if (!cursor) return true;
+  return (
+    compareSessionsByRecency(session, {
+      path: cursor.path,
+      updatedAt: cursor.updatedAt,
+      timestamp: cursor.updatedAt,
+    }) > 0
+  );
+}
+
+function sessionMatchesListQuery(
+  session: WorkspaceSessionEntry,
+  query?: string,
+): boolean {
+  const q = query?.trim().toLowerCase();
+  if (!q) return true;
+  return [
+    session.name,
+    session.path,
+    session.workspaceName,
+    session.workspacePath,
+  ]
+    .filter(Boolean)
+    .some(value => value!.toLowerCase().includes(q));
+}
+
+function readWorkspaceSessionSummary(
+  sessionPath: string,
+  running: boolean,
+): WorkspaceSessionEntry | null {
+  const prefix = readSessionFilePrefix(sessionPath);
+  const firstLine = prefix.split("\n", 1)[0];
+  const header = parseJsonLine(firstLine) as {
+    id?: unknown;
+    timestamp?: unknown;
+    cwd?: unknown;
+    type?: unknown;
+  } | null;
+  if (header?.type !== "session" || typeof header.id !== "string") {
+    return null;
+  }
+
+  const timestamp =
+    typeof header.timestamp === "string"
+      ? normalizeSessionTimestamp(header.timestamp)
+      : undefined;
+  const workspace = workspaceMetadata(
+    typeof header.cwd === "string" ? header.cwd : undefined,
+    sessionPath,
+  );
+  const explicitName = findLatestSessionInfoName(
+    readSessionFileSuffix(sessionPath),
+  );
+  const firstUserMessage = findFirstUserMessageText(prefix);
+
+  return {
+    id: header.id,
+    name:
+      explicitName ?? firstUserMessage ?? path.basename(sessionPath, ".jsonl"),
+    path: sessionPath,
+    isRunning: running,
+    timestamp,
+    updatedAt: timestamp,
+    ...workspace,
+  };
 }
 
 function normalizeWorkspacePath(filePath: string): string {
@@ -4215,23 +4401,35 @@ export class WsRpcAdapter {
        * ================================================================== */
 
       case "list_sessions": {
+        const workspacePath =
+          command.workspacePath ??
+          (command.scope === "active_workspace"
+            ? this.sessionRuntime.currentGitCwd()
+            : undefined);
+        const merge = command.merge;
+
         try {
           const sessions: WorkspaceSessionEntry[] = [];
           const seenSessionPaths = new Set<string>();
           const liveSessionFile = ctx.sessionManager.getSessionFile();
+          const cursor = decodeSessionCursor(command.cursor);
+          const limit =
+            typeof command.limit === "number" && command.limit > 0
+              ? Math.floor(command.limit)
+              : undefined;
+
+          const appendSession = (session: WorkspaceSessionEntry | null) => {
+            if (!session || seenSessionPaths.has(session.path)) return;
+            seenSessionPaths.add(session.path);
+            sessions.push(session);
+          };
 
           const appendSessionManager = (
             sessionManager: SessionListManager,
             sessionPath?: string,
             fallbackWorkspacePath?: string,
           ) => {
-            if (
-              !sessionPath ||
-              seenSessionPaths.has(sessionPath) ||
-              !fs.existsSync(sessionPath)
-            ) {
-              return;
-            }
+            if (!sessionPath || !fs.existsSync(sessionPath)) return;
             const header = sessionManager.getHeader();
             if (!header) return;
 
@@ -4239,8 +4437,7 @@ export class WsRpcAdapter {
               sessionManager.getCwd() || header.cwd || fallbackWorkspacePath,
               sessionPath,
             );
-            seenSessionPaths.add(sessionPath);
-            sessions.push({
+            appendSession({
               id: header.id,
               name: sessionDisplayName(sessionManager, sessionPath),
               path: sessionPath,
@@ -4254,44 +4451,92 @@ export class WsRpcAdapter {
             });
           };
 
-          const storedSessionFiles = new Set(listStoredSessionFiles());
-          if (liveSessionFile) {
-            for (const sessionPath of listSessionFilesInDir(
-              path.dirname(liveSessionFile),
-            )) {
-              storedSessionFiles.add(sessionPath);
-            }
-          }
-
-          for (const sessionPath of storedSessionFiles) {
-            try {
-              appendSessionManager(
-                openSessionManager(sessionPath),
-                sessionPath,
-              );
-            } catch {
-              // Skip malformed or unreadable session files.
-            }
-          }
-
-          appendSessionManager(ctx.sessionManager, liveSessionFile, ctx.cwd);
-
-          for (const sessionManager of this.sessionRuntime.getCachedSessionManagers()) {
-            appendSessionManager(
-              sessionManager,
-              sessionManager.getSessionFile(),
-              ctx.cwd,
+          const storedSessionFiles = workspacePath
+            ? listWorkspaceSessionFiles(workspacePath)
+            : listStoredSessionFiles();
+          if (!workspacePath && liveSessionFile) {
+            storedSessionFiles.push(
+              ...listSessionFilesInDir(path.dirname(liveSessionFile)),
             );
           }
 
-          sessions.sort(compareSessionsByRecency);
+          for (const sessionPath of storedSessionFiles) {
+            appendSession(
+              readWorkspaceSessionSummary(
+                sessionPath,
+                sessionPath === liveSessionFile
+                  ? !ctx.isIdle()
+                  : this.sessionRuntime.isSessionRunning(sessionPath),
+              ),
+            );
+          }
+
+          if (command.includeActive !== false) {
+            appendSessionManager(ctx.sessionManager, liveSessionFile, ctx.cwd);
+
+            for (const sessionManager of this.sessionRuntime.getCachedSessionManagers()) {
+              appendSessionManager(
+                sessionManager,
+                sessionManager.getSessionFile(),
+                ctx.cwd,
+              );
+            }
+          }
+
+          const filteredSessions = sessions
+            .filter(session => isAfterSessionCursor(session, cursor))
+            .filter(session => sessionMatchesListQuery(session, command.query))
+            .sort(compareSessionsByRecency);
+          let pageSessions: WorkspaceSessionEntry[];
+          let nextCursor: string | undefined;
+          let workspaceCursors: Record<string, string | null> | undefined;
+
+          if (command.scope === "workspaces" && !workspacePath && limit) {
+            workspaceCursors = {};
+            const sessionsByWorkspace = new Map<
+              string,
+              WorkspaceSessionEntry[]
+            >();
+            for (const session of filteredSessions) {
+              const key = session.workspacePath ?? session.workspaceId ?? "";
+              if (!key) continue;
+              const group = sessionsByWorkspace.get(key) ?? [];
+              group.push(session);
+              sessionsByWorkspace.set(key, group);
+            }
+
+            pageSessions = [];
+            for (const [key, group] of sessionsByWorkspace) {
+              const page = group.slice(0, limit);
+              pageSessions.push(...page);
+              workspaceCursors[key] =
+                group.length > limit
+                  ? encodeSessionCursor(page[page.length - 1])
+                  : null;
+            }
+            pageSessions.sort(compareSessionsByRecency);
+          } else {
+            pageSessions = limit
+              ? filteredSessions.slice(0, limit)
+              : filteredSessions;
+            nextCursor =
+              limit && filteredSessions.length > limit
+                ? encodeSessionCursor(pageSessions[pageSessions.length - 1])
+                : undefined;
+          }
 
           return {
             id: correlationId,
             type: "response" as const,
             command: "list_sessions" as const,
             success: true as const,
-            data: { sessions },
+            data: {
+              sessions: pageSessions,
+              workspacePath,
+              nextCursor,
+              workspaceCursors,
+              merge,
+            },
           };
         } catch {
           return {
@@ -4299,7 +4544,11 @@ export class WsRpcAdapter {
             type: "response" as const,
             command: "list_sessions" as const,
             success: true as const,
-            data: { sessions: [] as WorkspaceSessionEntry[] },
+            data: {
+              sessions: [] as WorkspaceSessionEntry[],
+              workspacePath,
+              merge,
+            },
           };
         }
       }
