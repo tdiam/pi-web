@@ -116,6 +116,7 @@ const pendingRevision = ref<{
   text: string;
   preview: string;
   hasImages: boolean;
+  images: RpcImageContent[];
 } | null>(null);
 const editQueuedPayload = ref<{
   text: string;
@@ -651,6 +652,7 @@ function handleReviseMessage(payload: {
   text: string;
   preview: string;
   hasImages: boolean;
+  images: RpcImageContent[];
 }) {
   pendingRevision.value = payload;
 }

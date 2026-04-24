@@ -9,6 +9,7 @@ import {
   watch,
 } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
+import type { RpcImageContent } from "../shared-types";
 import { userMessageCopyText } from "../utils/messageCopy";
 import {
   buildTranscriptDisplayItems,
@@ -48,6 +49,7 @@ const emit = defineEmits<{
       text: string;
       preview: string;
       hasImages: boolean;
+      images: RpcImageContent[];
     },
   ];
 }>();
@@ -424,8 +426,33 @@ function userMessageText(msg: TranscriptEntry): string {
   return messageContent(msg).trim();
 }
 
-function hasMessageImages(msg: TranscriptEntry): boolean {
-  return contentBlocks(msg).some(block => block.kind === "image");
+function messageImages(msg: TranscriptEntry): RpcImageContent[] {
+  if (!Array.isArray(msg.content)) return [];
+
+  return msg.content.flatMap(item => {
+    if (typeof item !== "object" || item === null) return [];
+
+    const block = item as {
+      type?: unknown;
+      data?: unknown;
+      mimeType?: unknown;
+    };
+    if (
+      block.type !== "image" ||
+      typeof block.data !== "string" ||
+      typeof block.mimeType !== "string"
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        type: "image" as const,
+        data: block.data,
+        mimeType: block.mimeType,
+      },
+    ];
+  });
 }
 
 function revisionPreview(text: string, maxLength: number = 96): string {
@@ -449,11 +476,13 @@ function canReviseMessage(msg: TranscriptEntry): msg is TranscriptEntry & {
 function handleRevise(msg: TranscriptEntry) {
   if (!canReviseMessage(msg)) return;
   const text = userMessageText(msg);
+  const images = messageImages(msg);
   emit("revise", {
     entryId: msg.id,
     text,
     preview: revisionPreview(text),
-    hasImages: hasMessageImages(msg),
+    hasImages: images.length > 0,
+    images,
   });
 }
 

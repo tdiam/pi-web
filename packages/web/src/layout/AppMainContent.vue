@@ -56,6 +56,7 @@ defineProps<{
     text: string;
     preview: string;
     hasImages: boolean;
+    images: RpcImageContent[];
   } | null;
   allowRevision: boolean;
   pendingMessageCount: number;
@@ -83,6 +84,7 @@ const emit = defineEmits<{
       text: string;
       preview: string;
       hasImages: boolean;
+      images: RpcImageContent[];
     },
   ];
   cancelRevision: [];

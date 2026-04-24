@@ -52,6 +52,7 @@ const props = defineProps<{
     text: string;
     preview: string;
     hasImages: boolean;
+    images: RpcImageContent[];
   } | null;
   pendingMessageCount: number;
   editQueuedPayload: { text: string; images: RpcImageContent[] } | null;
@@ -163,6 +164,59 @@ const revisionBackup = ref<{
 
 let attachmentNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 let dragDepth = 0;
+
+function restoredAttachmentExtension(mimeType: string): string {
+  switch (mimeType) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/gif":
+      return "gif";
+    case "image/webp":
+      return "webp";
+    default:
+      return "img";
+  }
+}
+
+function restoredAttachmentSize(base64Data: string): number {
+  const normalized = base64Data.replace(/\s+/g, "");
+  if (!normalized) return 0;
+
+  const padding = normalized.endsWith("==")
+    ? 2
+    : normalized.endsWith("=")
+      ? 1
+      : 0;
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
+}
+
+function restoredAttachmentId(index: number): string {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `restored_attachment_${Date.now().toString(36)}_${index.toString(36)}_${Math.random().toString(36).slice(2)}`;
+}
+
+function attachmentsFromRpcImages(
+  images: readonly RpcImageContent[] | undefined,
+): ComposerAttachment[] {
+  if (!images?.length) return [];
+
+  return images.map((image, index) => {
+    const extension = restoredAttachmentExtension(image.mimeType);
+    return {
+      id: restoredAttachmentId(index),
+      type: "image",
+      data: image.data,
+      mimeType: image.mimeType,
+      name: `image-${index + 1}.${extension}`,
+      size: restoredAttachmentSize(image.data),
+      previewUrl: `data:${image.mimeType};base64,${image.data}`,
+    };
+  });
+}
 
 function normalizeSubmittedText(value: string): string {
   const normalized = value.replace(/\r\n/g, "\n");
@@ -312,7 +366,11 @@ watch(
         attachments: [...attachments.value],
       };
     }
-    applyExternalText(revision.text, { clearAttachments: true });
+    applyExternalText(revision.text);
+    attachments.value = attachmentsFromRpcImages(revision.images);
+    if (fileInputRef.value) {
+      fileInputRef.value.value = "";
+    }
   },
 );
 
@@ -321,7 +379,7 @@ watch(
   payload => {
     if (!payload) return;
     inputText.value = payload.text;
-    attachments.value = [];
+    attachments.value = attachmentsFromRpcImages(payload.images);
     if (fileInputRef.value) {
       fileInputRef.value.value = "";
     }
@@ -703,7 +761,7 @@ resizeTextarea();
             <span class="revision-kicker">Revising earlier message</span>
             <p class="revision-preview">{{ revision.preview }}</p>
             <p v-if="revision.hasImages" class="revision-note">
-              Only the text was copied. Re-attach images if you still need them.
+              Original images were restored for this revision.
             </p>
           </div>
           <button
