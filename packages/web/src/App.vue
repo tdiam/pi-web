@@ -1072,6 +1072,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 900px) {
   .app-shell {
+    --mobile-header-offset: calc(env(safe-area-inset-top) + 50px);
     display: flex;
     flex-direction: column;
   }

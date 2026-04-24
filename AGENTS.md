@@ -12,12 +12,6 @@ repository.
 - `pnpm fmt` / `pnpm run fmt:check` — format/check with `oxfmt`
 - `pnpm lint` / `pnpm run lint:fix` — lint/fix with `oxlint`
 
-## Dev Workflow
-
-When working on the browser UI, set `PI_BRIDGE_PORT=8080` before starting Pi so
-the Vite `/ws` proxy has a stable target. Run `npm run dev:web`, start Pi, run
-`/web`, then open the Vite URL.
-
 ## Architecture
 
 - `packages/bin/` — Pi extension entry point, registers `/web` command
@@ -31,6 +25,8 @@ the Vite `/ws` proxy has a stable target. Run `npm run dev:web`, start Pi, run
   @mariozechner/pi-ai carefuilly, especially the wire protocol of pi
 - Do not add thin wrapper functions around existing functions unless the wrapper
   adds real value beyond renaming.
-- use git conventional commits specification when commit
-- do not use `nl -ba $file | rg -n $pattern`, use `car $file | rg -n $pattern`
+- Use git conventional commits specification when commit
+- Do not use `nl -ba $file | rg -n $pattern`, use `car $file | rg -n $pattern`
   instead
+- If you apply any edits on vue codes in @packages/web/src, run
+  `pnpm run build:web`
