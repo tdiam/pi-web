@@ -623,7 +623,8 @@ watch(
   flex-direction: column;
   gap: 4px;
   overflow-y: auto;
-  padding: 0 0 8px;
+  padding: 0 6px 8px 0;
+  scrollbar-gutter: stable;
 }
 
 .workspace-group {
