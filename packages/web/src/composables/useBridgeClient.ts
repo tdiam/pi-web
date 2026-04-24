@@ -1745,10 +1745,7 @@ async function fetchInitialState() {
       return;
     }
 
-    await Promise.all([
-      restoreLiveSessionState(),
-      ...bootstrapRequests,
-    ]);
+    await Promise.all([restoreLiveSessionState(), ...bootstrapRequests]);
   } catch {
     transcriptInitialLoading.value = false;
     // Individual errors already handled by reject; swallow aggregate

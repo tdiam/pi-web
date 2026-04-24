@@ -1389,7 +1389,8 @@ function projectTreeEntriesWithTranscriptMessage(
     isActive: false,
   }));
   const existingIndex = nextEntries.findIndex(
-    entry => entry.id === projectedEntryId || entry.id === message.transcriptKey,
+    entry =>
+      entry.id === projectedEntryId || entry.id === message.transcriptKey,
   );
 
   if (existingIndex >= 0) {
@@ -3275,9 +3276,8 @@ export class WsRpcAdapter {
     );
     if (!payload) return;
 
-    let treeEntries = this.sessionRuntime.buildTreeEntriesForSessionPath(
-      sessionPath,
-    );
+    let treeEntries =
+      this.sessionRuntime.buildTreeEntriesForSessionPath(sessionPath);
     if (
       !treeEntries.some(
         entry =>

@@ -87,9 +87,7 @@ function treeEntryIdForElement(element: HTMLElement): string | null {
     return element.dataset.treeEntryId;
   }
 
-  return (
-    element.dataset.treeEntryIds?.split(/\s+/).find(Boolean) ?? null
-  );
+  return element.dataset.treeEntryIds?.split(/\s+/).find(Boolean) ?? null;
 }
 
 function findTreeEntryElement(messageId: string): HTMLElement | null {
@@ -97,18 +95,20 @@ function findTreeEntryElement(messageId: string): HTMLElement | null {
   if (!root || !messageId) return null;
 
   return (
-    [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(element => {
-      if (element.dataset.treeEntryId === messageId) {
-        return true;
-      }
+    [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(
+      element => {
+        if (element.dataset.treeEntryId === messageId) {
+          return true;
+        }
 
-      return (
-        element.dataset.treeEntryIds
-          ?.split(/\s+/)
-          .filter(Boolean)
-          .includes(messageId) ?? false
-      );
-    }) ?? null
+        return (
+          element.dataset.treeEntryIds
+            ?.split(/\s+/)
+            .filter(Boolean)
+            .includes(messageId) ?? false
+        );
+      },
+    ) ?? null
   );
 }
 
@@ -126,9 +126,9 @@ function captureScrollSnapshot(): SessionScrollSnapshot | null {
   if (!root) return null;
 
   const rootRect = root.getBoundingClientRect();
-  const anchorElement = [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(
-    element => element.getBoundingClientRect().bottom > rootRect.top,
-  );
+  const anchorElement = [
+    ...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR),
+  ].find(element => element.getBoundingClientRect().bottom > rootRect.top);
 
   return {
     anchorEntryId: anchorElement ? treeEntryIdForElement(anchorElement) : null,
@@ -213,7 +213,11 @@ function tryRestorePendingSessionScroll(): boolean {
     return true;
   }
 
-  if (pending.snapshot.anchorEntryId && props.hasOlder && !pending.waitingForOlder) {
+  if (
+    pending.snapshot.anchorEntryId &&
+    props.hasOlder &&
+    !pending.waitingForOlder
+  ) {
     pending.waitingForOlder = true;
     emit("loadOlder");
     return true;
@@ -576,14 +580,15 @@ watch(
 );
 
 watch(
-  () => [
-    props.sessionPath,
-    props.messages,
-    props.hasOlder,
-    props.initialLoading,
-    props.pageLoading,
-    showBusyIndicator.value,
-  ] as const,
+  () =>
+    [
+      props.sessionPath,
+      props.messages,
+      props.hasOlder,
+      props.initialLoading,
+      props.pageLoading,
+      showBusyIndicator.value,
+    ] as const,
   async () => {
     await syncViewportAfterRender();
   },

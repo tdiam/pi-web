@@ -49,9 +49,11 @@ function updateMockLocation(url: string) {
 // Mock location for connect()
 vi.stubGlobal("location", mockLocation);
 vi.stubGlobal("history", {
-  pushState: vi.fn((_state: unknown, _title: string, url?: string | URL | null) => {
-    if (typeof url === "string") updateMockLocation(url);
-  }),
+  pushState: vi.fn(
+    (_state: unknown, _title: string, url?: string | URL | null) => {
+      if (typeof url === "string") updateMockLocation(url);
+    },
+  ),
   replaceState: vi.fn(
     (_state: unknown, _title: string, url?: string | URL | null) => {
       if (typeof url === "string") updateMockLocation(url);
