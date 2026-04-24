@@ -219,20 +219,35 @@ const barColor = computed(() => {
 
 @media (max-width: 900px) {
   .stats-bar {
+    justify-content: flex-start;
     padding: 6px 16px 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .stats-bar::-webkit-scrollbar {
+    display: none;
   }
 
   .stats-inner {
-    width: 100%;
-    flex-wrap: wrap;
+    width: max-content;
+    min-width: 100%;
+    flex-wrap: nowrap;
     gap: 6px;
   }
 
+  .stats-leading,
+  .stats-trailing,
+  .stat-chip {
+    flex-shrink: 0;
+  }
+
   .stats-trailing {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-start;
-    flex-wrap: wrap;
+    width: max-content;
+    margin-left: auto;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
     gap: 6px;
   }
 }
@@ -242,22 +257,8 @@ const barColor = computed(() => {
     padding: 4px 12px 0;
   }
 
-  .stat-chip {
-    max-width: 100%;
-  }
-
-  .context-chip {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
   .context-bar-track {
     width: 40px;
-  }
-
-  .stat-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }
 </style>
