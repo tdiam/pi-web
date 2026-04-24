@@ -408,7 +408,6 @@ watch(
               active: s.path === activeSessionPath,
               running: isSessionRunning(s.path),
             }"
-            :title="s.path"
             @click="handleSessionSelect(s.path)"
             @keydown.enter.prevent="handleSessionSelect(s.path)"
             @contextmenu.prevent="openMenu($event, s.path)"
@@ -510,7 +509,6 @@ watch(
             active: s.path === activeSessionPath,
             running: isSessionRunning(s.path),
           }"
-          :title="s.path"
           @click="handleSessionSelect(s.path, true)"
           @keydown.enter.prevent="handleSessionSelect(s.path, true)"
           @contextmenu.prevent="openMenu($event, s.path)"
@@ -1221,11 +1219,87 @@ watch(
 @media (max-width: 700px) {
   .older-modal-overlay {
     align-items: stretch;
-    padding: 12px;
+    padding: 8px;
   }
 
   .older-modal {
-    max-height: calc(100vh - 24px);
+    width: 100%;
+    max-height: calc(100vh - 16px);
+    border-radius: 14px;
+  }
+
+  .older-modal-header {
+    gap: 12px;
+    padding: 14px 14px 10px;
+  }
+
+  .older-modal-title {
+    font-size: 0.95rem;
+    line-height: 1.25;
+  }
+
+  .older-modal-path {
+    font-size: 0.72rem;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .modal-session-search {
+    height: 46px;
+    margin: 12px 14px;
+    padding: 0 12px;
+    gap: 10px;
+    border-radius: 12px;
+  }
+
+  .modal-session-search svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .modal-session-search input {
+    height: 36px;
+    font-size: 0.95rem;
+  }
+
+  .older-modal-list {
+    padding: 0 8px 10px;
+  }
+
+  .modal-session-item {
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 0;
+    padding: 8px 10px;
+  }
+
+  .modal-session-copy {
+    align-items: flex-start;
+    padding-top: 1px;
+  }
+
+  .modal-session-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .item-status {
+    width: 16px;
+    height: 16px;
+    margin-top: 2px;
+  }
+
+  .modal-load-more {
+    margin: 8px 8px 2px;
+  }
+
+  .modal-empty {
+    padding: 16px 10px;
   }
 }
 
