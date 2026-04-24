@@ -28,6 +28,7 @@ import MarkdownRenderer from "./MarkdownRenderer.vue";
 import ToolCard from "./ToolCard.vue";
 
 const props = defineProps<{
+  sessionPath: string | null;
   messages: readonly TranscriptEntry[];
   hasOlder: boolean;
   initialLoading: boolean;
@@ -54,18 +55,101 @@ const emit = defineEmits<{
 const container = ref<HTMLDivElement | null>(null);
 const userCopySelector = "[data-user-message-index]";
 
+type SessionScrollSnapshot = {
+  anchorEntryId: string | null;
+  anchorOffset: number;
+  scrollTop: number;
+  stickToBottom: boolean;
+};
+
+type PendingSessionRestore = {
+  sessionPath: string;
+  snapshot: SessionScrollSnapshot;
+  waitingForOlder: boolean;
+};
+
 let wasDisconnected = false;
 let savedScrollTop = 0;
 let savedScrollHeight = 0;
 let topLoadArmed = true;
+let shouldStickToBottom = true;
 let pendingHistoryAnchor: { scrollTop: number; scrollHeight: number } | null =
   null;
+let pendingSessionRestore: PendingSessionRestore | null = null;
+const sessionScrollSnapshots = new Map<string, SessionScrollSnapshot>();
 const TREE_ENTRY_SELECTOR = "[data-tree-entry-id], [data-tree-entry-ids]";
 
 const TOP_LOAD_THRESHOLD = 120;
+const AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+
+function treeEntryIdForElement(element: HTMLElement): string | null {
+  if (element.dataset.treeEntryId) {
+    return element.dataset.treeEntryId;
+  }
+
+  return (
+    element.dataset.treeEntryIds?.split(/\s+/).find(Boolean) ?? null
+  );
+}
+
+function findTreeEntryElement(messageId: string): HTMLElement | null {
+  const root = container.value;
+  if (!root || !messageId) return null;
+
+  return (
+    [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(element => {
+      if (element.dataset.treeEntryId === messageId) {
+        return true;
+      }
+
+      return (
+        element.dataset.treeEntryIds
+          ?.split(/\s+/)
+          .filter(Boolean)
+          .includes(messageId) ?? false
+      );
+    }) ?? null
+  );
+}
+
+function isNearBottom(): boolean {
+  const root = container.value;
+  if (!root) return true;
+  return (
+    root.scrollHeight - root.clientHeight - root.scrollTop <=
+    AUTO_SCROLL_BOTTOM_THRESHOLD
+  );
+}
+
+function captureScrollSnapshot(): SessionScrollSnapshot | null {
+  const root = container.value;
+  if (!root) return null;
+
+  const rootRect = root.getBoundingClientRect();
+  const anchorElement = [...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR)].find(
+    element => element.getBoundingClientRect().bottom > rootRect.top,
+  );
+
+  return {
+    anchorEntryId: anchorElement ? treeEntryIdForElement(anchorElement) : null,
+    anchorOffset: anchorElement
+      ? anchorElement.getBoundingClientRect().top - rootRect.top
+      : 0,
+    scrollTop: root.scrollTop,
+    stickToBottom: isNearBottom(),
+  };
+}
+
+function rememberSessionScroll(sessionPath: string | null = props.sessionPath) {
+  if (!sessionPath) return;
+  const snapshot = captureScrollSnapshot();
+  if (!snapshot) return;
+  sessionScrollSnapshots.set(sessionPath, snapshot);
+}
 
 function preserveScroll() {
   if (!container.value) return;
+  rememberSessionScroll();
   savedScrollTop = container.value.scrollTop;
   savedScrollHeight = container.value.scrollHeight;
   wasDisconnected = true;
@@ -75,27 +159,99 @@ function restoreScroll() {
   if (!container.value || !wasDisconnected) return;
   const delta = container.value.scrollHeight - savedScrollHeight;
   container.value.scrollTop = savedScrollTop + delta;
+  shouldStickToBottom = isNearBottom();
   wasDisconnected = false;
 }
 
-function scrollToMessageId(messageId: string): boolean {
+function scrollToBottom() {
+  if (!container.value) return;
+  container.value.scrollTop = container.value.scrollHeight;
+  shouldStickToBottom = true;
+}
+
+function restoreSnapshotByAnchor(snapshot: SessionScrollSnapshot): boolean {
   const root = container.value;
-  if (!root || !messageId) return false;
+  if (!root || !snapshot.anchorEntryId) return false;
 
-  const target = [
-    ...root.querySelectorAll<HTMLElement>(TREE_ENTRY_SELECTOR),
-  ].find(element => {
-    if (element.dataset.treeEntryId === messageId) {
-      return true;
-    }
+  const target = findTreeEntryElement(snapshot.anchorEntryId);
+  if (!target) return false;
 
-    return (
-      element.dataset.treeEntryIds
-        ?.split(/\s+/)
-        .filter(Boolean)
-        .includes(messageId) ?? false
-    );
-  });
+  const rootRect = root.getBoundingClientRect();
+  const targetTop = target.getBoundingClientRect().top - rootRect.top;
+  root.scrollTop += targetTop - snapshot.anchorOffset;
+  shouldStickToBottom = isNearBottom();
+  return true;
+}
+
+function restoreSnapshotByScrollTop(snapshot: SessionScrollSnapshot) {
+  if (!container.value) return;
+  const maxScrollTop = Math.max(
+    0,
+    container.value.scrollHeight - container.value.clientHeight,
+  );
+  container.value.scrollTop = Math.min(maxScrollTop, snapshot.scrollTop);
+  shouldStickToBottom = isNearBottom();
+}
+
+function tryRestorePendingSessionScroll(): boolean {
+  const pending = pendingSessionRestore;
+  if (!pending || props.sessionPath !== pending.sessionPath) return false;
+
+  if (pending.snapshot.stickToBottom) {
+    scrollToBottom();
+    pendingSessionRestore = null;
+    return true;
+  }
+
+  if (props.pageLoading || props.initialLoading) {
+    return true;
+  }
+
+  pending.waitingForOlder = false;
+  if (restoreSnapshotByAnchor(pending.snapshot)) {
+    pendingSessionRestore = null;
+    return true;
+  }
+
+  if (pending.snapshot.anchorEntryId && props.hasOlder && !pending.waitingForOlder) {
+    pending.waitingForOlder = true;
+    emit("loadOlder");
+    return true;
+  }
+
+  restoreSnapshotByScrollTop(pending.snapshot);
+  pendingSessionRestore = null;
+  return true;
+}
+
+async function syncViewportAfterRender() {
+  await nextTick();
+
+  if (pendingHistoryAnchor && container.value) {
+    const delta =
+      container.value.scrollHeight - pendingHistoryAnchor.scrollHeight;
+    container.value.scrollTop = pendingHistoryAnchor.scrollTop + delta;
+    shouldStickToBottom = isNearBottom();
+    pendingHistoryAnchor = null;
+    return;
+  }
+
+  if (tryRestorePendingSessionScroll()) {
+    return;
+  }
+
+  if (wasDisconnected) {
+    restoreScroll();
+    return;
+  }
+
+  if (shouldStickToBottom) {
+    scrollToBottom();
+  }
+}
+
+function scrollToMessageId(messageId: string): boolean {
+  const target = findTreeEntryElement(messageId);
   if (!target) return false;
 
   target.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -381,12 +537,14 @@ function maybeLoadOlderTranscript() {
 }
 
 function handleScroll() {
+  shouldStickToBottom = isNearBottom();
   maybeLoadOlderTranscript();
 }
 
 onMounted(() => {
   document.addEventListener("copy", handleCopy);
   container.value?.addEventListener("scroll", handleScroll, { passive: true });
+  shouldStickToBottom = isNearBottom();
 });
 onBeforeUnmount(() => {
   document.removeEventListener("copy", handleCopy);
@@ -394,39 +552,42 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  () => props.messages.length,
-  async () => {
-    await nextTick();
-
-    if (pendingHistoryAnchor && container.value) {
-      const delta =
-        container.value.scrollHeight - pendingHistoryAnchor.scrollHeight;
-      container.value.scrollTop = pendingHistoryAnchor.scrollTop + delta;
-      pendingHistoryAnchor = null;
-      return;
+  () => props.sessionPath,
+  (sessionPath, previousSessionPath) => {
+    if (previousSessionPath && previousSessionPath !== sessionPath) {
+      rememberSessionScroll(previousSessionPath);
     }
 
-    if (!wasDisconnected) {
-      if (container.value) {
-        container.value.scrollTop = container.value.scrollHeight;
-      }
-      return;
-    }
+    pendingSessionRestore = sessionPath
+      ? (() => {
+          const snapshot = sessionScrollSnapshots.get(sessionPath);
+          return snapshot
+            ? {
+                sessionPath,
+                snapshot,
+                waitingForOlder: false,
+              }
+            : null;
+        })()
+      : null;
 
-    restoreScroll();
+    topLoadArmed = true;
   },
 );
 
 watch(
-  () => showBusyIndicator.value,
-  async busy => {
-    if (busy) {
-      await nextTick();
-      if (container.value) {
-        container.value.scrollTop = container.value.scrollHeight;
-      }
-    }
+  () => [
+    props.sessionPath,
+    props.messages,
+    props.hasOlder,
+    props.initialLoading,
+    props.pageLoading,
+    showBusyIndicator.value,
+  ] as const,
+  async () => {
+    await syncViewportAfterRender();
   },
+  { immediate: true },
 );
 
 watch(
@@ -440,7 +601,7 @@ watch(
   },
 );
 
-defineExpose({ preserveScroll, scrollToMessageId });
+defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
 </script>
 
 <template>

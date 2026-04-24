@@ -24,6 +24,7 @@ import type { PendingTranscriptSessionEvent } from "../utils/transcript";
 defineProps<{
   compatWarningVisible: boolean;
   statusEntries: Record<string, string>;
+  activeSessionPath: string | null;
   transcript: readonly TranscriptEntry[];
   transcriptHasOlder: boolean;
   transcriptInitialLoading: boolean;
@@ -95,11 +96,19 @@ function preserveTranscriptScroll() {
   chatTranscriptRef.value?.preserveScroll();
 }
 
+function rememberTranscriptScroll() {
+  chatTranscriptRef.value?.rememberSessionScroll();
+}
+
 function scrollToTranscriptEntry(entryId: string): boolean {
   return chatTranscriptRef.value?.scrollToMessageId(entryId) ?? false;
 }
 
-defineExpose({ preserveTranscriptScroll, scrollToTranscriptEntry });
+defineExpose({
+  preserveTranscriptScroll,
+  rememberTranscriptScroll,
+  scrollToTranscriptEntry,
+});
 </script>
 
 <template>
@@ -118,6 +127,7 @@ defineExpose({ preserveTranscriptScroll, scrollToTranscriptEntry });
 
     <ChatTranscript
       ref="chatTranscriptRef"
+      :session-path="activeSessionPath"
       :messages="transcript"
       :has-older="transcriptHasOlder"
       :initial-loading="transcriptInitialLoading"

@@ -464,6 +464,7 @@ function toggleDebugMode() {
 
 async function handleSessionSelect(sessionPath: string) {
   pendingRevision.value = null;
+  mainContentRef.value?.rememberTranscriptScroll();
   try {
     const response = await switchSession(sessionPath);
     if (response.success) {
@@ -492,6 +493,7 @@ function handleLoadOlderSessions(payload: {
 
 async function handleNewSession(workspacePath: string) {
   pendingRevision.value = null;
+  mainContentRef.value?.rememberTranscriptScroll();
   try {
     const response = await newSession(workspacePath);
     if (response.success) {
@@ -813,6 +815,7 @@ onBeforeUnmount(() => {
           ref="mainContentRef"
           :compat-warning-visible="compatWarningVisible"
           :status-entries="statusEntries"
+          :active-session-path="activeSessionPath"
           :transcript="transcript"
           :transcript-has-older="transcriptHasOlder"
           :transcript-initial-loading="transcriptInitialLoading"
