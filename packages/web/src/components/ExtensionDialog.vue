@@ -89,7 +89,6 @@ watch(() => props.request, initFromRequest, { immediate: true });
 </script>
 
 <template>
-  <Teleport to="body">
     <div v-if="request" class="dialog-overlay" @click.self="handleCancel">
       <div class="dialog-panel">
         <div class="dialog-header">
@@ -176,7 +175,6 @@ watch(() => props.request, initFromRequest, { immediate: true });
         </div>
       </div>
     </div>
-  </Teleport>
 </template>
 
 <style scoped>
