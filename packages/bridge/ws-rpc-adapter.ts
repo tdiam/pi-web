@@ -3128,6 +3128,8 @@ class ExtensionUIBridge {
       } as RpcExtensionUIRequest);
     };
 
+    const noop = () => {};
+
     return {
       select: (
         title: string,
@@ -3246,7 +3248,20 @@ class ExtensionUIBridge {
         setEditorText(text);
       },
       setEditorComponent: () => {}, // Not supported
-      theme: {} as ExtensionUIContext["theme"], // Not available
+      theme: {
+        fg: noop,
+        bg: noop,
+        bold: noop,
+        italic: noop,
+        underline: noop,
+        inverse: noop,
+        strikethrough: noop,
+        getFgAnsi: noop,
+        getBgAnsi: noop,
+        getColorMode: noop,
+        getThinkingBorderColor: noop,
+        getBashModeBorderColor: noop,
+      } as unknown as ExtensionUIContext["theme"], // Not available
       getAllThemes: () => [],
       getTheme: () => undefined,
       setTheme: () => ({ success: false, error: "Not supported" }),
