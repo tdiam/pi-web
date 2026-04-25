@@ -83,6 +83,11 @@ export class DetachedSessionHandle {
   }
 
   async bindViewer(binding: ViewerBinding): Promise<void> {
+    // Skip bindExtensions when the same client rebinds — the Pi SDK emits
+    // a session_start event on every bindExtensions() call, so redundant
+    // calls (e.g. ensureDetachedSession() before each command) would fire
+    // session_start on every turn.
+    if (this.viewerBinding?.clientId === binding.clientId) return;
     this.viewerBinding = binding;
     if (!this.session) return;
     await this.bindSessionExtensions(this.session, binding.uiContext);
