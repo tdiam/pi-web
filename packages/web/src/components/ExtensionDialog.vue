@@ -210,6 +210,7 @@ watch(() => props.request, initFromRequest, { immediate: true });
   padding: 18px 20px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  white-space: pre;
 }
 
 .dialog-kicker {
