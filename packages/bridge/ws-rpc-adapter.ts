@@ -510,27 +510,6 @@ function workspaceSessionDirPath(workspacePath: string): string {
   return path.join(getSessionsRoot(), workspaceSessionDirName(workspacePath));
 }
 
-function legacyRegisteredWorkspaceDirName(workspacePath: string): string {
-  return `@@${Buffer.from(workspacePath, "utf8").toString("base64url")}@@`;
-}
-
-function migrateLegacyRegisteredWorkspaceDir(workspacePath: string): void {
-  const sessionsRoot = getSessionsRoot();
-  const legacyDir = path.join(
-    sessionsRoot,
-    legacyRegisteredWorkspaceDirName(workspacePath),
-  );
-  const currentDir = workspaceSessionDirPath(workspacePath);
-
-  if (!fs.existsSync(legacyDir) || fs.existsSync(currentDir)) return;
-
-  try {
-    fs.renameSync(legacyDir, currentDir);
-  } catch {
-    // Ignore migration failures and continue using the pi-native path.
-  }
-}
-
 function isExistingDirectory(directoryPath: string): boolean {
   try {
     return fs.statSync(directoryPath).isDirectory();
@@ -598,7 +577,6 @@ function ensureRegisteredWorkspace(workspacePath: string): {
   created: boolean;
 } {
   const normalizedWorkspacePath = workspacePath.trim();
-  migrateLegacyRegisteredWorkspaceDir(normalizedWorkspacePath);
   const sessionDir = workspaceSessionDirPath(normalizedWorkspacePath);
   const created = !fs.existsSync(sessionDir);
 
@@ -695,7 +673,6 @@ function pickWorkspaceDirectoryFromNativeDialog(): string | null {
 }
 
 function listWorkspaceSessionFiles(workspacePath: string): string[] {
-  migrateLegacyRegisteredWorkspaceDir(workspacePath);
   return listSessionFilesInDir(workspaceSessionDirPath(workspacePath));
 }
 
