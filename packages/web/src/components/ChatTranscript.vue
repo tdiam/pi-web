@@ -456,32 +456,20 @@ function toolBlockDiff(block: ToolContentBlock): string | undefined {
     .trim();
 }
 
-function isReadImageFileNote(text: string): boolean {
-  const lines = text.trim().split("\n");
-  if (!/^Read image file \[image\/[a-z0-9.+-]+\]$/i.test(lines[0] ?? "")) {
-    return false;
-  }
-  return lines.slice(1).every(line =>
-    /^\[(Image:|Image omitted:|Current model does not support images\.)/.test(
-      line,
-    ),
-  );
-}
-
 function toolBlockTextResult(block: ToolContentBlock): string {
   const diff = toolBlockDiff(block);
   if (diff) return diff;
+
+  if (block.toolName === "read" && toolBlockImages(block).length > 0) {
+    return "";
+  }
 
   const text = (block.resultBlocks ?? [])
     .flatMap(item => (item.kind === "text" ? [item.text] : []))
     .join("\n")
     .replace(/\r/g, "")
     .trim();
-  if (text) {
-    const isReadImageResult =
-      block.toolName === "read" && toolBlockImages(block).length > 0;
-    return isReadImageResult && isReadImageFileNote(text) ? "" : text;
-  }
+  if (text) return text;
 
   return block.resultText?.replace(/\r/g, "").trim() ?? "";
 }
@@ -499,12 +487,13 @@ function toolBlockEmptyState(block: ToolContentBlock): string {
 }
 
 function toolResultText(msg: TranscriptEntry): string {
-  const text = contentBlocks(msg)
+  if (msg.toolName === "read" && toolResultImages(msg).length > 0) {
+    return "";
+  }
+
+  return contentBlocks(msg)
     .flatMap(block => (block.kind === "text" ? [block.text] : []))
     .join("\n");
-  const isReadImageResult =
-    msg.toolName === "read" && toolResultImages(msg).length > 0;
-  return isReadImageResult && isReadImageFileNote(text) ? "" : text;
 }
 
 function toolResultPreview(msg: TranscriptEntry): string {
