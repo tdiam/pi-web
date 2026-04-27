@@ -275,13 +275,6 @@ function roleClass(role: string): "user" | "assistant" | "tool" | "system" {
   return "tool";
 }
 
-function roleLabel(role: string): string {
-  if (role === "toolResult") return "Tool Result";
-  if (role === "tool") return "Tool";
-  if (role === "system") return "System";
-  return role;
-}
-
 const expandedToolBlocks = ref(new Set<string>());
 const expandedThinking = ref(new Set<string>());
 const displayItems = computed(() =>
@@ -842,10 +835,7 @@ defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
           :data-message-id="item.message.id ?? undefined"
           :data-tree-entry-id="item.message.id ?? undefined"
         >
-          <div class="message-meta">
-            <span class="message-role">{{ roleLabel(item.message.role) }}</span>
-          </div>
-          <div class="message-content tool-row">
+          <div class="message-content tool">
             <div
               class="tool-inline"
               :data-status="item.message.isError ? 'error' : 'success'"
@@ -878,7 +868,6 @@ defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
                   <span class="tool-inline-name">{{
                     toolResultName(item.message)
                   }}</span>
-                  <span class="tool-inline-params">result</span>
                 </span>
                 <span
                   v-if="toolResultMeta(item.message)"
@@ -1508,22 +1497,7 @@ defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
 }
 
 .message-row.tool {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 16px;
-}
-
-.message-meta {
-  padding-top: 2px;
-}
-
-.message-role {
-  display: inline-block;
-  font-size: 0.64rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-subtle);
+  display: flex;
 }
 
 .message-stack {
@@ -1768,10 +1742,6 @@ defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
   max-height: 400px;
   overflow-y: auto;
   word-break: break-word;
-}
-
-.tool-row {
-  padding-left: 10px;
 }
 
 .tool-inline {
@@ -2019,19 +1989,9 @@ defineExpose({ preserveScroll, rememberSessionScroll, scrollToMessageId });
     display: none;
   }
 
-  .message-row.tool {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .message-meta {
-    display: none;
-  }
-
   .message-content.assistant,
   .message-content.tool,
-  .message-content.system,
-  .tool-row {
+  .message-content.system {
     margin-left: 0;
     max-width: 100%;
     padding-left: 0;
