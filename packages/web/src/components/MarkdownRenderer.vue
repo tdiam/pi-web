@@ -132,6 +132,8 @@ function sanitizeMarkdownHtml(html: string): string {
       "src",
       "title",
       "class",
+      "start",
+      "reversed",
       "data-mermaid-index",
       "data-code-index",
       "data-file-path",
@@ -612,6 +614,14 @@ watch(
 .markdown-body ol {
   margin: 0.5em 0;
   padding-left: 1.6em;
+}
+
+.markdown-body ul {
+  list-style: disc;
+}
+
+.markdown-body ol {
+  list-style: decimal;
 }
 
 .markdown-body li {
