@@ -536,6 +536,28 @@ function pendingTranscriptAnchorKey(): string | null {
   return message?.transcriptKey ?? message?.id ?? null;
 }
 
+function transcriptHasMessageKey(messageKey: string): boolean {
+  return transcript.value.some(
+    (message, index) =>
+      (message.transcriptKey ?? message.id ?? `message:${index}`) ===
+      messageKey,
+  );
+}
+
+function reanchorMissingPendingTranscriptConfigEvent() {
+  const pending = pendingTranscriptConfigEvent.value;
+  if (!pending || pending.sessionPath !== transcriptSessionPath.value) return;
+
+  const anchorKey = pending.insertAfterMessageKey;
+  if (typeof anchorKey !== "string" || !anchorKey.trim()) return;
+  if (transcriptHasMessageKey(anchorKey)) return;
+
+  pendingTranscriptConfigEvent.value = {
+    ...pending,
+    insertAfterMessageKey: pendingTranscriptAnchorKey(),
+  };
+}
+
 function samePendingTranscriptModel(
   left: PendingTranscriptSessionEvent["model"] | undefined,
   right: PendingTranscriptSessionEvent["model"] | undefined,
@@ -683,6 +705,7 @@ function replaceTranscript(
     queuedUserMessages.value = [];
   }
   transcriptSessionPath.value = sessionPath;
+  reanchorMissingPendingTranscriptConfigEvent();
   reconcilePendingTranscriptConfigEvent();
 }
 
@@ -718,6 +741,9 @@ function applyTranscriptPage(
   transcriptNewestCursor.value = page.newestCursor ?? null;
   transcriptInitialLoading.value = false;
   transcriptPageLoading.value = false;
+  if (mode === "replace") {
+    reanchorMissingPendingTranscriptConfigEvent();
+  }
   reconcilePendingTranscriptConfigEvent();
 }
 

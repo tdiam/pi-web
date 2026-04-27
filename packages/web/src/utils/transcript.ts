@@ -437,6 +437,26 @@ function insertPendingSessionEvent(
     sourceMessageIds: [],
   };
 
+  const previousItem = items[insertIndex - 1];
+  if (
+    previousItem?.kind === "session_event" &&
+    !insertionState.hasSeenNonConfigMessage
+  ) {
+    const mergedItem: TranscriptSessionEventDisplayItem = {
+      kind: "session_event",
+      key: `${previousItem.key}:${pendingEvent.key}`,
+      label: item.label,
+      model: item.model ?? previousItem.model,
+      thinkingLevel: item.thinkingLevel ?? previousItem.thinkingLevel,
+      sourceMessageIds: previousItem.sourceMessageIds,
+    };
+    return [
+      ...items.slice(0, insertIndex - 1),
+      mergedItem,
+      ...items.slice(insertIndex),
+    ];
+  }
+
   return [...items.slice(0, insertIndex), item, ...items.slice(insertIndex)];
 }
 

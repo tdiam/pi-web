@@ -509,6 +509,67 @@ describe("normalizeTranscript", () => {
     ]);
   });
 
+  it("merges pending session-start config with existing initial config", () => {
+    const items = buildTranscriptDisplayItems(
+      [
+        {
+          id: "m1",
+          role: "system",
+          content: [
+            {
+              type: "model_change",
+              provider: "deepseek",
+              modelId: "deepseek-v4-pro",
+            },
+          ],
+        },
+        {
+          id: "m2",
+          role: "system",
+          content: [
+            {
+              type: "thinking_level_change",
+              thinkingLevel: "medium",
+            },
+          ],
+        },
+        {
+          id: "u1",
+          role: "user",
+          content: "hello",
+        },
+      ],
+      {
+        pendingSessionEvent: {
+          key: "pending:1",
+          model: { provider: "kimi-coding", id: "k2p6" },
+          thinkingLevel: "high",
+          insertAfterMessageKey: null,
+        },
+      },
+    );
+
+    expect(items).toEqual([
+      {
+        kind: "session_event",
+        key: "session-event:m1-m2:pending:1",
+        label: "Session configured",
+        model: { provider: "kimi-coding", id: "k2p6" },
+        thinkingLevel: "high",
+        sourceMessageIds: ["m1", "m2"],
+      },
+      {
+        kind: "message",
+        message: {
+          id: "u1",
+          role: "user",
+          content: "hello",
+        },
+        messageIndex: 2,
+      },
+    ]);
+  });
+
   it("anchors a pending mid-session config event after the captured message", () => {
     const items = buildTranscriptDisplayItems(
       [

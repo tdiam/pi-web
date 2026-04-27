@@ -1323,6 +1323,96 @@ describe("extension_ui_request handling", () => {
     ).toBe("u1");
   });
 
+  it("reanchors a pending config event when revision removes its message", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_snapshot",
+        sessionPath: "/tmp/session.jsonl",
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content: "Original prompt",
+          },
+          {
+            id: "a1",
+            role: "assistant",
+            content: "Cancelled response",
+          },
+        ],
+        hasOlder: false,
+        hasNewer: false,
+      },
+    });
+
+    const pendingSet = client.setThinkingLevel("high");
+    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+      message.includes('"type":"set_thinking_level"'),
+    );
+    expect(setCommandCall).toBeDefined();
+    const setCommand = JSON.parse(setCommandCall?.[0] as string) as {
+      payload: { id: string };
+    };
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: setCommand.payload.id,
+        type: "response",
+        command: "set_thinking_level",
+        success: true,
+      },
+    });
+
+    await pendingSet;
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBe("a1");
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_snapshot",
+        sessionPath: "/tmp/session.jsonl",
+        messages: [
+          {
+            id: "u1",
+            role: "user",
+            content: "Original prompt",
+          },
+        ],
+        hasOlder: false,
+        hasNewer: false,
+      },
+    });
+
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBe("u1");
+
+    simulateMessage(ws, {
+      type: "event",
+      payload: {
+        type: "transcript_upsert",
+        sessionPath: "/tmp/session.jsonl",
+        message: {
+          id: "a2",
+          role: "assistant",
+          content: "Replacement response",
+        },
+      },
+    });
+
+    expect(
+      client.pendingTranscriptConfigEvent.value?.insertAfterMessageKey,
+    ).toBe("u1");
+  });
+
   it("setAutoCompactionEnabled sends the command and updates local state", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();
