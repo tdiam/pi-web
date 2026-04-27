@@ -2232,9 +2232,11 @@ describe("WsRpcAdapter", () => {
     });
 
     it("lists registered workspaces even before the first session exists", async () => {
-      const workspaceDir = fs.mkdtempSync(
-        path.join(os.tmpdir(), "pi-web-registered-workspace-"),
+      const workspaceRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "piwebregisteredworkspace"),
       );
+      const workspaceDir = path.join(workspaceRoot, "example");
+      fs.mkdirSync(workspaceDir);
       (
         context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
       ).mockReturnValue(undefined);
@@ -2302,6 +2304,73 @@ describe("WsRpcAdapter", () => {
           isWorkspacePlaceholder: true,
         },
       ]);
+    });
+
+    it("restores registered workspace paths when directory names contain hyphens", async () => {
+      const workspaceRoot = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-registered-workspace-"),
+      );
+      const workspaceDir = path.join(workspaceRoot, "demo-project");
+      fs.mkdirSync(workspaceDir);
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(undefined);
+
+      const registerCommand: RpcCommand = {
+        id: "cmd-register-hyphen",
+        type: "register_workspace",
+        workspacePath: workspaceDir,
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({ type: "command", payload: registerCommand }),
+        ),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const listCommand: RpcCommand = {
+        id: "cmd-list-hyphen",
+        type: "list_sessions",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: listCommand })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      const listResponse = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "list_sessions" &&
+          call.payload.id === "cmd-list-hyphen",
+      );
+
+      expect(listResponse?.payload.success).toBe(true);
+      expect(listResponse?.payload.data.sessions).toContainEqual({
+        id: `workspace:${workspaceDir}`,
+        name: path.basename(workspaceDir),
+        path: path.join(
+          process.env.PI_WEB_SESSIONS_ROOT!,
+          `--${workspaceDir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+        ),
+        isRunning: false,
+        timestamp: undefined,
+        updatedAt: undefined,
+        workspaceId: workspaceDir,
+        workspaceName: path.basename(workspaceDir),
+        workspacePath: workspaceDir,
+        isWorkspacePlaceholder: true,
+      });
     });
 
     it("should handle list_workspace_entries command", async () => {

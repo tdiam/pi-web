@@ -487,8 +487,6 @@ function getSessionsRoot(): string {
   );
 }
 
-const WORKSPACE_MARKER_FILE = ".pi-workspace.json";
-
 function listStoredSessionFiles(): string[] {
   const sessionsRoot = getSessionsRoot();
   if (!fs.existsSync(sessionsRoot)) return [];
@@ -512,26 +510,105 @@ function workspaceSessionDirPath(workspacePath: string): string {
   return path.join(getSessionsRoot(), workspaceSessionDirName(workspacePath));
 }
 
-function readRegisteredWorkspace(
-  sessionDir: string,
-): RegisteredWorkspace | null {
+function legacyRegisteredWorkspaceDirName(workspacePath: string): string {
+  return `@@${Buffer.from(workspacePath, "utf8").toString("base64url")}@@`;
+}
+
+function migrateLegacyRegisteredWorkspaceDir(workspacePath: string): void {
+  const sessionsRoot = getSessionsRoot();
+  const legacyDir = path.join(
+    sessionsRoot,
+    legacyRegisteredWorkspaceDirName(workspacePath),
+  );
+  const currentDir = workspaceSessionDirPath(workspacePath);
+
+  if (!fs.existsSync(legacyDir) || fs.existsSync(currentDir)) return;
+
   try {
-    const markerPath = path.join(sessionDir, WORKSPACE_MARKER_FILE);
-    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as {
-      workspacePath?: unknown;
-    };
-    const workspacePath =
-      typeof marker.workspacePath === "string"
-        ? marker.workspacePath.trim()
-        : "";
-    if (!workspacePath) return null;
-    return {
-      workspacePath,
-      sessionDir,
-    };
+    fs.renameSync(legacyDir, currentDir);
   } catch {
+    // Ignore migration failures and continue using the pi-native path.
+  }
+}
+
+function isExistingDirectory(directoryPath: string): boolean {
+  try {
+    return fs.statSync(directoryPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function resolveExistingWorkspacePathFromEncoded(
+  encoded: string,
+): string | null {
+  const tokens = encoded.split("-").filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  const cache = new Map<string, string | null>();
+
+  const search = (basePath: string, tokenIndex: number): string | null => {
+    const cacheKey = `${basePath}\0${tokenIndex}`;
+    const cached = cache.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    if (tokenIndex >= tokens.length) {
+      const resolved = isExistingDirectory(basePath) ? basePath : null;
+      cache.set(cacheKey, resolved);
+      return resolved;
+    }
+
+    for (let length = 1; tokenIndex + length <= tokens.length; length += 1) {
+      const segment = tokens.slice(tokenIndex, tokenIndex + length).join("-");
+      const candidate = path.join(basePath, segment);
+      if (!isExistingDirectory(candidate)) continue;
+
+      const resolved = search(candidate, tokenIndex + length);
+      if (resolved) {
+        cache.set(cacheKey, resolved);
+        return resolved;
+      }
+    }
+
+    cache.set(cacheKey, null);
+    return null;
+  };
+
+  return search(path.sep, 0);
+}
+
+function decodeWorkspaceSessionDirName(sessionDirName: string): string | null {
+  if (!sessionDirName.startsWith("--") || !sessionDirName.endsWith("--")) {
     return null;
   }
+
+  const encoded = sessionDirName.slice(2, -2);
+  if (!encoded) return null;
+
+  const directPath = path.sep + encoded.replace(/-/g, path.sep);
+  if (isExistingDirectory(directPath)) {
+    return directPath;
+  }
+
+  return resolveExistingWorkspacePathFromEncoded(encoded) ?? directPath;
+}
+
+function ensureRegisteredWorkspace(workspacePath: string): {
+  metadata: WorkspaceMetadata;
+  created: boolean;
+} {
+  const normalizedWorkspacePath = workspacePath.trim();
+  migrateLegacyRegisteredWorkspaceDir(normalizedWorkspacePath);
+  const sessionDir = workspaceSessionDirPath(normalizedWorkspacePath);
+  const created = !fs.existsSync(sessionDir);
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.rmSync(path.join(sessionDir, ".pi-workspace.json"), { force: true });
+
+  return {
+    metadata: workspaceMetadata(normalizedWorkspacePath, sessionDir),
+    created,
+  };
 }
 
 function listRegisteredWorkspaces(): RegisteredWorkspace[] {
@@ -541,36 +618,14 @@ function listRegisteredWorkspaces(): RegisteredWorkspace[] {
   const workspaces: RegisteredWorkspace[] = [];
   for (const entry of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const registered = readRegisteredWorkspace(
-      path.join(sessionsRoot, entry.name),
-    );
-    if (registered) {
-      workspaces.push(registered);
-    }
+    const workspacePath = decodeWorkspaceSessionDirName(entry.name);
+    if (!workspacePath) continue;
+    workspaces.push({
+      workspacePath,
+      sessionDir: path.join(sessionsRoot, entry.name),
+    });
   }
   return workspaces;
-}
-
-function ensureRegisteredWorkspace(workspacePath: string): {
-  metadata: WorkspaceMetadata;
-  created: boolean;
-} {
-  const normalizedWorkspacePath = workspacePath.trim();
-  const sessionDir = workspaceSessionDirPath(normalizedWorkspacePath);
-  const markerPath = path.join(sessionDir, WORKSPACE_MARKER_FILE);
-  const created = !fs.existsSync(sessionDir);
-
-  fs.mkdirSync(sessionDir, { recursive: true });
-  fs.writeFileSync(
-    markerPath,
-    JSON.stringify({ workspacePath: normalizedWorkspacePath }, null, 2) + "\n",
-    "utf8",
-  );
-
-  return {
-    metadata: workspaceMetadata(normalizedWorkspacePath, sessionDir),
-    created,
-  };
 }
 
 function pickWorkspaceDirectoryFromNativeDialog(): string | null {
@@ -640,6 +695,7 @@ function pickWorkspaceDirectoryFromNativeDialog(): string | null {
 }
 
 function listWorkspaceSessionFiles(workspacePath: string): string[] {
+  migrateLegacyRegisteredWorkspaceDir(workspacePath);
   return listSessionFilesInDir(workspaceSessionDirPath(workspacePath));
 }
 
