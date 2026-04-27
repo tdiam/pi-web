@@ -2231,6 +2231,79 @@ describe("WsRpcAdapter", () => {
       expect(response.payload.data.sessions).toEqual([]);
     });
 
+    it("lists registered workspaces even before the first session exists", async () => {
+      const workspaceDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-registered-workspace-"),
+      );
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(undefined);
+
+      const registerCommand: RpcCommand = {
+        id: "cmd-register",
+        type: "register_workspace",
+        workspacePath: workspaceDir,
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(
+          JSON.stringify({ type: "command", payload: registerCommand }),
+        ),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const listCommand: RpcCommand = { id: "cmd-list", type: "list_sessions" };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: listCommand })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls.map(
+        call => JSON.parse(call[0] as string),
+      );
+      const registerResponse = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "register_workspace" &&
+          call.payload.id === "cmd-register",
+      );
+      const listResponse = sendCalls.find(
+        call =>
+          call.type === "response" &&
+          call.payload.command === "list_sessions" &&
+          call.payload.id === "cmd-list",
+      );
+
+      expect(registerResponse?.payload.success).toBe(true);
+      expect(registerResponse?.payload.data.cancelled).toBe(false);
+      expect(registerResponse?.payload.data.workspacePath).toBe(workspaceDir);
+      expect(listResponse?.payload.success).toBe(true);
+      expect(listResponse?.payload.data.sessions).toEqual([
+        {
+          id: `workspace:${workspaceDir}`,
+          name: path.basename(workspaceDir),
+          path: path.join(
+            process.env.PI_WEB_SESSIONS_ROOT!,
+            `--${workspaceDir.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+          ),
+          isRunning: false,
+          timestamp: undefined,
+          updatedAt: undefined,
+          workspaceId: workspaceDir,
+          workspaceName: path.basename(workspaceDir),
+          workspacePath: workspaceDir,
+          isWorkspacePlaceholder: true,
+        },
+      ]);
+    });
+
     it("should handle list_workspace_entries command", async () => {
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), "pi-web-workspace-test-"),

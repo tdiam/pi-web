@@ -57,6 +57,7 @@ export interface SessionEntry {
   workspaceId?: string;
   workspaceName?: string;
   workspacePath?: string;
+  isWorkspacePlaceholder?: boolean;
 }
 
 export type TreeTrackColumn = RpcTreeTrackColumn;
@@ -1261,6 +1262,13 @@ async function newSession(workspacePath: string): Promise<RpcResponse> {
   return response;
 }
 
+function registerWorkspace(workspacePath?: string): Promise<RpcResponse> {
+  return sendCommand(
+    { type: "register_workspace", workspacePath },
+    { timeoutMs: 300_000 },
+  );
+}
+
 async function compactSession(customInstructions?: string) {
   compactingRequestCount.value += 1;
 
@@ -1914,6 +1922,7 @@ export function useBridgeClient() {
     createGitBranch,
     switchSession,
     newSession,
+    registerWorkspace,
     abortGeneration,
     compactSession,
     setThinkingLevel,

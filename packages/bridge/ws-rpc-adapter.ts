@@ -139,12 +139,18 @@ interface WorkspaceSessionEntry {
   workspaceId?: string;
   workspaceName?: string;
   workspacePath?: string;
+  isWorkspacePlaceholder?: boolean;
 }
 
 interface WorkspaceMetadata {
   workspaceId: string;
   workspaceName: string;
   workspacePath: string;
+}
+
+interface RegisteredWorkspace {
+  workspacePath: string;
+  sessionDir: string;
 }
 
 interface SessionListCursor {
@@ -481,6 +487,8 @@ function getSessionsRoot(): string {
   );
 }
 
+const WORKSPACE_MARKER_FILE = ".pi-workspace.json";
+
 function listStoredSessionFiles(): string[] {
   const sessionsRoot = getSessionsRoot();
   if (!fs.existsSync(sessionsRoot)) return [];
@@ -500,10 +508,139 @@ function workspaceSessionDirName(workspacePath: string): string {
   return `--${workspacePath.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
 }
 
-function listWorkspaceSessionFiles(workspacePath: string): string[] {
-  return listSessionFilesInDir(
-    path.join(getSessionsRoot(), workspaceSessionDirName(workspacePath)),
+function workspaceSessionDirPath(workspacePath: string): string {
+  return path.join(getSessionsRoot(), workspaceSessionDirName(workspacePath));
+}
+
+function readRegisteredWorkspace(
+  sessionDir: string,
+): RegisteredWorkspace | null {
+  try {
+    const markerPath = path.join(sessionDir, WORKSPACE_MARKER_FILE);
+    const marker = JSON.parse(fs.readFileSync(markerPath, "utf8")) as {
+      workspacePath?: unknown;
+    };
+    const workspacePath =
+      typeof marker.workspacePath === "string"
+        ? marker.workspacePath.trim()
+        : "";
+    if (!workspacePath) return null;
+    return {
+      workspacePath,
+      sessionDir,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function listRegisteredWorkspaces(): RegisteredWorkspace[] {
+  const sessionsRoot = getSessionsRoot();
+  if (!fs.existsSync(sessionsRoot)) return [];
+
+  const workspaces: RegisteredWorkspace[] = [];
+  for (const entry of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const registered = readRegisteredWorkspace(
+      path.join(sessionsRoot, entry.name),
+    );
+    if (registered) {
+      workspaces.push(registered);
+    }
+  }
+  return workspaces;
+}
+
+function ensureRegisteredWorkspace(workspacePath: string): {
+  metadata: WorkspaceMetadata;
+  created: boolean;
+} {
+  const normalizedWorkspacePath = workspacePath.trim();
+  const sessionDir = workspaceSessionDirPath(normalizedWorkspacePath);
+  const markerPath = path.join(sessionDir, WORKSPACE_MARKER_FILE);
+  const created = !fs.existsSync(sessionDir);
+
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    markerPath,
+    JSON.stringify({ workspacePath: normalizedWorkspacePath }, null, 2) + "\n",
+    "utf8",
   );
+
+  return {
+    metadata: workspaceMetadata(normalizedWorkspacePath, sessionDir),
+    created,
+  };
+}
+
+function pickWorkspaceDirectoryFromNativeDialog(): string | null {
+  if (process.platform === "darwin") {
+    const result = spawnSync(
+      "osascript",
+      [
+        "-e",
+        'set selectedFolder to choose folder with prompt "Choose a workspace"',
+        "-e",
+        "POSIX path of selectedFolder",
+      ],
+      { encoding: "utf8" },
+    );
+    if (result.status === 0) {
+      const selectedPath = result.stdout.trim();
+      return selectedPath || null;
+    }
+    return null;
+  }
+
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        [
+          "Add-Type -AssemblyName System.Windows.Forms",
+          "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+          '$dialog.Description = "Choose a workspace"',
+          "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
+          "  Write-Output $dialog.SelectedPath",
+          "}",
+        ].join("; "),
+      ],
+      { encoding: "utf8" },
+    );
+    if (result.status === 0) {
+      const selectedPath = result.stdout.trim();
+      return selectedPath || null;
+    }
+    return null;
+  }
+
+  const zenity = spawnSync(
+    "zenity",
+    ["--file-selection", "--directory", "--title=Choose a workspace"],
+    { encoding: "utf8" },
+  );
+  if (zenity.status === 0) {
+    const selectedPath = zenity.stdout.trim();
+    return selectedPath || null;
+  }
+
+  const kdialog = spawnSync(
+    "kdialog",
+    ["--getexistingdirectory", os.homedir(), "--title", "Choose a workspace"],
+    { encoding: "utf8" },
+  );
+  if (kdialog.status === 0) {
+    const selectedPath = kdialog.stdout.trim();
+    return selectedPath || null;
+  }
+
+  return null;
+}
+
+function listWorkspaceSessionFiles(workspacePath: string): string[] {
+  return listSessionFilesInDir(workspaceSessionDirPath(workspacePath));
 }
 
 function readFileChunk(
@@ -854,7 +991,9 @@ function resolveWorkspaceFile(
 
   return {
     resolvedPath,
-    displayPath: normalizeWorkspacePath(path.relative(workspaceRoot, resolvedPath)),
+    displayPath: normalizeWorkspacePath(
+      path.relative(workspaceRoot, resolvedPath),
+    ),
   };
 }
 
@@ -2556,7 +2695,7 @@ class SessionRuntime {
       ctx.sessionManager.getCwd() ||
       ctx.cwd;
     const sessionDir = options.workspacePath
-      ? undefined
+      ? workspaceSessionDirPath(targetCwd)
       : currentSessionFile
         ? path.dirname(currentSessionFile)
         : undefined;
@@ -4216,6 +4355,8 @@ export class WsRpcAdapter {
               error: "Workspace path not found",
             };
           }
+
+          ensureRegisteredWorkspace(workspacePath);
         }
 
         const created = await this.sessionRuntime.createDetachedSession({
@@ -4234,6 +4375,60 @@ export class WsRpcAdapter {
             sessionId: created.sessionId,
             sessionName: created.sessionName,
             sessionPath: created.sessionPath,
+            cancelled: false,
+          },
+        };
+      }
+
+      case "register_workspace": {
+        const selectedWorkspacePath =
+          command.workspacePath?.trim() ||
+          pickWorkspaceDirectoryFromNativeDialog();
+        if (!selectedWorkspacePath) {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "register_workspace",
+            success: true,
+            data: {
+              workspaceId: "",
+              workspaceName: "",
+              workspacePath: "",
+              created: false,
+              cancelled: true,
+            },
+          };
+        }
+
+        try {
+          if (!fs.statSync(selectedWorkspacePath).isDirectory()) {
+            return {
+              id: correlationId,
+              type: "response",
+              command: "register_workspace",
+              success: false,
+              error: "Workspace path is not a directory",
+            };
+          }
+        } catch {
+          return {
+            id: correlationId,
+            type: "response",
+            command: "register_workspace",
+            success: false,
+            error: "Workspace path not found",
+          };
+        }
+
+        const registered = ensureRegisteredWorkspace(selectedWorkspacePath);
+        return {
+          id: correlationId,
+          type: "response",
+          command: "register_workspace",
+          success: true,
+          data: {
+            ...registered.metadata,
+            created: registered.created,
             cancelled: false,
           },
         };
@@ -4603,6 +4798,7 @@ export class WsRpcAdapter {
         try {
           const sessions: WorkspaceSessionEntry[] = [];
           const seenSessionPaths = new Set<string>();
+          const seenWorkspacePaths = new Set<string>();
           const liveSessionFile = ctx.sessionManager.getSessionFile();
           const cursor = decodeSessionCursor(command.cursor);
           const limit =
@@ -4613,6 +4809,10 @@ export class WsRpcAdapter {
           const appendSession = (session: WorkspaceSessionEntry | null) => {
             if (!session || seenSessionPaths.has(session.path)) return;
             seenSessionPaths.add(session.path);
+            const workspaceKey = session.workspacePath ?? session.workspaceId;
+            if (workspaceKey) {
+              seenWorkspacePaths.add(workspaceKey);
+            }
             sessions.push(session);
           };
 
@@ -4672,6 +4872,28 @@ export class WsRpcAdapter {
                 sessionManager.getSessionFile(),
                 ctx.cwd,
               );
+            }
+          }
+
+          if (!workspacePath) {
+            for (const registeredWorkspace of listRegisteredWorkspaces()) {
+              if (seenWorkspacePaths.has(registeredWorkspace.workspacePath)) {
+                continue;
+              }
+              const workspace = workspaceMetadata(
+                registeredWorkspace.workspacePath,
+                registeredWorkspace.sessionDir,
+              );
+              appendSession({
+                id: `workspace:${workspace.workspacePath}`,
+                name: workspace.workspaceName,
+                path: registeredWorkspace.sessionDir,
+                isRunning: false,
+                timestamp: undefined,
+                updatedAt: undefined,
+                isWorkspacePlaceholder: true,
+                ...workspace,
+              });
             }
           }
 

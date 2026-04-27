@@ -30,6 +30,7 @@ interface WorkspaceGroup {
   name: string;
   path: string;
   sessions: SessionEntry[];
+  actualSessions: SessionEntry[];
   latestActivity: number;
   isExpanded: boolean;
   isActive: boolean;
@@ -61,6 +62,9 @@ const menu = ref<MenuState>({
 });
 
 function sessionActivityValue(session: SessionEntry): number {
+  if (session.isWorkspacePlaceholder) {
+    return Number.NEGATIVE_INFINITY;
+  }
   const parsed = Date.parse(session.updatedAt ?? session.timestamp ?? "");
   return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }
@@ -172,19 +176,23 @@ const workspaceGroups = computed<WorkspaceGroup[]>(() => {
   return Array.from(groups.values())
     .map(group => {
       const sessions = [...group.sessions].sort(compareSessionsByActivity);
+      const actualSessions = sessions.filter(
+        session => !session.isWorkspacePlaceholder,
+      );
       const query = workspaceQueries.value[group.id] ?? "";
-      const remainingSessions = sessions.slice(RECENT_SESSION_LIMIT);
+      const remainingSessions = actualSessions.slice(RECENT_SESSION_LIMIT);
       const nextCursor = props.workspaceSessionCursors[group.path] ?? null;
 
       return {
         ...group,
         sessions,
+        actualSessions,
         isExpanded: expandedWorkspaceIds.value.has(group.id),
-        isActive: sessions.some(
+        isActive: actualSessions.some(
           session => session.path === props.activeSessionPath,
         ),
         query,
-        recentSessions: sessions.slice(0, RECENT_SESSION_LIMIT),
+        recentSessions: actualSessions.slice(0, RECENT_SESSION_LIMIT),
         remainingSessions,
         filteredRemainingSessions: remainingSessions.filter(session =>
           sessionMatchesQuery(session, query),
@@ -398,6 +406,12 @@ watch(
         </div>
 
         <div v-if="workspace.isExpanded" class="session-list">
+          <p
+            v-if="workspace.actualSessions.length === 0"
+            class="workspace-empty"
+          >
+            No sessions yet
+          </p>
           <div
             v-for="s in workspace.recentSessions"
             :key="s.path"
@@ -770,6 +784,13 @@ watch(
   flex-direction: column;
   gap: 2px;
   padding: 0 0 6px 20px;
+}
+
+.workspace-empty {
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 0.76rem;
+  color: var(--text-subtle);
 }
 
 .rail-item {

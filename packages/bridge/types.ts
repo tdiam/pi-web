@@ -238,6 +238,9 @@ export interface RpcCommandMap {
     limit?: number;
     workspacePath?: string;
   };
+  register_workspace: {
+    workspacePath?: string;
+  };
 
   /** State */
   get_state: {};
@@ -564,6 +567,13 @@ export interface RpcResponseMap {
     sessionPath: string;
     cancelled: boolean;
   };
+  register_workspace: {
+    workspaceId: string;
+    workspaceName: string;
+    workspacePath: string;
+    created: boolean;
+    cancelled: boolean;
+  };
   get_state: RpcSessionState;
   set_model: RpcModel;
   cycle_model: {
@@ -618,6 +628,7 @@ export interface RpcResponseMap {
       workspaceId?: string;
       workspaceName?: string;
       workspacePath?: string;
+      isWorkspacePlaceholder?: boolean;
     }>;
     workspacePath?: string;
     nextCursor?: string;

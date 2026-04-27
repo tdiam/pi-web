@@ -65,6 +65,7 @@ const {
   sendCommand,
   switchSession,
   newSession,
+  registerWorkspace,
   fetchWorkspaceEntries,
   readWorkspaceFile,
   loadWorkspaceSessions,
@@ -220,9 +221,11 @@ const debugModeLabel = computed(() =>
 const hasRightSidebarContent = computed(
   () => hasSessionOutline.value || fileViewerTabs.value.length > 0,
 );
-const activeFileViewerTab = computed(() =>
-  fileViewerTabs.value.find(tab => tab.id === activeRightSidebarTabId.value) ??
-  null,
+const activeFileViewerTab = computed(
+  () =>
+    fileViewerTabs.value.find(
+      tab => tab.id === activeRightSidebarTabId.value,
+    ) ?? null,
 );
 const showLeftRailResizer = computed(
   () => !compactLayout.value && !leftSidebarCollapsed.value,
@@ -299,9 +302,8 @@ function openFileViewer(path: string, lineNumber: number) {
     return;
   }
 
-  const nextLineNumber = Number.isInteger(lineNumber) && lineNumber > 0
-    ? lineNumber
-    : 1;
+  const nextLineNumber =
+    Number.isInteger(lineNumber) && lineNumber > 0 ? lineNumber : 1;
   const id = fileViewerTabId(trimmedPath);
   const existingIndex = fileViewerTabs.value.findIndex(tab => tab.id === id);
   if (existingIndex >= 0) {
@@ -641,6 +643,23 @@ async function handleNewSession(workspacePath: string) {
   }
 }
 
+async function handleRegisterWorkspace() {
+  try {
+    const response = await registerWorkspace();
+    if (response.success) {
+      const data = response.data as
+        | { cancelled?: boolean; workspacePath?: string }
+        | undefined;
+      if (data?.cancelled) {
+        return;
+      }
+      handleRefreshSessions();
+    }
+  } catch {
+    // Ignore
+  }
+}
+
 async function handleRenameSession(sessionPath: string, name: string) {
   try {
     const response = await renameSession(sessionPath, name);
@@ -689,7 +708,10 @@ function handleRightSidebarTabSelect(tabId: string) {
   }
 }
 
-function handleOpenFileReference(payload: { path: string; lineNumber: number }) {
+function handleOpenFileReference(payload: {
+  path: string;
+  lineNumber: number;
+}) {
   openFileViewer(payload.path, payload.lineNumber);
 }
 
@@ -917,6 +939,7 @@ onBeforeUnmount(() => {
       :workspace-session-cursors="workspaceSessionCursors"
       :sidebar-open="sidebarOpen"
       :collapsed="leftSidebarCollapsed"
+      @register-workspace="handleRegisterWorkspace"
       @close-sidebar="sidebarOpen = false"
       @select-session="handleSessionSelect"
       @refresh-sessions="handleRefreshSessions"

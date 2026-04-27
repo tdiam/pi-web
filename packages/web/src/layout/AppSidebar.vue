@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { RefreshCw } from "lucide-vue-next";
+import { FolderPlus, RefreshCw } from "lucide-vue-next";
 import SessionRail from "../components/SessionRail.vue";
 import type { SessionEntry } from "../composables/useBridgeClient";
 
@@ -14,6 +14,7 @@ defineProps<{
 
 const emit = defineEmits<{
   closeSidebar: [];
+  registerWorkspace: [];
   selectSession: [sessionPath: string];
   refreshSessions: [];
   loadOlderSessions: [
@@ -40,6 +41,15 @@ const emit = defineEmits<{
       @load-older-sessions="emit('loadOlderSessions', $event)"
     >
       <template #header-actions>
+        <button
+          class="rail-button"
+          type="button"
+          aria-label="Open workspace"
+          title="Open workspace"
+          @click="emit('registerWorkspace')"
+        >
+          <FolderPlus aria-hidden="true" />
+        </button>
         <button
           class="rail-button"
           type="button"
