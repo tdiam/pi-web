@@ -4,7 +4,8 @@ export type InlineFileReference = {
   columnNumber?: number;
 };
 
-const FILE_REFERENCE_PATTERN = /^(?<path>.+?):(?<line>\d+)(?::(?<column>\d+))?$/;
+const FILE_REFERENCE_PATTERN =
+  /^(?<path>.+?):(?<line>\d+)(?::(?<column>\d+))?$/;
 const SPECIAL_FILE_NAMES = new Set([
   "dockerfile",
   "makefile",
@@ -58,7 +59,11 @@ export function parseInlineFileReference(
   const columnNumber = match.groups.column
     ? Number.parseInt(match.groups.column, 10)
     : undefined;
-  if (!looksLikeFilePath(path) || !Number.isInteger(lineNumber) || lineNumber < 1) {
+  if (
+    !looksLikeFilePath(path) ||
+    !Number.isInteger(lineNumber) ||
+    lineNumber < 1
+  ) {
     return null;
   }
 

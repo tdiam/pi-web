@@ -3,6 +3,7 @@ import {
   Bug,
   Menu,
   Moon,
+  Palette,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   toggleSidebarCollapse: [];
   toggleOutlineSidebar: [];
   toggleTheme: [];
+  openThemeSettings: [];
   toggleDebugMode: [];
 }>();
 </script>
@@ -76,14 +78,10 @@ const emit = defineEmits<{
         class="outline-toggle"
         type="button"
         :aria-label="
-          outlineSidebarOpen
-            ? 'Collapse right sidebar'
-            : 'Expand right sidebar'
+          outlineSidebarOpen ? 'Collapse right sidebar' : 'Expand right sidebar'
         "
         :title="
-          outlineSidebarOpen
-            ? 'Collapse right sidebar'
-            : 'Expand right sidebar'
+          outlineSidebarOpen ? 'Collapse right sidebar' : 'Expand right sidebar'
         "
         @click="emit('toggleOutlineSidebar')"
       >
@@ -105,6 +103,15 @@ const emit = defineEmits<{
       >
         <Bug class="debug-icon" aria-hidden="true" />
         <span class="debug-label">Debug</span>
+      </button>
+      <button
+        class="appearance-toggle"
+        type="button"
+        aria-label="Open appearance settings"
+        title="Open appearance settings"
+        @click="emit('openThemeSettings')"
+      >
+        <Palette class="appearance-icon" aria-hidden="true" />
       </button>
       <button
         class="theme-toggle"
@@ -183,6 +190,7 @@ const emit = defineEmits<{
 .sidebar-collapse,
 .outline-toggle,
 .debug-toggle,
+.appearance-toggle,
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -209,6 +217,7 @@ const emit = defineEmits<{
 .sidebar-collapse:hover,
 .outline-toggle:hover,
 .debug-toggle:hover,
+.appearance-toggle:hover,
 .theme-toggle:hover {
   background: var(--surface-hover);
   border-color: var(--border-strong);
@@ -219,6 +228,7 @@ const emit = defineEmits<{
 .sidebar-collapse:focus-visible,
 .outline-toggle:focus-visible,
 .debug-toggle:focus-visible,
+.appearance-toggle:focus-visible,
 .theme-toggle:focus-visible {
   outline: none;
   border-color: var(--accent);
@@ -233,6 +243,7 @@ const emit = defineEmits<{
 
 .sidebar-collapse,
 .outline-toggle,
+.appearance-toggle,
 .theme-toggle {
   justify-content: center;
   width: 32px;
@@ -243,6 +254,7 @@ const emit = defineEmits<{
 .sidebar-collapse-icon,
 .outline-toggle-icon,
 .debug-icon,
+.appearance-icon,
 .theme-icon {
   width: 16px;
   height: 16px;
@@ -287,6 +299,7 @@ const emit = defineEmits<{
 
   .hamburger,
   .outline-toggle,
+  .appearance-toggle,
   .theme-toggle {
     width: 30px;
     height: 30px;

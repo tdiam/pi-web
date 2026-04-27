@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { highlightCodeHtml, readThemeMode } from "../utils/codeHighlight";
+import { highlightCodeHtml } from "../utils/codeHighlight";
 
 const props = defineProps<{
   code: string;
@@ -18,7 +18,7 @@ async function renderCode() {
     return;
   }
 
-  const html = await highlightCodeHtml(props.code, props.path, readThemeMode());
+  const html = await highlightCodeHtml(props.code, props.path);
   if (version !== renderVersion) return;
   renderedHtml.value = html;
 }
@@ -31,7 +31,7 @@ onMounted(() => {
     });
     observer.observe(shell, {
       attributes: true,
-      attributeFilter: ["data-theme"],
+      attributeFilter: ["data-dark-theme", "data-light-theme"],
     });
   }
 });

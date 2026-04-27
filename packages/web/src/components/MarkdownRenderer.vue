@@ -83,7 +83,11 @@ function codeBlockPlaceholder(
   return `<div class="markdown-code-block" data-code-index="${index}" aria-live="polite"><pre><code${className}>${escapeHtml(source)}</code></pre></div>`;
 }
 
-function fileReferenceLink(label: string, path: string, lineNumber: number): string {
+function fileReferenceLink(
+  label: string,
+  path: string,
+  lineNumber: number,
+): string {
   return `<a class="markdown-file-ref" href="#" data-file-path="${escapeHtml(path)}" data-file-line="${lineNumber}" title="Open ${escapeHtml(path)} at line ${lineNumber}"><code>${escapeHtml(label)}</code></a>`;
 }
 
@@ -198,7 +202,7 @@ function cssVar(styles: CSSStyleDeclaration, name: string, fallback: string) {
 function configureMermaid(mermaid: MermaidModule) {
   const shell = document.querySelector<HTMLElement>(".app-shell");
   const styles = getComputedStyle(shell ?? document.documentElement);
-  const isDark = shell?.dataset.theme !== "light";
+  const isDark = readThemeMode() !== "light";
 
   mermaid.initialize({
     startOnLoad: false,
@@ -431,11 +435,7 @@ async function renderCodeBlocks() {
     if (!source) continue;
 
     try {
-      const html = await highlightCodeHtml(
-        source.text,
-        source.lang,
-        readThemeMode(),
-      );
+      const html = await highlightCodeHtml(source.text, source.lang);
       if (version !== codeRenderVersion) return;
       block.innerHTML = html;
       block.classList.add("markdown-code-block-rendered");
@@ -500,14 +500,30 @@ function ensureThemeObserver() {
   const shell = document.querySelector(".app-shell");
   if (!shell) return;
 
-  themeObserver = new MutationObserver(() => {
+  themeObserver = new MutationObserver(records => {
     const current = renderedMarkdown.value;
-    if (current.mermaidSources.length > 0) void renderMermaidBlocks();
-    if (current.codeBlocks.length > 0) void renderCodeBlocks();
+    const rerenderMermaid = records.some(
+      record => record.attributeName === "data-theme-mode",
+    );
+    const rerenderCode = records.some(
+      record =>
+        record.attributeName === "data-dark-theme" ||
+        record.attributeName === "data-light-theme",
+    );
+
+    if (
+      (rerenderMermaid || rerenderCode) &&
+      current.mermaidSources.length > 0
+    ) {
+      void renderMermaidBlocks();
+    }
+    if (rerenderCode && current.codeBlocks.length > 0) {
+      void renderCodeBlocks();
+    }
   });
   themeObserver.observe(shell, {
     attributes: true,
-    attributeFilter: ["data-theme"],
+    attributeFilter: ["data-theme-mode", "data-dark-theme", "data-light-theme"],
   });
 }
 
@@ -650,7 +666,7 @@ watch(
   font-size: 0.85em;
   padding: 0.15em 0.4em;
   border-radius: 4px;
-  background: var(--panel-2);
+  background: var(--panel);
   color: var(--text);
 }
 
@@ -660,7 +676,7 @@ watch(
 }
 
 .markdown-body a.markdown-file-ref code {
-  color: color-mix(in srgb, var(--accent-hover) 80%, var(--text));
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
   background: color-mix(in srgb, var(--surface-active) 64%, var(--panel-2));
   cursor: pointer;

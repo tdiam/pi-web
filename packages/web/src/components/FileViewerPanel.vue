@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { RpcWorkspaceFile } from "../shared-types";
 import {
-  highlightCodeLinesHtml,
-  readThemeMode,
-} from "../utils/codeHighlight";
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import type { RpcWorkspaceFile } from "../shared-types";
+import { highlightCodeLinesHtml } from "../utils/codeHighlight";
 
 const props = defineProps<{
   filePath: string;
@@ -83,7 +87,7 @@ async function renderCode() {
   const html = await highlightCodeLinesHtml(
     file.value.content,
     file.value.path,
-    readThemeMode(),
+    undefined,
     activeLineNumber.value,
   );
   if (version !== renderVersion) {
@@ -105,7 +109,7 @@ onMounted(() => {
   });
   themeObserver.observe(shell, {
     attributes: true,
-    attributeFilter: ["data-theme"],
+    attributeFilter: ["data-dark-theme", "data-light-theme"],
   });
 });
 
@@ -137,10 +141,13 @@ watch(
     <div v-if="errorMessage" class="file-viewer-state error">
       {{ errorMessage }}
     </div>
-    <div v-else-if="loading && !file" class="file-viewer-state">Loading file...</div>
+    <div v-else-if="loading && !file" class="file-viewer-state">
+      Loading file...
+    </div>
     <template v-else>
       <div v-if="file?.truncated" class="file-viewer-notice">
-        Showing the first {{ file.lineCount }} lines. The full file is {{ file.totalBytes }} bytes.
+        Showing the first {{ file.lineCount }} lines. The full file is
+        {{ file.totalBytes }} bytes.
       </div>
       <div ref="container" class="file-viewer-code-shell">
         <!-- eslint-disable-next-line vue/no-v-html -->

@@ -9,6 +9,7 @@ import {
 } from "vue";
 import ExtensionDialog from "./components/ExtensionDialog.vue";
 import ReconnectBanner from "./components/ReconnectBanner.vue";
+import ThemeSettingsDialog from "./components/ThemeSettingsDialog.vue";
 import { useBridgeClient } from "./composables/useBridgeClient";
 import AppHeader from "./layout/AppHeader.vue";
 import AppMainContent from "./layout/AppMainContent.vue";
@@ -16,11 +17,21 @@ import AppNotifications from "./layout/AppNotifications.vue";
 import AppRightSidebar from "./layout/AppRightSidebar.vue";
 import AppSidebar from "./layout/AppSidebar.vue";
 import type { RpcImageContent, RpcThinkingLevel } from "./shared-types";
+import {
+  listThemes,
+  readStoredThemePreference,
+  resolveActiveTheme,
+  resolveAppThemeVars,
+  serializeThemePreference,
+  setThemePreferenceTheme,
+  toggleThemePreferenceMode,
+  type ThemeMode,
+  type ThemePreference,
+} from "./themes";
 import { readInitialDebugMode } from "./utils/debugMode";
 import type { RpcModelInfo } from "./utils/models";
 import { parseCompactSlashCommand } from "./utils/slashCommands";
 
-type ThemeMode = "dark" | "light";
 type RightSidebarTabId = string;
 
 type FileViewerTab = {
@@ -121,6 +132,7 @@ const TREE_TAB_ID = "tree";
 const sidebarOpen = ref(false);
 const leftSidebarCollapsed = ref(false);
 const outlineSidebarOpen = ref(false);
+const themeSettingsOpen = ref(false);
 const activeRightSidebarTabId = ref<RightSidebarTabId>(TREE_TAB_ID);
 const fileViewerTabs = ref<FileViewerTab[]>([]);
 const mainContentRef = ref<InstanceType<typeof AppMainContent> | null>(null);
@@ -150,13 +162,15 @@ const MIN_CENTER_COLUMN_WIDTH = 360;
 
 type RailSide = "left" | "right";
 
-function readCachedTheme(): ThemeMode {
-  if (typeof window === "undefined") return "dark";
-  const cached = window.localStorage.getItem(THEME_CACHE_KEY);
-  if (cached === "dark" || cached === "light") return cached;
-  return window.matchMedia("(prefers-color-scheme: light)").matches
-    ? "light"
-    : "dark";
+function readCachedThemePreference(): ThemePreference {
+  if (typeof window === "undefined") {
+    return readStoredThemePreference(null, false);
+  }
+
+  return readStoredThemePreference(
+    window.localStorage.getItem(THEME_CACHE_KEY),
+    window.matchMedia("(prefers-color-scheme: light)").matches,
+  );
 }
 
 const debugModeAvailable =
@@ -188,7 +202,14 @@ function readCachedRailWidth(
     : fallback;
 }
 
-const theme = ref<ThemeMode>(readCachedTheme());
+const themePreference = ref<ThemePreference>(readCachedThemePreference());
+const darkThemes = listThemes("dark");
+const lightThemes = listThemes("light");
+const activeTheme = computed(() => resolveActiveTheme(themePreference.value));
+const appThemeStyle = computed(() => ({
+  ...resolveAppThemeVars(activeTheme.value),
+  colorScheme: activeTheme.value.mode,
+}));
 const debugMode = ref(readCachedDebugMode());
 const compactLayout = ref(isCompactLayout());
 const leftRailWidth = ref(
@@ -213,7 +234,7 @@ const activeRailResize = ref<{
   startWidth: number;
 } | null>(null);
 const nextThemeLabel = computed<ThemeMode>(() =>
-  theme.value === "dark" ? "light" : "dark",
+  activeTheme.value.mode === "dark" ? "light" : "dark",
 );
 const debugModeLabel = computed(() =>
   debugMode.value ? "Disable debug mode" : "Enable debug mode",
@@ -360,11 +381,18 @@ function closeFileViewerTab(tabId: string) {
   outlineSidebarOpen.value = false;
 }
 
-watch(theme, value => {
-  if (typeof window !== "undefined") {
-    window.localStorage.setItem(THEME_CACHE_KEY, value);
-  }
-});
+watch(
+  themePreference,
+  value => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        THEME_CACHE_KEY,
+        serializeThemePreference(value),
+      );
+    }
+  },
+  { deep: true },
+);
 
 watch(debugMode, value => {
   if (!debugModeAvailable) return;
@@ -581,7 +609,23 @@ function resetRailWidth(side: RailSide) {
 }
 
 function toggleTheme() {
-  theme.value = theme.value === "dark" ? "light" : "dark";
+  themePreference.value = toggleThemePreferenceMode(themePreference.value);
+}
+
+function openThemeSettings() {
+  themeSettingsOpen.value = true;
+}
+
+function closeThemeSettings() {
+  themeSettingsOpen.value = false;
+}
+
+function handleThemePresetSelect(themeId: string) {
+  themePreference.value = setThemePreferenceTheme(
+    themePreference.value,
+    themePreference.value.mode,
+    themeId,
+  );
 }
 
 function toggleSessionSidebar() {
@@ -929,8 +973,11 @@ onBeforeUnmount(() => {
   <div
     class="app-shell"
     :class="{ 'left-rail-collapsed': leftSidebarCollapsed }"
-    :data-theme="theme"
-    :style="appShellStyle"
+    :data-theme="activeTheme.id"
+    :data-theme-mode="activeTheme.mode"
+    :data-dark-theme="themePreference.darkThemeId"
+    :data-light-theme="themePreference.lightThemeId"
+    :style="[appThemeStyle, appShellStyle]"
   >
     <AppSidebar
       :sessions="sessions"
@@ -960,7 +1007,7 @@ onBeforeUnmount(() => {
 
     <div class="app-main-column">
       <AppHeader
-        :theme="theme"
+        :theme="activeTheme.mode"
         :next-theme-label="nextThemeLabel"
         :show-debug-toggle="debugModeAvailable"
         :debug-mode="debugMode"
@@ -972,6 +1019,7 @@ onBeforeUnmount(() => {
         @toggle-sidebar-collapse="toggleLeftSidebarCollapse"
         @toggle-outline-sidebar="toggleOutlineSidebar"
         @toggle-theme="toggleTheme"
+        @open-theme-settings="openThemeSettings"
         @toggle-debug-mode="toggleDebugMode"
       />
 
@@ -1076,6 +1124,18 @@ onBeforeUnmount(() => {
       @dismiss="handleDismissNotification"
     />
 
+    <ThemeSettingsDialog
+      :open="themeSettingsOpen"
+      :mode="themePreference.mode"
+      :dark-theme-id="themePreference.darkThemeId"
+      :light-theme-id="themePreference.lightThemeId"
+      :dark-themes="darkThemes"
+      :light-themes="lightThemes"
+      :theme-style="appThemeStyle"
+      @close="closeThemeSettings"
+      @set-theme="handleThemePresetSelect"
+    />
+
     <ExtensionDialog
       :request="pendingExtensionRequest"
       @respond="handleUIRespond"
@@ -1085,51 +1145,6 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .app-shell {
-  --bg: #0d1117;
-  --bg-elevated: #161b22;
-  --panel: #161b22;
-  --panel-2: #21262d;
-  --panel-3: #30363d;
-  --tool-surface: #161b22;
-  --tool-surface-strong: #21262d;
-  --tool-output-bg: #0f141b;
-  --tool-output-border: #30363d;
-  --diff-added-bg: rgba(46, 160, 67, 0.15);
-  --diff-added-text: #aff5b4;
-  --diff-added-accent: #3fb950;
-  --diff-removed-bg: rgba(218, 54, 51, 0.15);
-  --diff-removed-text: #ffa198;
-  --diff-removed-accent: #f85149;
-  --diff-header-bg: #30363d;
-  --diff-hunk-bg: #21262d;
-  --rail-bg: #010409;
-  --border: #30363d;
-  --border-strong: #484f58;
-  --text: #e6edf3;
-  --text-muted: #8b949e;
-  --text-subtle: #7d8590;
-  --accent: #2f81f7;
-  --accent-hover: #58a6ff;
-  --success: #3fb950;
-  --warning: #d29922;
-  --danger: #f85149;
-  --surface-hover: rgba(110, 118, 129, 0.1);
-  --surface-active: rgba(56, 139, 253, 0.15);
-  --surface-selected: rgba(110, 118, 129, 0.4);
-  --focus-ring: rgba(31, 111, 235, 0.35);
-  --focus-ring-muted: rgba(139, 148, 158, 0.22);
-  --selection-bg: rgba(56, 139, 253, 0.22);
-  --button-bg: #21262d;
-  --button-hover: #30363d;
-  --shadow-raised: 0 8px 24px rgba(1, 4, 9, 0.28);
-  --shadow-floating: 0 20px 48px rgba(1, 4, 9, 0.4);
-  --shadow: 0 24px 60px rgba(1, 4, 9, 0.36);
-  --overlay: rgba(1, 4, 9, 0.78);
-  --backdrop: rgba(1, 4, 9, 0.52);
-  --composer-fade: rgba(13, 17, 23, 0.96);
-  --error-bg: rgba(248, 81, 73, 0.14);
-  --error-border: rgba(248, 81, 73, 0.32);
-  --error-text: #ffa198;
   --pi-font-sans:
     -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --pi-font-mono:
@@ -1141,10 +1156,9 @@ onBeforeUnmount(() => {
   height: 100dvh;
   width: 100vw;
   overflow: hidden;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--bg, #0d1117);
+  color: var(--text, #e6edf3);
   font-family: var(--pi-font-sans);
-  color-scheme: dark;
   position: relative;
 }
 
@@ -1183,6 +1197,15 @@ onBeforeUnmount(() => {
   background: var(--selection-bg);
 }
 
+.app-shell[data-theme-mode="dark"] :deep(pre.shiki) {
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+.app-shell[data-theme-mode="dark"] :deep(pre.shiki),
+.app-shell[data-theme-mode="dark"] :deep(pre.shiki span) {
+  color: var(--shiki-dark) !important;
+}
+
 .app-shell.left-rail-collapsed {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1193,55 +1216,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-}
-
-.app-shell[data-theme="light"] {
-  --bg: #ffffff;
-  --bg-elevated: #ffffff;
-  --panel: #ffffff;
-  --panel-2: #f6f8fa;
-  --panel-3: #ebedf0;
-  --tool-surface: #f6f8fa;
-  --tool-surface-strong: #ebedf0;
-  --tool-output-bg: #f6f8fa;
-  --tool-output-border: #d0d7de;
-  --diff-added-bg: rgba(26, 127, 55, 0.12);
-  --diff-added-text: #116329;
-  --diff-added-accent: #1a7f37;
-  --diff-removed-bg: rgba(207, 34, 46, 0.1);
-  --diff-removed-text: #a40e26;
-  --diff-removed-accent: #cf222e;
-  --diff-header-bg: #d8dee4;
-  --diff-hunk-bg: #eaeef2;
-  --rail-bg: #f6f8fa;
-  --border: #d0d7de;
-  --border-strong: #afb8c1;
-  --text: #1f2328;
-  --text-muted: #656d76;
-  --text-subtle: #6e7781;
-  --accent: #0969da;
-  --accent-hover: #218bff;
-  --success: #1a7f37;
-  --warning: #9a6700;
-  --danger: #cf222e;
-  --surface-hover: rgba(234, 238, 242, 0.5);
-  --surface-active: rgba(221, 244, 255, 0.95);
-  --surface-selected: rgba(175, 184, 193, 0.2);
-  --focus-ring: rgba(9, 105, 218, 0.28);
-  --focus-ring-muted: rgba(101, 109, 118, 0.18);
-  --selection-bg: rgba(9, 105, 218, 0.16);
-  --button-bg: #f6f8fa;
-  --button-hover: #f3f4f6;
-  --shadow-raised: 0 8px 24px rgba(31, 35, 40, 0.08);
-  --shadow-floating: 0 20px 48px rgba(31, 35, 40, 0.12);
-  --shadow: 0 18px 48px rgba(31, 35, 40, 0.08);
-  --overlay: rgba(31, 35, 40, 0.22);
-  --backdrop: rgba(31, 35, 40, 0.12);
-  --composer-fade: rgba(255, 255, 255, 0.96);
-  --error-bg: rgba(207, 34, 46, 0.08);
-  --error-border: rgba(207, 34, 46, 0.22);
-  --error-text: #cf222e;
-  color-scheme: light;
 }
 
 .app-body {

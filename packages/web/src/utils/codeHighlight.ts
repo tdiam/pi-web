@@ -4,14 +4,17 @@ import {
   createSingletonShorthands,
 } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import {
+  readThemeModeFromDom,
+  readThemePairFromDom,
+  resolveShikiTheme,
+  type ThemeMode,
+  type ThemePair,
+} from "../themes";
 
-export type ThemeMode = "dark" | "light";
+export type { ThemeMode } from "../themes";
 
 type SupportedLanguage = keyof typeof LANGUAGE_LOADERS;
-type SupportedTheme = typeof DARK_THEME | typeof LIGHT_THEME;
-
-const LIGHT_THEME = "github-light-default";
-const DARK_THEME = "github-dark-default";
 
 const LANGUAGE_LOADERS = {
   bash: () => import("shiki/dist/langs/bash.mjs"),
@@ -38,10 +41,13 @@ const LANGUAGE_LOADERS = {
   yaml: () => import("shiki/dist/langs/yaml.mjs"),
 } as const;
 
-const THEME_LOADERS = {
-  [DARK_THEME]: () => import("shiki/dist/themes/github-dark-default.mjs"),
-  [LIGHT_THEME]: () => import("shiki/dist/themes/github-light-default.mjs"),
-} as const;
+const createReadHighlighter = createBundledHighlighter({
+  langs: LANGUAGE_LOADERS,
+  themes: {},
+  engine: () => createJavaScriptRegexEngine(),
+});
+
+const { codeToHtml } = createSingletonShorthands(createReadHighlighter);
 
 const LANGUAGE_ALIASES: Record<string, SupportedLanguage | "text"> = {
   js: "javascript",
@@ -91,17 +97,6 @@ const LANGUAGE_ALIASES: Record<string, SupportedLanguage | "text"> = {
   patch: "diff",
 };
 
-const createReadHighlighter = createBundledHighlighter<
-  SupportedLanguage,
-  SupportedTheme
->({
-  langs: LANGUAGE_LOADERS,
-  themes: THEME_LOADERS,
-  engine: () => createJavaScriptRegexEngine(),
-});
-
-const { codeToHtml } = createSingletonShorthands(createReadHighlighter);
-
 function isSupportedLanguage(value: string): value is SupportedLanguage {
   return Object.hasOwn(LANGUAGE_LOADERS, value);
 }
@@ -125,14 +120,22 @@ function sanitizeHighlightedHtml(html: string): string {
   });
 }
 
+function resolveHighlighterThemes(themePair?: ThemePair) {
+  const pair = themePair ?? readThemePairFromDom();
+  return {
+    light: resolveShikiTheme(pair.light),
+    dark: resolveShikiTheme(pair.dark),
+  };
+}
+
 export async function highlightCodeHtml(
   code: string,
   pathOrLanguage?: string,
-  themeMode: ThemeMode = "dark",
+  themePair?: ThemePair,
 ): Promise<string> {
   const html = await codeToHtml(code, {
     lang: detectLanguageFromPath(pathOrLanguage),
-    theme: themeMode === "light" ? LIGHT_THEME : DARK_THEME,
+    themes: resolveHighlighterThemes(themePair),
   });
   return sanitizeHighlightedHtml(html);
 }
@@ -140,12 +143,12 @@ export async function highlightCodeHtml(
 export async function highlightCodeLinesHtml(
   code: string,
   pathOrLanguage?: string,
-  themeMode: ThemeMode = "dark",
+  themePair?: ThemePair,
   highlightedLine?: number,
 ): Promise<string> {
   const html = await codeToHtml(code, {
     lang: detectLanguageFromPath(pathOrLanguage),
-    theme: themeMode === "light" ? LIGHT_THEME : DARK_THEME,
+    themes: resolveHighlighterThemes(themePair),
     transformers: [
       {
         line(node, line) {
@@ -184,6 +187,5 @@ export function detectLanguageFromPath(
 }
 
 export function readThemeMode(): ThemeMode {
-  const shell = document.querySelector<HTMLElement>(".app-shell");
-  return shell?.dataset.theme === "light" ? "light" : "dark";
+  return readThemeModeFromDom();
 }
