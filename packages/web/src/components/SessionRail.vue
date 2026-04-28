@@ -646,7 +646,7 @@ watch(
 }
 
 .workspace-group.active {
-  background: var(--surface-selected);
+  background: transparent;
 }
 
 .workspace-toggle,
@@ -697,7 +697,7 @@ watch(
 }
 
 .workspace-group.active > .workspace-row {
-  color: var(--text);
+  color: inherit;
 }
 
 .workspace-caret {
