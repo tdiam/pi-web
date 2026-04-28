@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { CornerDownLeft, ImagePlus, Square, X } from "lucide-vue-next";
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import type { ConnectionStatus } from "../composables/useBridgeClient";
 import type {
   RpcImageContent,
   RpcSlashCommand,
   RpcThinkingLevel,
   RpcWorkspaceEntry,
-} from "../shared-types";
+} from "@pi-web/bridge/types";
+import { CornerDownLeft, ImagePlus, Square, X } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import type { ConnectionStatus } from "../composables/useBridgeClient";
 import {
   COMPOSER_ATTACHMENT_ACCEPT,
   createComposerAttachments,
@@ -38,11 +38,11 @@ import WorkspaceMentionPalette from "./WorkspaceMentionPalette.vue";
 const props = defineProps<{
   connectionStatus: ConnectionStatus;
   isStreaming: boolean;
-  commands: RpcSlashCommand[];
-  workspaceEntries: RpcWorkspaceEntry[];
+  commands: readonly RpcSlashCommand[];
+  workspaceEntries: readonly RpcWorkspaceEntry[];
   workspaceEntriesLoading: boolean;
   ensureWorkspaceEntries: () => Promise<RpcWorkspaceEntry[]>;
-  models: RpcModelInfo[];
+  models: readonly RpcModelInfo[];
   selectedModel: RpcModelInfo | null;
   thinkingLevel: RpcThinkingLevel | null;
   autoCompactionEnabled: boolean;

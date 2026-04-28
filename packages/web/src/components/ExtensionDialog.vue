@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { X } from "lucide-vue-next";
-import { ref, watch } from "vue";
 import type {
   RpcExtensionUIRequest,
   RpcExtensionUIResponse,
-} from "../shared-types";
+} from "@pi-web/bridge/types";
+import { X } from "lucide-vue-next";
+import { ref, watch } from "vue";
+
+type DialogExtensionUIRequest = Extract<
+  RpcExtensionUIRequest,
+  { method: "select" | "confirm" | "input" | "editor" }
+>;
 
 const props = defineProps<{
-  request: RpcExtensionUIRequest | null;
+  request: DialogExtensionUIRequest | null;
 }>();
 
 const emit = defineEmits<{

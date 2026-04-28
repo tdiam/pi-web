@@ -30,13 +30,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Build publishable package
-        run: pnpm run build:server && pnpm run build:web
       - name: Install pi-coding-agent
         run: npm install --global @mariozechner/pi-coding-agent
       - name: Show Pi version
         run: pi --version
       - name: Install pi-web from local package
         run: pi install .
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build publishable package
+        run: pnpm run build:server && pnpm run build:web
+      - name: Smoke test /web through pi
+        run: pnpm run smoke:pi-web

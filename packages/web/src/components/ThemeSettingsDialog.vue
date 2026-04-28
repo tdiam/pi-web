@@ -391,7 +391,6 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-
 @media (max-width: 900px) {
   .theme-dialog-overlay {
     padding: 10px;

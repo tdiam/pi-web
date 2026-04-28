@@ -1,4 +1,3 @@
-import { ref, readonly, computed, onUnmounted, watch } from "vue";
 import type {
   ClientMessage,
   RpcBridgeEvent,
@@ -27,7 +26,8 @@ import type {
   RpcTranscriptUpsertEvent,
   RpcSessionStatsEvent,
   ServerMessage,
-} from "../shared-types";
+} from "@pi-web/bridge/types";
+import { ref, computed, onUnmounted, watch } from "vue";
 import {
   normalizeRpcModel,
   upsertModel,
@@ -39,6 +39,15 @@ import {
   type PendingTranscriptSessionEvent,
 } from "../utils/transcript";
 
+type TranscriptConfigSnapshot = ReturnType<typeof transcriptConfigState>;
+
+const normalizeTranscriptEntries = normalizeTranscript as (
+  messages: readonly unknown[],
+) => TranscriptEntry[];
+const readTranscriptConfigState = transcriptConfigState as (
+  messages: readonly unknown[],
+) => TranscriptConfigSnapshot;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -46,6 +55,11 @@ import {
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export type TranscriptEntry = RpcTranscriptMessage;
+
+type DialogExtensionUIRequest = Extract<
+  RpcExtensionUIRequest,
+  { method: "select" | "confirm" | "input" | "editor" }
+>;
 
 export interface SessionEntry {
   id: string;
@@ -173,7 +187,7 @@ const transcriptOldestCursor = ref<string | null>(null);
 const transcriptNewestCursor = ref<string | null>(null);
 const transcriptInitialLoading = ref(true);
 const transcriptPageLoading = ref(false);
-const transcript = computed(() => normalizeTranscript(rawTranscript.value));
+const transcript = ref<TranscriptEntry[]>([]);
 const sessionState = ref<RpcSessionState | null>(null);
 const pendingTranscriptConfigEvent = ref<
   (PendingTranscriptSessionEvent & { sessionPath: string | null }) | null
@@ -217,7 +231,7 @@ const connectionError = ref("");
 // ---------------------------------------------------------------------------
 
 /** Current dialog-requiring extension UI request, or null. */
-const pendingExtensionRequest = ref<RpcExtensionUIRequest | null>(null);
+const pendingExtensionRequest = ref<DialogExtensionUIRequest | null>(null);
 
 /** Toast notification entries from extension notify calls. */
 const notifications = ref<
@@ -264,6 +278,14 @@ const pendingRequests = new Map<
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function currentRawTranscriptEntries(): TranscriptEntry[] {
+  return rawTranscript.value as unknown as TranscriptEntry[];
+}
+
+function syncTranscript() {
+  transcript.value = normalizeTranscriptEntries(currentRawTranscriptEntries());
+}
 
 function resetReconnectDelay() {
   reconnectDelay = 1000;
@@ -570,7 +592,7 @@ function reconcilePendingTranscriptConfigEvent() {
   const pending = pendingTranscriptConfigEvent.value;
   if (!pending || pending.sessionPath !== transcriptSessionPath.value) return;
 
-  const configState = transcriptConfigState(rawTranscript.value);
+  const configState = readTranscriptConfigState(rawTranscript.value);
   const next = { ...pending };
   if (samePendingTranscriptModel(next.model, configState.model)) {
     next.model = undefined;
@@ -697,7 +719,8 @@ function replaceTranscript(
   const previousSessionPath = transcriptSessionPath.value;
   rawTranscript.value = entries.map((entry, index) =>
     normalizeTranscriptEntry(entry, `snapshot:${index}`),
-  );
+  ) as TranscriptEntry[];
+  syncTranscript();
   if (previousSessionPath !== sessionPath || rawTranscript.value.length === 0) {
     clearPendingTranscriptConfigEvent();
   }
@@ -716,19 +739,28 @@ function applyTranscriptPage(
   const previousSessionPath = transcriptSessionPath.value;
   const normalized = page.messages.map((entry, index) =>
     normalizeTranscriptEntry(entry, `snapshot:${index}`),
-  );
+  ) as TranscriptEntry[];
 
   if (mode === "prepend") {
-    const existingKeys = new Set(
-      rawTranscript.value.map(entry => entry.transcriptKey),
-    );
+    const existingKeys = new Set<string | undefined>();
+    for (const entry of currentRawTranscriptEntries()) {
+      existingKeys.add(entry.transcriptKey);
+    }
     const merged = normalized.filter(
       entry => !existingKeys.has(entry.transcriptKey),
     );
-    rawTranscript.value = [...merged, ...rawTranscript.value];
+    const nextTranscript: TranscriptEntry[] = [];
+    for (const entry of merged) {
+      nextTranscript.push(entry);
+    }
+    for (const entry of currentRawTranscriptEntries()) {
+      nextTranscript.push(entry);
+    }
+    rawTranscript.value = nextTranscript;
   } else {
     rawTranscript.value = normalized;
   }
+  syncTranscript();
 
   const nextSessionPath = page.sessionPath ?? null;
   if (previousSessionPath !== nextSessionPath) {
@@ -755,11 +787,15 @@ function shouldReplaceSessionTranscript(sessionPath: string | null): boolean {
 }
 
 function currentTranscriptContainsLiveOnlyEntries(): boolean {
-  return rawTranscript.value.some(
-    entry =>
+  for (const entry of currentRawTranscriptEntries()) {
+    if (
       typeof entry.transcriptKey === "string" &&
-      entry.transcriptKey.startsWith("live:"),
-  );
+      entry.transcriptKey.startsWith("live:")
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function applySessionTranscriptPage(page: RpcTranscriptPage) {
@@ -879,19 +915,30 @@ function upsertTranscriptMessage(
   if (shouldReplaceSessionTranscript(sessionPath)) {
     transcriptSessionPath.value = sessionPath;
   }
-  const index = rawTranscript.value.findIndex(
-    current => current.transcriptKey === normalized.transcriptKey,
-  );
+  let index = -1;
+  for (const [
+    currentIndex,
+    current,
+  ] of currentRawTranscriptEntries().entries()) {
+    if (current.transcriptKey === normalized.transcriptKey) {
+      index = currentIndex;
+      break;
+    }
+  }
 
   if (index >= 0) {
-    const updated = [...rawTranscript.value];
+    const updated = currentRawTranscriptEntries().slice();
     updated[index] = { ...updated[index], ...normalized };
-    rawTranscript.value = updated;
+    rawTranscript.value = updated as TranscriptEntry[];
+    syncTranscript();
     reconcilePendingTranscriptConfigEvent();
     return;
   }
 
-  rawTranscript.value = [...rawTranscript.value, normalized];
+  const nextTranscript = currentRawTranscriptEntries().slice();
+  nextTranscript.push(normalized);
+  rawTranscript.value = nextTranscript as TranscriptEntry[];
+  syncTranscript();
   reconcilePendingTranscriptConfigEvent();
 }
 
@@ -1893,47 +1940,47 @@ export function useBridgeClient() {
   );
 
   return {
-    connectionStatus: readonly(connectionStatus),
-    transcript: readonly(transcript),
-    transcriptHasOlder: readonly(transcriptHasOlder),
-    transcriptInitialLoading: readonly(transcriptInitialLoading),
-    transcriptPageLoading: readonly(transcriptPageLoading),
-    pendingTranscriptConfigEvent: readonly(visiblePendingTranscriptConfigEvent),
-    sessionState: readonly(sessionState),
-    sessions: readonly(sessions),
-    treeEntries: readonly(treeEntries),
-    activeTreeSessionPath: readonly(activeTreeSessionPath),
-    liveSessionPath: readonly(liveSessionPath),
-    runningSessionPaths: readonly(runningSessionPaths),
-    workspaceSessionCursors: readonly(workspaceSessionCursors),
-    commands: readonly(commands),
-    workspaceEntries: readonly(workspaceEntries),
-    workspaceEntriesLoading: readonly(workspaceEntriesLoading),
-    availableModels: readonly(availableModels),
-    currentModel: readonly(currentModel),
-    currentThinkingLevel: readonly(currentThinkingLevel),
-    isStreaming: readonly(isStreaming),
-    isCompacting: readonly(isCompacting),
-    sessionStats: readonly(sessionStats),
-    gitRepoState: readonly(gitRepoState),
-    gitRepoLoading: readonly(gitRepoLoading),
-    gitBranchSwitching: readonly(gitBranchSwitching),
+    connectionStatus,
+    transcript,
+    transcriptHasOlder,
+    transcriptInitialLoading,
+    transcriptPageLoading,
+    pendingTranscriptConfigEvent: visiblePendingTranscriptConfigEvent,
+    sessionState,
+    sessions,
+    treeEntries,
+    activeTreeSessionPath,
+    liveSessionPath,
+    runningSessionPaths,
+    workspaceSessionCursors,
+    commands,
+    workspaceEntries,
+    workspaceEntriesLoading,
+    availableModels,
+    currentModel,
+    currentThinkingLevel,
+    isStreaming,
+    isCompacting,
+    sessionStats,
+    gitRepoState,
+    gitRepoLoading,
+    gitBranchSwitching,
     // Pending messages
     pendingMessageCount: computed(
       () => sessionState.value?.pendingMessageCount ?? 0,
     ),
-    queuedUserMessages: readonly(queuedUserMessages),
+    queuedUserMessages,
     // Reconnect diagnostics
     isReconnecting,
-    reconnectCount: readonly(reconnectCount),
-    lastDisconnectReason: readonly(lastDisconnectReason),
-    connectionError: readonly(connectionError),
+    reconnectCount,
+    lastDisconnectReason,
+    connectionError,
     // Extension UI
-    pendingExtensionRequest: readonly(pendingExtensionRequest),
-    notifications: readonly(notifications),
-    statusEntries: readonly(statusEntries),
-    widgetEntries: readonly(widgetEntries),
-    prefillText: readonly(prefillText),
+    pendingExtensionRequest,
+    notifications,
+    statusEntries,
+    widgetEntries,
+    prefillText,
     respondToUIRequest,
     dismissNotification,
     sendCommand,

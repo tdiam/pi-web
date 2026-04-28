@@ -1,4 +1,4 @@
-import type { RpcThinkingLevel } from "../shared-types";
+import type { RpcThinkingLevel } from "@pi-web/bridge/types";
 
 export const DEFAULT_THINKING_LEVEL: RpcThinkingLevel = "off";
 

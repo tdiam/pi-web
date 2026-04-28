@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { filterModels, getModelKey, type RpcModelInfo } from "../utils/models";
 
 const props = defineProps<{
-  models: RpcModelInfo[];
+  models: readonly RpcModelInfo[];
   selectedModel: RpcModelInfo | null;
   label?: string;
   disabled?: boolean;

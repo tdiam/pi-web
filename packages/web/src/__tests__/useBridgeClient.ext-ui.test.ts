@@ -9,21 +9,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock global WebSocket before importing the composable
-const mockWsInstances: Array<{
-  send: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  addEventListener: ReturnType<typeof vi.fn>;
-  readyState: number;
-}> = [];
+const mockWsInstances: MockWebSocket[] = [];
 
 class MockWebSocket {
-  readyState = WebSocket.OPEN;
+  readyState: number = WebSocket.OPEN;
   send = vi.fn();
   close = vi.fn();
   addEventListener = vi.fn();
 
   constructor() {
-    mockWsInstances.push(this as (typeof mockWsInstances)[number]);
+    mockWsInstances.push(this);
   }
 }
 
@@ -126,8 +121,12 @@ async function importComposable() {
   return mod.useBridgeClient();
 }
 
-function getLastMockWs() {
-  return mockWsInstances[mockWsInstances.length - 1];
+function getLastMockWs(): MockWebSocket {
+  const ws = mockWsInstances[mockWsInstances.length - 1];
+  if (!ws) {
+    throw new Error("No mock WebSocket instance was created");
+  }
+  return ws;
 }
 
 /** Simulate an incoming WebSocket message. */
@@ -171,7 +170,7 @@ describe("extension_ui_request handling", () => {
     const ws = getLastMockWs();
     simulateOpen(ws);
 
-    const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
+    const sentCommandTypes = ws.send.mock.calls.map(([message]) => {
       const payload = JSON.parse(message) as { payload?: { type?: string } };
       return payload.payload?.type;
     });
@@ -200,7 +199,7 @@ describe("extension_ui_request handling", () => {
     const ws = getLastMockWs();
     simulateOpen(ws);
 
-    const sentCommandTypes = ws.send.mock.calls.map(([message]: [string]) => {
+    const sentCommandTypes = ws.send.mock.calls.map(([message]) => {
       const payload = JSON.parse(message) as { payload?: { type?: string } };
       return payload.payload?.type;
     });
@@ -885,7 +884,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"list_git_branches"'),
     );
 
-    const listCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const listCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"list_git_branches"'),
     );
     expect(listCommandCall).toBeDefined();
@@ -982,7 +981,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"switch_git_branch"'),
     );
 
-    const switchCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const switchCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"switch_git_branch"'),
     );
     expect(switchCommandCall).toBeDefined();
@@ -1037,7 +1036,7 @@ describe("extension_ui_request handling", () => {
     ws.send.mockClear();
 
     const pendingSwitch = client.switchGitBranch("feature");
-    const switchCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const switchCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"switch_git_branch"'),
     );
     expect(switchCommandCall).toBeDefined();
@@ -1099,7 +1098,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"create_git_branch"'),
     );
 
-    const createCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const createCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"create_git_branch"'),
     );
     expect(createCommandCall).toBeDefined();
@@ -1152,8 +1151,8 @@ describe("extension_ui_request handling", () => {
     const ws = getLastMockWs();
     simulateOpen(ws);
 
-    const initialGetStateCount = ws.send.mock.calls.filter(
-      ([message]: [string]) => message.includes('"type":"get_state"'),
+    const initialGetStateCount = ws.send.mock.calls.filter(([message]) =>
+      message.includes('"type":"get_state"'),
     ).length;
 
     const pendingSet = client.setThinkingLevel("high");
@@ -1161,7 +1160,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"set_thinking_level"'),
     );
 
-    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const setCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"set_thinking_level"'),
     );
     expect(setCommandCall).toBeDefined();
@@ -1183,7 +1182,7 @@ describe("extension_ui_request handling", () => {
     expect(client.currentThinkingLevel.value).toBe("high");
     // setThinkingLevel only sends set_thinking_level; it does not send get_state.
     expect(
-      ws.send.mock.calls.filter(([message]: [string]) =>
+      ws.send.mock.calls.filter(([message]) =>
         message.includes('"type":"get_state"'),
       ).length,
     ).toBe(initialGetStateCount);
@@ -1195,7 +1194,7 @@ describe("extension_ui_request handling", () => {
     simulateOpen(ws);
 
     const pendingStartSet = client.setThinkingLevel("high");
-    const startSetCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const startSetCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"set_thinking_level"'),
     );
     expect(startSetCommandCall).toBeDefined();
@@ -1283,7 +1282,7 @@ describe("extension_ui_request handling", () => {
     });
 
     const pendingSet = client.setThinkingLevel("high");
-    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const setCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"set_thinking_level"'),
     );
     expect(setCommandCall).toBeDefined();
@@ -1351,7 +1350,7 @@ describe("extension_ui_request handling", () => {
     });
 
     const pendingSet = client.setThinkingLevel("high");
-    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const setCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"set_thinking_level"'),
     );
     expect(setCommandCall).toBeDefined();
@@ -1445,7 +1444,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"set_auto_compaction"'),
     );
 
-    const setCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const setCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"set_auto_compaction"'),
     );
     expect(setCommandCall).toBeDefined();
@@ -1479,7 +1478,7 @@ describe("extension_ui_request handling", () => {
       expect.stringContaining('"type":"compact"'),
     );
 
-    const compactCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const compactCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"compact"'),
     );
     expect(compactCommandCall).toBeDefined();
@@ -1503,7 +1502,7 @@ describe("extension_ui_request handling", () => {
     await pendingCompact;
     expect(client.isCompacting.value).toBe(false);
     expect(
-      ws.send.mock.calls.some(([message]: [string]) =>
+      ws.send.mock.calls.some(([message]) =>
         message.includes('"type":"get_state"'),
       ),
     ).toBe(true);
@@ -1516,7 +1515,7 @@ describe("extension_ui_request handling", () => {
     ws.send.mockClear();
 
     const pendingCompact = client.compactSession("Keep pending todos");
-    const compactCommandCall = ws.send.mock.calls.find(([message]: [string]) =>
+    const compactCommandCall = ws.send.mock.calls.find(([message]) =>
       message.includes('"type":"compact"'),
     );
     expect(compactCommandCall).toBeDefined();
@@ -1809,7 +1808,7 @@ describe("extension_ui_request handling", () => {
     const editPromise = client.editQueuedMessage(1);
     const dequeueRequest = ws.send.mock.calls
       .map(
-        ([message]: [string]) =>
+        ([message]) =>
           JSON.parse(message) as {
             payload?: { type?: string; id?: string; index?: number };
           },
@@ -2229,7 +2228,7 @@ describe("extension_ui_request handling", () => {
       },
     ]);
     expect(
-      ws.send.mock.calls.some(([message]: [string]) =>
+      ws.send.mock.calls.some(([message]) =>
         message.includes('"type":"get_messages"'),
       ),
     ).toBe(false);
@@ -2593,7 +2592,7 @@ describe("extension_ui_request handling", () => {
     const abortPromise = client.abortGeneration();
     const abortRequest = ws.send.mock.calls
       .map(
-        ([message]: [string]) =>
+        ([message]) =>
           JSON.parse(message) as { payload?: { type?: string; id?: string } },
       )
       .find(message => message.payload?.type === "abort");

@@ -2895,9 +2895,14 @@ class TranscriptProjector {
     };
 
     for (const message of page.messages) {
-      if (message.id) {
-        this.state.messageIdToKey.set(message.id, message.transcriptKey);
+      if (!message.id) {
+        continue;
       }
+
+      this.state.messageIdToKey.set(
+        message.id,
+        message.transcriptKey ?? message.id,
+      );
     }
   }
 

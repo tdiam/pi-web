@@ -48,7 +48,7 @@ export function getModelKey(
 }
 
 export function upsertModel(
-  models: RpcModelInfo[],
+  models: readonly RpcModelInfo[],
   model: RpcModelInfo,
 ): RpcModelInfo[] {
   const key = getModelKey(model);
@@ -115,7 +115,7 @@ function scoreToken(query: string, target: string): number {
 }
 
 export function filterModels(
-  models: RpcModelInfo[],
+  models: readonly RpcModelInfo[],
   query: string,
 ): RpcModelInfo[] {
   const normalizedQuery = normalizeSearchText(query);

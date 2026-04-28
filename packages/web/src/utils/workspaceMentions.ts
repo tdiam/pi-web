@@ -1,4 +1,4 @@
-import type { RpcWorkspaceEntry } from "../shared-types";
+import type { RpcWorkspaceEntry } from "@pi-web/bridge/types";
 
 const PATH_DELIMITERS = new Set([" ", "\t", '"', "'", "=", "\n"]);
 const DEFAULT_SUGGESTION_LIMIT = 20;

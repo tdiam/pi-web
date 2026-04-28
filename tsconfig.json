@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "Node16",
+    "module": "ESNext",
     "lib": ["ES2022"],
     "strict": true,
     "esModuleInterop": true,
@@ -9,7 +9,7 @@
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
     "sourceMap": true,
-    "moduleResolution": "Node16",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "outDir": "./dist",
     "rootDir": "./packages",

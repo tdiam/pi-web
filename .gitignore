@@ -30,3 +30,7 @@ coverage/
 tmp/
 web-dist/
 pi-mono
+
+# Monorepo
+.turbo/
+*.tsbuildinfo

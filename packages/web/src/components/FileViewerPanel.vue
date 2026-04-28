@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { RpcWorkspaceFile } from "@pi-web/bridge/types";
 import {
   computed,
   nextTick,
@@ -7,7 +8,6 @@ import {
   ref,
   watch,
 } from "vue";
-import type { RpcWorkspaceFile } from "../shared-types";
 import { highlightCodeLinesHtml } from "../utils/codeHighlight";
 
 const props = defineProps<{

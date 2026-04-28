@@ -2460,7 +2460,7 @@ describe("WsRpcAdapter", () => {
       expect(response.payload.success).toBe(true);
       expect(response.payload.data).toMatchObject({
         path: "src/App.vue",
-        absolutePath: filePath,
+        absolutePath: fs.realpathSync(filePath),
         truncated: false,
         totalBytes: fs.statSync(filePath).size,
         lineCount: 4,

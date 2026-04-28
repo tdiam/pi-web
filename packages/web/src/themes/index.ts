@@ -102,10 +102,12 @@ export function readStoredThemePreference(
         ? parsed.mode
         : fallback.mode;
     const darkThemeId =
+      typeof parsed.darkThemeId === "string" &&
       themeById(parsed.darkThemeId)?.mode === "dark"
         ? parsed.darkThemeId
         : DEFAULT_THEME_PREFERENCE.darkThemeId;
     const lightThemeId =
+      typeof parsed.lightThemeId === "string" &&
       themeById(parsed.lightThemeId)?.mode === "light"
         ? parsed.lightThemeId
         : DEFAULT_THEME_PREFERENCE.lightThemeId;

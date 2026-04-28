@@ -1,4 +1,4 @@
-import type { RpcImageContent } from "../shared-types";
+import type { RpcImageContent } from "@pi-web/bridge/types";
 
 const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   "image/png",

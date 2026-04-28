@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import FailureOnlyReporter from "./scripts/vitest-failure-only-reporter";
+import FailureOnlyReporter from "./scripts/vitest-failure-only-reporter.js";
 
 export default defineConfig({
   test: {

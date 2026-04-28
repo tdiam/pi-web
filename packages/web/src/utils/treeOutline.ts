@@ -1,4 +1,4 @@
-import type { RpcTreeEntry, RpcTreeTrackColumn } from "../shared-types";
+import type { RpcTreeEntry, RpcTreeTrackColumn } from "@pi-web/bridge/types";
 
 export type TreeFilterMode =
   | "default"

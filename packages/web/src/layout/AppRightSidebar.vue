@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import type { RpcWorkspaceFile } from "@pi-web/bridge/types";
 import { X } from "lucide-vue-next";
 import { computed } from "vue";
 import FileViewerPanel from "../components/FileViewerPanel.vue";
 import SessionTreeRail from "../components/SessionTreeRail.vue";
 import type { TreeEntry } from "../composables/useBridgeClient";
-import type { RpcWorkspaceFile } from "../shared-types";
 
 type FileTab = {
   id: string;

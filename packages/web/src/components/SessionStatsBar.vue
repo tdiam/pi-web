@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import type { RpcGitRepoState, RpcSessionStats } from "@pi-web/bridge/types";
 import { computed } from "vue";
-import type { RpcGitRepoState, RpcSessionStats } from "../shared-types";
 import GitBranchDropdown from "./GitBranchDropdown.vue";
 
 const props = defineProps<{

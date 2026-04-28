@@ -7,20 +7,147 @@
  */
 
 import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   type ExtensionAPI,
   type ExtensionCommandContext,
 } from "@mariozechner/pi-coding-agent";
-import { isBridgeExitInput } from "../bridge/exit-input.js";
-import { startBridge, type BridgeController } from "../bridge/lifecycle.js";
-import { createBridgeTerminalView } from "../bridge/terminal-log-view.js";
-import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "../bridge/types.js";
-import type { WsRpcAdapterContext } from "../bridge/ws-rpc-adapter.js";
+import { isBridgeExitInput } from "@pi-web/bridge/exit-input";
+import { startBridge, type BridgeController } from "@pi-web/bridge/lifecycle";
+import { createBridgeTerminalView } from "@pi-web/bridge/terminal-log-view";
+import { DEFAULT_BRIDGE_CONFIG, type BridgeConfig } from "@pi-web/bridge/types";
+import type { WsRpcAdapterContext } from "@pi-web/bridge/ws-rpc-adapter";
+
+const HEADLESS_ENV = "PI_WEB_HEADLESS";
+const READY_FILE_ENV = "PI_WEB_READY_FILE";
+const SHUTDOWN_FILE_ENV = "PI_WEB_SHUTDOWN_FILE";
+const SHUTDOWN_POLL_MS = 200;
+
+export interface WebCommandOptions {
+  headless: boolean;
+  readyFile?: string;
+  shutdownFile?: string;
+}
+
+function isTruthyEnv(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+      return false;
+    default:
+      return true;
+  }
+}
+
+export function parseWebCommandOptions(
+  args: string,
+  env: NodeJS.ProcessEnv = process.env,
+  hasUI = true,
+): WebCommandOptions {
+  const tokens = args
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(Boolean);
+
+  return {
+    headless: tokens.includes("--headless") || isTruthyEnv(env[HEADLESS_ENV]) || !hasUI,
+    readyFile: env[READY_FILE_ENV],
+    shutdownFile: env[SHUTDOWN_FILE_ENV],
+  };
+}
+
+async function writeReadyFile(
+  readyFile: string,
+  payload: Record<string, string>,
+): Promise<void> {
+  await mkdir(dirname(readyFile), { recursive: true });
+  await writeFile(`${readyFile}`, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+async function runHeadlessWebBridge(
+  config: BridgeConfig,
+  adapterContext: WsRpcAdapterContext,
+  options: WebCommandOptions,
+): Promise<void> {
+  let resolveStopped: (() => void) | undefined;
+  const stopped = new Promise<void>(resolve => {
+    resolveStopped = resolve;
+  });
+
+  const bridgeController = await startBridge(
+    config,
+    adapterContext,
+    () => resolveStopped?.(),
+    {
+      captureSigint: false,
+    },
+  );
+
+  const bridgeUrl = bridgeController.getBridgeUrl();
+  if (!bridgeUrl) {
+    await bridgeController.stop();
+    throw new Error("Bridge started without a reachable URL");
+  }
+
+  const wsUrl = `${bridgeUrl.replace(/^http/, "ws")}/ws`;
+  console.log(`[pi-web] Bridge URL: ${bridgeUrl}`);
+  console.log(`[pi-web] WebSocket: ${wsUrl}`);
+
+  if (options.readyFile) {
+    await writeReadyFile(options.readyFile, { bridgeUrl, wsUrl });
+  }
+
+  const requestStop = (): void => {
+    void bridgeController.stop().catch(err => {
+      console.error("[pi-web] Failed to stop bridge:", err);
+    });
+  };
+
+  const onSigint = (): void => {
+    requestStop();
+  };
+  const onSigterm = (): void => {
+    requestStop();
+  };
+  const onAbort = (): void => {
+    requestStop();
+  };
+
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
+  adapterContext.ctx.signal?.addEventListener("abort", onAbort, { once: true });
+
+  const shutdownPoll = options.shutdownFile
+    ? setInterval(() => {
+        if (existsSync(options.shutdownFile!)) {
+          requestStop();
+        }
+      }, SHUTDOWN_POLL_MS)
+    : undefined;
+  shutdownPoll?.unref();
+
+  try {
+    await stopped;
+  } finally {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+    adapterContext.ctx.signal?.removeEventListener("abort", onAbort);
+    if (shutdownPoll) {
+      clearInterval(shutdownPoll);
+    }
+  }
+}
 
 async function webBridgeHandler(
-  _args: string,
+  args: string,
   ctx: ExtensionCommandContext,
   pi: ExtensionAPI,
 ): Promise<void> {
@@ -33,6 +160,7 @@ async function webBridgeHandler(
   const projectRoot = join(dirname(thisFile), "..", "..");
   const webDistDir = join(projectRoot, "web-dist");
   const staticDir = existsSync(webDistDir) ? webDistDir : undefined;
+  const options = parseWebCommandOptions(args, process.env, ctx.hasUI);
 
   const config: BridgeConfig = {
     ...DEFAULT_BRIDGE_CONFIG,
@@ -42,6 +170,11 @@ async function webBridgeHandler(
     host: process.env.PI_BRIDGE_HOST || DEFAULT_BRIDGE_CONFIG.host,
     staticDir,
   };
+
+  if (options.headless) {
+    await runHeadlessWebBridge(config, adapterContext, options);
+    return;
+  }
 
   let bridgeController: BridgeController | undefined;
   let terminalView:

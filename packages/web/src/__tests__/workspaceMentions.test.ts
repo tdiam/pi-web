@@ -1,5 +1,5 @@
+import type { RpcWorkspaceEntry } from "@pi-web/bridge/types";
 import { describe, expect, it } from "vitest";
-import type { RpcWorkspaceEntry } from "../shared-types";
 import {
   applyWorkspaceMentionCompletion,
   getWorkspaceMentionContext,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { RpcGitBranch, RpcGitRepoState } from "@pi-web/bridge/types";
 import {
   Check,
   ChevronDown,
@@ -8,7 +9,6 @@ import {
   RefreshCw,
 } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import type { RpcGitBranch, RpcGitRepoState } from "../shared-types";
 
 const props = defineProps<{
   label: string | null;

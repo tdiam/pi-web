@@ -67,12 +67,16 @@ export function parseInlineFileReference(
     return null;
   }
 
+  const normalizedColumnNumber =
+    typeof columnNumber === "number" &&
+    Number.isInteger(columnNumber) &&
+    columnNumber > 0
+      ? columnNumber
+      : undefined;
+
   return {
     path,
     lineNumber,
-    columnNumber:
-      Number.isInteger(columnNumber) && columnNumber > 0
-        ? columnNumber
-        : undefined,
+    columnNumber: normalizedColumnNumber,
   };
 }

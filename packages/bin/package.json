@@ -1,0 +1,26 @@
+{
+  "name": "@pi-web/bin",
+  "version": "0.2.2",
+  "private": true,
+  "description": "Pi extension entry point for Pi Web",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pi-web/bridge": "workspace:*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.65.0",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3",
+    "vite": "^8.0.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { RpcImageContent } from "@pi-web/bridge/types";
 import { Pencil, Sparkle } from "lucide-vue-next";
 import {
   computed,
@@ -9,7 +10,6 @@ import {
   watch,
 } from "vue";
 import type { TranscriptEntry } from "../composables/useBridgeClient";
-import type { RpcImageContent } from "../shared-types";
 import { userMessageCopyText } from "../utils/messageCopy";
 import { buildToolInlineModel } from "../utils/toolBlock";
 import {

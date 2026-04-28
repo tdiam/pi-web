@@ -456,7 +456,7 @@ export interface RpcTranscriptCompactionBlock {
   type: "compaction";
   summary: string;
   tokensBefore: number;
-  firstKeptEntryId: string;
+  firstKeptEntryId?: string;
 }
 
 export interface RpcTranscriptBranchSummaryBlock {
@@ -502,7 +502,7 @@ export type RpcTranscriptContent =
   | Array<string | RpcTranscriptContentBlock>;
 
 export interface RpcTranscriptMessage {
-  transcriptKey: string;
+  transcriptKey?: string;
   id?: string;
   role: RpcTranscriptRole;
   content?: RpcTranscriptContent;
@@ -644,7 +644,9 @@ export interface RpcResponseMap {
   dequeue_follow_up_message: { removed: RpcQueuedMessage };
 }
 
-type RpcResponseData<T> = [T] extends [void] ? {} : { data: T };
+type RpcResponseData<T> = [T] extends [void]
+  ? { data?: undefined }
+  : { data: T };
 
 /** Structured responses sent back to the browser client after command dispatch. */
 export type RpcResponse =

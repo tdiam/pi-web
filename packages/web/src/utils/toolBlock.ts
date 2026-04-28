@@ -6,6 +6,7 @@ import type {
 } from "./transcript";
 
 export interface ToolInlineModel {
+  label: string;
   title: string;
   meta?: string;
   diffStats?: { added: number; removed: number };
@@ -17,6 +18,7 @@ export function buildToolInlineModel(block: ToolContentBlock): ToolInlineModel {
   const args = asRecord(block.toolArgs);
 
   return {
+    label: humanizeToolName(block.toolName),
     title: formatToolTitle(block.toolName, args),
     meta: formatToolMeta(
       block.toolName,
