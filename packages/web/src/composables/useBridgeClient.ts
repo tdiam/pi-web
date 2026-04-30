@@ -260,7 +260,12 @@ const MAX_RECONNECT_DELAY = 30_000;
 let disposed = false;
 let requestIdCounter = 0;
 let pendingTranscriptConfigEventCounter = 0;
+const WORKSPACE_ENTRIES_REFRESH_MS = 10_000;
 let workspaceEntriesRequest: Promise<RpcWorkspaceEntry[]> | null = null;
+let workspaceEntriesRequestId: string | null = null;
+let workspaceEntriesRequestContextKey: string | null = null;
+let workspaceEntriesLoadedContextKey: string | null = null;
+let workspaceEntriesLoadedAt = 0;
 let gitRepoStateRequest: Promise<RpcGitRepoState | null> | null = null;
 let stopDisplayedSessionRouteSync: (() => void) | null = null;
 let popStateListenerInstalled = false;
@@ -325,6 +330,40 @@ function updateAvailableModels(values: readonly unknown[]) {
 
 function getDisplayedSessionPath(): string | null {
   return activeTreeSessionPath.value ?? sessionState.value?.sessionFile ?? null;
+}
+
+function getDisplayedWorkspacePath(): string | null {
+  const sessionWorkspacePath = sessionState.value?.workspacePath?.trim();
+  if (sessionWorkspacePath) {
+    return sessionWorkspacePath;
+  }
+
+  const displayedSessionPath = getDisplayedSessionPath();
+  if (!displayedSessionPath) {
+    return null;
+  }
+
+  const matchedSession = sessions.value.find(
+    session => session.path === displayedSessionPath,
+  );
+  const matchedWorkspacePath =
+    matchedSession?.workspacePath ?? matchedSession?.workspaceId;
+  return matchedWorkspacePath?.trim() || null;
+}
+
+function getWorkspaceEntriesContextKey(): string | null {
+  return getDisplayedWorkspacePath() ?? getDisplayedSessionPath();
+}
+
+function invalidateWorkspaceEntries() {
+  workspaceEntriesLoaded.value = false;
+  workspaceEntriesLoading.value = false;
+  workspaceEntries.value = [];
+  workspaceEntriesRequest = null;
+  workspaceEntriesRequestId = null;
+  workspaceEntriesRequestContextKey = null;
+  workspaceEntriesLoadedContextKey = null;
+  workspaceEntriesLoadedAt = 0;
 }
 
 const SESSION_ROUTE_PARAM = "session";
@@ -840,6 +879,7 @@ function applySessionSnapshotResponse(
         sessionId?: string;
         sessionName?: string;
         sessionPath?: string;
+        workspacePath?: string;
       }
     | undefined,
   options?: { refreshState?: boolean },
@@ -849,6 +889,7 @@ function applySessionSnapshotResponse(
   }
 
   const previousSessionPath = getDisplayedSessionPath();
+  const previousWorkspacePath = getWorkspaceEntriesContextKey();
 
   applySessionTranscriptPage(data.transcript);
   if (data.sessionPath) {
@@ -867,11 +908,15 @@ function applySessionSnapshotResponse(
       sessionId: data.sessionId,
       sessionName: data.sessionName,
       sessionFile: data.sessionPath ?? sessionState.value?.sessionFile,
+      workspacePath: data.workspacePath ?? sessionState.value?.workspacePath,
     } as RpcSessionState;
   }
   if (previousSessionPath !== getDisplayedSessionPath()) {
     resetGitRepoState();
     isStreaming.value = false;
+  }
+  if (previousWorkspacePath !== getWorkspaceEntriesContextKey()) {
+    invalidateWorkspaceEntries();
   }
   if (options?.refreshState) {
     sendCommand({ type: "get_state" }).catch(() => {});
@@ -1051,11 +1096,24 @@ async function editQueuedMessage(
 async function fetchWorkspaceEntries(
   force: boolean = false,
 ): Promise<RpcWorkspaceEntry[]> {
-  if (workspaceEntriesLoaded.value && !force) {
+  const workspacePath = getDisplayedWorkspacePath();
+  const contextKey = getWorkspaceEntriesContextKey();
+  const contextChanged = workspaceEntriesLoadedContextKey !== contextKey;
+  const isStale =
+    workspaceEntriesLoadedAt > 0 &&
+    Date.now() - workspaceEntriesLoadedAt >= WORKSPACE_ENTRIES_REFRESH_MS;
+  const shouldRefresh =
+    force || !workspaceEntriesLoaded.value || contextChanged || isStale;
+
+  if (!shouldRefresh) {
     return workspaceEntries.value;
   }
 
-  if (workspaceEntriesRequest && !force) {
+  if (
+    workspaceEntriesRequest &&
+    workspaceEntriesRequestContextKey === contextKey &&
+    !force
+  ) {
     return workspaceEntriesRequest;
   }
 
@@ -1063,24 +1121,31 @@ async function fetchWorkspaceEntries(
     return workspaceEntries.value;
   }
 
+  if (contextChanged) {
+    workspaceEntriesLoaded.value = false;
+    workspaceEntries.value = [];
+  }
+
+  const requestId = createRequestId();
   workspaceEntriesLoading.value = true;
-  workspaceEntriesRequest = sendCommand({ type: "list_workspace_entries" })
-    .then(response => {
-      if (response.success) {
-        const data = response.data as
-          | { entries?: RpcWorkspaceEntry[] }
-          | undefined;
-        workspaceEntries.value = Array.isArray(data?.entries)
-          ? data.entries
-          : [];
-        workspaceEntriesLoaded.value = true;
-      }
-      return workspaceEntries.value;
-    })
+  workspaceEntriesRequestId = requestId;
+  workspaceEntriesRequestContextKey = contextKey;
+  workspaceEntriesRequest = sendCommand({
+    id: requestId,
+    type: "list_workspace_entries",
+    force: force || contextChanged || isStale,
+    ...(workspacePath ? { workspacePath } : {}),
+  })
+    .then(() => workspaceEntries.value)
     .catch(() => workspaceEntries.value)
     .finally(() => {
+      if (workspaceEntriesRequestId !== requestId) {
+        return;
+      }
       workspaceEntriesLoading.value = false;
       workspaceEntriesRequest = null;
+      workspaceEntriesRequestId = null;
+      workspaceEntriesRequestContextKey = null;
     });
 
   return workspaceEntriesRequest;
@@ -1107,7 +1172,12 @@ function summarizeErrorMessage(message: string, fallback: string): string {
 }
 
 async function readWorkspaceFile(path: string): Promise<RpcWorkspaceFile> {
-  const response = await sendCommand({ type: "read_workspace_file", path });
+  const workspacePath = getDisplayedWorkspacePath();
+  const response = await sendCommand({
+    type: "read_workspace_file",
+    path,
+    ...(workspacePath ? { workspacePath } : {}),
+  });
   if (!response.success) {
     throw new Error(response.error ?? "Failed to read workspace file");
   }
@@ -1186,9 +1256,7 @@ function applyGitRepoMutation(state: RpcGitRepoState | null) {
     };
   }
 
-  workspaceEntriesLoaded.value = false;
-  workspaceEntries.value = [];
-  workspaceEntriesRequest = null;
+  invalidateWorkspaceEntries();
   void fetchWorkspaceEntries(true).catch(() => {});
 }
 
@@ -1456,6 +1524,7 @@ function handleResponse(payload: RpcResponse) {
         const data = payload.data as RpcSessionState | undefined;
         if (data) {
           const previousSessionPath = getDisplayedSessionPath();
+          const previousWorkspacePath = getWorkspaceEntriesContextKey();
           liveSessionPath.value = data.sessionFile ?? null;
           const isBrowsingDifferentSession = Boolean(
             activeTreeSessionPath.value &&
@@ -1469,6 +1538,8 @@ function handleResponse(payload: RpcResponse) {
                 sessionName:
                   sessionState.value?.sessionName ?? data.sessionName,
                 sessionFile: activeTreeSessionPath.value ?? data.sessionFile,
+                workspacePath:
+                  sessionState.value?.workspacePath ?? data.workspacePath,
               }
             : data;
           updateCurrentModel(data.model);
@@ -1483,6 +1554,9 @@ function handleResponse(payload: RpcResponse) {
           }
           if (previousSessionPath !== getDisplayedSessionPath()) {
             resetGitRepoState();
+          }
+          if (previousWorkspacePath !== getWorkspaceEntriesContextKey()) {
+            invalidateWorkspaceEntries();
           }
         }
         break;
@@ -1531,6 +1605,7 @@ function handleResponse(payload: RpcResponse) {
               sessionId?: string;
               sessionName?: string;
               sessionPath?: string;
+              workspacePath?: string;
             }
           | undefined;
         applySessionSnapshotResponse(data, { refreshState: true });
@@ -1553,6 +1628,7 @@ function handleResponse(payload: RpcResponse) {
               sessionId?: string;
               sessionName?: string;
               sessionPath?: string;
+              workspacePath?: string;
             }
           | undefined;
         if (!applySessionSnapshotResponse(data)) {
@@ -1581,6 +1657,10 @@ function handleResponse(payload: RpcResponse) {
         break;
       }
       case "list_workspace_entries": {
+        if (payload.id && workspaceEntriesRequestId !== payload.id) {
+          break;
+        }
+
         const data = payload.data as
           | { entries?: RpcWorkspaceEntry[] }
           | undefined;
@@ -1588,6 +1668,9 @@ function handleResponse(payload: RpcResponse) {
           ? data.entries
           : [];
         workspaceEntriesLoaded.value = true;
+        workspaceEntriesLoadedContextKey =
+          workspaceEntriesRequestContextKey ?? getWorkspaceEntriesContextKey();
+        workspaceEntriesLoadedAt = Date.now();
         workspaceEntriesLoading.value = false;
         break;
       }
@@ -1633,6 +1716,7 @@ function handleResponse(payload: RpcResponse) {
               sessionId?: string;
               sessionName?: string;
               sessionPath?: string;
+              workspacePath?: string;
             }
           | undefined;
         applySessionSnapshotResponse(data, { refreshState: true });

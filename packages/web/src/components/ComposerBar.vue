@@ -41,7 +41,8 @@ const props = defineProps<{
   commands: readonly RpcSlashCommand[];
   workspaceEntries: readonly RpcWorkspaceEntry[];
   workspaceEntriesLoading: boolean;
-  ensureWorkspaceEntries: () => Promise<RpcWorkspaceEntry[]>;
+  workspaceContextKey: string | null;
+  ensureWorkspaceEntries: (force?: boolean) => Promise<RpcWorkspaceEntry[]>;
   models: readonly RpcModelInfo[];
   selectedModel: RpcModelInfo | null;
   thinkingLevel: RpcThinkingLevel | null;
@@ -93,6 +94,7 @@ const cursorOffset = ref(0);
 const dismissedCommandKey = ref<string | null>(null);
 const dismissedMentionKey = ref<string | null>(null);
 const isComposing = ref(false);
+const mentionInteractionWorkspaceKey = ref<string | null>(null);
 
 const commandContext = computed(() =>
   getSlashCommandContext(inputText.value, cursorOffset.value),
@@ -337,16 +339,28 @@ watch(commandContext, (command, previousCommand) => {
   }
 });
 
-watch(mentionContext, (mention, previousMention) => {
-  const mentionKey = getMentionKey(mention);
-  if (mentionKey && mentionKey !== getMentionKey(previousMention)) {
-    dismissedMentionKey.value = null;
-  }
+watch(
+  [mentionContext, () => props.workspaceContextKey],
+  ([mention, workspaceContextKey], [previousMention]) => {
+    const mentionKey = getMentionKey(mention);
+    if (mentionKey && mentionKey !== getMentionKey(previousMention)) {
+      dismissedMentionKey.value = null;
+    }
 
-  if (mention) {
+    if (!mention) {
+      mentionInteractionWorkspaceKey.value = null;
+      return;
+    }
+
+    const nextInteractionKey = `${workspaceContextKey ?? ""}:${mention.start}`;
+    if (mentionInteractionWorkspaceKey.value === nextInteractionKey) {
+      return;
+    }
+
+    mentionInteractionWorkspaceKey.value = nextInteractionKey;
     void props.ensureWorkspaceEntries();
-  }
-});
+  },
+);
 
 watch(
   () => props.prefillText,

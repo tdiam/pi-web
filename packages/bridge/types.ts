@@ -302,13 +302,13 @@ export interface RpcCommandMap {
     limit?: number;
     cursor?: string;
     query?: string;
-    scope?: "active_workspace" | "workspace" | "workspaces";
+    scope?: "workspace" | "workspaces";
     includeActive?: boolean;
     merge?: "replace" | "append";
   };
   list_tree_entries: { sessionPath?: string };
-  list_workspace_entries: {};
-  read_workspace_file: { path: string };
+  list_workspace_entries: { force?: boolean; workspacePath?: string };
+  read_workspace_file: { path: string; workspacePath?: string };
 
   /** Git */
   list_git_branches: {};
@@ -347,6 +347,7 @@ export interface RpcSessionState {
   sessionFile?: string;
   sessionId: string;
   sessionName?: string;
+  workspacePath?: string;
   gitBranch?: string;
   autoCompactionEnabled: boolean;
   messageCount: number;
@@ -565,6 +566,7 @@ export interface RpcResponseMap {
     sessionId: string;
     sessionName: string;
     sessionPath: string;
+    workspacePath?: string;
     cancelled: boolean;
   };
   register_workspace: {
@@ -599,6 +601,7 @@ export interface RpcResponseMap {
     sessionId: string;
     sessionName: string;
     sessionPath: string;
+    workspacePath?: string;
     cancelled: boolean;
   };
   select_tree_entry: {
@@ -607,6 +610,7 @@ export interface RpcResponseMap {
     sessionId: string;
     sessionName: string;
     sessionPath: string;
+    workspacePath?: string;
     cancelled: boolean;
   };
   navigate_tree: { cancelled: boolean };

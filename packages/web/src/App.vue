@@ -1054,6 +1054,9 @@ onBeforeUnmount(() => {
           :commands="commands"
           :workspace-entries="workspaceEntries"
           :workspace-entries-loading="workspaceEntriesLoading"
+          :workspace-context-key="
+            sessionState?.workspacePath ?? activeSessionPath
+          "
           :ensure-workspace-entries="fetchWorkspaceEntries"
           :available-models="availableModels"
           :current-model="currentModel"

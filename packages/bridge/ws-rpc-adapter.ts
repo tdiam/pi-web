@@ -127,6 +127,7 @@ interface SessionSummary {
   treeEntries: RpcTreeEntry[];
   sessionId: string;
   sessionName: string;
+  workspacePath?: string;
 }
 
 interface WorkspaceSessionEntry {
@@ -443,6 +444,13 @@ function compareSessionsByRecency(
   if (timestampDelta !== 0) return timestampDelta;
 
   return right.path.localeCompare(left.path);
+}
+
+function normalizeOptionalWorkspaceRoot(
+  workspacePath?: string | null,
+): string | undefined {
+  const trimmed = workspacePath?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function workspaceDisplayName(workspacePath: string): string {
@@ -2048,6 +2056,7 @@ function buildStateFromStoredSession(
   const branch = sessionManager.getBranch();
   const context = sessionManager.buildSessionContext();
   const model = findLatestModelInfo(branch);
+  const workspacePath = sessionManager.getCwd() ?? fallbackCwd;
 
   return {
     model: model ?? undefined,
@@ -2061,7 +2070,8 @@ function buildStateFromStoredSession(
     sessionName:
       sessionManager.getSessionName() ??
       sessionDisplayName(sessionManager, sessionManager.getSessionFile()),
-    gitBranch: getCurrentGitBranch(sessionManager.getCwd() ?? fallbackCwd),
+    workspacePath,
+    gitBranch: getCurrentGitBranch(workspacePath),
     autoCompactionEnabled: false,
     messageCount: sessionManager.getEntries()?.length ?? 0,
     pendingMessageCount: 0,
@@ -2647,6 +2657,8 @@ class SessionRuntime {
         this.selectedSessionPath,
       );
       if (activeSession) {
+        const workspacePath =
+          activeSession.sessionManager.getCwd() ?? this.context.ctx.cwd;
         return {
           model:
             activeSession.model ??
@@ -2665,9 +2677,8 @@ class SessionRuntime {
               activeSession.sessionManager,
               activeSession.sessionFile,
             ),
-          gitBranch: getCurrentGitBranch(
-            activeSession.sessionManager.getCwd() ?? this.context.ctx.cwd,
-          ),
+          workspacePath,
+          gitBranch: getCurrentGitBranch(workspacePath),
           autoCompactionEnabled: activeSession.autoCompactionEnabled,
           messageCount: activeSession.sessionManager.getEntries()?.length ?? 0,
           pendingMessageCount: activeSession.pendingMessageCount,
@@ -2703,6 +2714,7 @@ class SessionRuntime {
         },
         sessionFile,
       ),
+      workspacePath: ctx.cwd,
       gitBranch: getCurrentGitBranch(ctx.cwd),
       autoCompactionEnabled: false,
       messageCount: ctx.sessionManager.getEntries()?.length ?? 0,
@@ -2816,6 +2828,7 @@ class SessionRuntime {
       treeEntries: buildTreeEntriesFromSession(sessionManager),
       sessionId: sessionManager.getSessionId(),
       sessionName: sessionDisplayName(sessionManager, sessionPath),
+      workspacePath: sessionManager.getCwd(),
     };
   }
 
@@ -3348,7 +3361,10 @@ export class WsRpcAdapter {
   // Track if adapter is disposed.
   private disposed = false;
 
-  private workspaceEntriesCache: RpcWorkspaceEntry[] | null = null;
+  private workspaceEntriesCache: {
+    cwd: string;
+    entries: RpcWorkspaceEntry[];
+  } | null = null;
 
   constructor(
     client: WsClient,
@@ -3840,6 +3856,7 @@ export class WsRpcAdapter {
         sessionId: sessionManager.getSessionId(),
         sessionName: sessionDisplayName(sessionManager, sessionPath),
         sessionPath,
+        workspacePath: sessionManager.getCwd(),
         cancelled: false,
       },
     };
@@ -4372,7 +4389,9 @@ export class WsRpcAdapter {
        * ================================================================== */
 
       case "new_session": {
-        const workspacePath = command.workspacePath?.trim();
+        const workspacePath = normalizeOptionalWorkspaceRoot(
+          command.workspacePath,
+        );
         if (workspacePath) {
           try {
             if (!fs.statSync(workspacePath).isDirectory()) {
@@ -4413,6 +4432,7 @@ export class WsRpcAdapter {
             sessionId: created.sessionId,
             sessionName: created.sessionName,
             sessionPath: created.sessionPath,
+            workspacePath: created.workspacePath,
             cancelled: false,
           },
         };
@@ -4420,7 +4440,7 @@ export class WsRpcAdapter {
 
       case "register_workspace": {
         const selectedWorkspacePath =
-          command.workspacePath?.trim() ||
+          normalizeOptionalWorkspaceRoot(command.workspacePath) ||
           pickWorkspaceDirectoryFromNativeDialog();
         if (!selectedWorkspacePath) {
           return {
@@ -4507,6 +4527,7 @@ export class WsRpcAdapter {
               sessionId: selected.sessionId,
               sessionName: selected.sessionName,
               sessionPath: selected.sessionPath,
+              workspacePath: selected.workspacePath,
               cancelled: false,
             },
           };
@@ -4826,12 +4847,20 @@ export class WsRpcAdapter {
        * ================================================================== */
 
       case "list_sessions": {
-        const workspacePath =
-          command.workspacePath ??
-          (command.scope === "active_workspace"
-            ? this.sessionRuntime.currentGitCwd()
-            : undefined);
+        const workspacePath = normalizeOptionalWorkspaceRoot(
+          command.workspacePath,
+        );
         const merge = command.merge;
+
+        if (command.scope === "workspace" && !workspacePath) {
+          return {
+            id: correlationId,
+            type: "response" as const,
+            command: "list_sessions" as const,
+            success: false as const,
+            error: "workspacePath is required when scope is workspace",
+          };
+        }
 
         try {
           const sessions: WorkspaceSessionEntry[] = [];
@@ -4846,10 +4875,17 @@ export class WsRpcAdapter {
 
           const appendSession = (session: WorkspaceSessionEntry | null) => {
             if (!session || seenSessionPaths.has(session.path)) return;
+
+            const sessionWorkspacePath = normalizeOptionalWorkspaceRoot(
+              session.workspacePath ?? session.workspaceId,
+            );
+            if (workspacePath && sessionWorkspacePath !== workspacePath) {
+              return;
+            }
+
             seenSessionPaths.add(session.path);
-            const workspaceKey = session.workspacePath ?? session.workspaceId;
-            if (workspaceKey) {
-              seenWorkspacePaths.add(workspaceKey);
+            if (sessionWorkspacePath) {
+              seenWorkspacePaths.add(sessionWorkspacePath);
             }
             sessions.push(session);
           };
@@ -5038,10 +5074,18 @@ export class WsRpcAdapter {
       }
 
       case "list_workspace_entries": {
-        if (!this.workspaceEntriesCache) {
-          this.workspaceEntriesCache = listWorkspaceEntries(
-            this.sessionRuntime.currentGitCwd(),
-          );
+        const cwd =
+          normalizeOptionalWorkspaceRoot(command.workspacePath) ||
+          this.sessionRuntime.currentGitCwd();
+        if (
+          command.force ||
+          !this.workspaceEntriesCache ||
+          this.workspaceEntriesCache.cwd !== cwd
+        ) {
+          this.workspaceEntriesCache = {
+            cwd,
+            entries: listWorkspaceEntries(cwd),
+          };
         }
 
         return {
@@ -5049,13 +5093,14 @@ export class WsRpcAdapter {
           type: "response" as const,
           command: "list_workspace_entries" as const,
           success: true as const,
-          data: { entries: this.workspaceEntriesCache },
+          data: { entries: this.workspaceEntriesCache.entries },
         };
       }
 
       case "read_workspace_file": {
         const result = readWorkspaceFile(
-          this.sessionRuntime.currentGitCwd(),
+          normalizeOptionalWorkspaceRoot(command.workspacePath) ||
+            this.sessionRuntime.currentGitCwd(),
           command.path,
         );
         if ("error" in result) {

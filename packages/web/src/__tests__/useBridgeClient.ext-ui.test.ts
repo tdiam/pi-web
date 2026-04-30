@@ -362,6 +362,393 @@ describe("extension_ui_request handling", () => {
     );
   });
 
+  it("refreshes workspace entries after the cache becomes stale", async () => {
+    const now = { value: 1_000 };
+    const dateNowSpy = vi
+      .spyOn(Date, "now")
+      .mockImplementation(() => now.value);
+
+    try {
+      const client = await importComposable();
+      const ws = getLastMockWs();
+      simulateOpen(ws);
+
+      simulateMessage(ws, {
+        type: "response",
+        payload: {
+          type: "response",
+          command: "get_state",
+          success: true,
+          data: {
+            sessionId: "session-a",
+            sessionFile: "/tmp/session-a.jsonl",
+            sessionName: "Session A",
+            workspacePath: "/tmp/workspace-a",
+            gitBranch: "main",
+            thinkingLevel: "medium",
+            isStreaming: false,
+            isCompacting: false,
+            steeringMode: "all",
+            followUpMode: "all",
+            autoCompactionEnabled: false,
+            messageCount: 0,
+            pendingMessageCount: 0,
+          },
+        },
+      });
+
+      ws.send.mockClear();
+
+      const firstFetch = client.fetchWorkspaceEntries();
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"list_workspace_entries"'),
+      );
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"workspacePath":"/tmp/workspace-a"'),
+      );
+      const firstCommand = getLastSentCommand(ws);
+
+      simulateMessage(ws, {
+        type: "response",
+        payload: {
+          id: firstCommand.payload.id,
+          type: "response",
+          command: "list_workspace_entries",
+          success: true,
+          data: {
+            entries: [{ path: "src/App.vue", kind: "file" }],
+          },
+        },
+      });
+
+      await firstFetch;
+      expect(client.workspaceEntries.value).toEqual([
+        { path: "src/App.vue", kind: "file" },
+      ]);
+
+      ws.send.mockClear();
+      now.value += 11_000;
+
+      const secondFetch = client.fetchWorkspaceEntries();
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"type":"list_workspace_entries"'),
+      );
+      expect(ws.send).toHaveBeenCalledWith(
+        expect.stringContaining('"workspacePath":"/tmp/workspace-a"'),
+      );
+      const secondCommand = getLastSentCommand(ws);
+
+      simulateMessage(ws, {
+        type: "response",
+        payload: {
+          id: secondCommand.payload.id,
+          type: "response",
+          command: "list_workspace_entries",
+          success: true,
+          data: {
+            entries: [
+              { path: "src/App.vue", kind: "file" },
+              { path: "src/NewFile.ts", kind: "file" },
+            ],
+          },
+        },
+      });
+
+      await secondFetch;
+      expect(client.workspaceEntries.value).toEqual([
+        { path: "src/App.vue", kind: "file" },
+        { path: "src/NewFile.ts", kind: "file" },
+      ]);
+    } finally {
+      dateNowSpy.mockRestore();
+    }
+  });
+
+  it("reuses workspace entries across sessions in the same workspace", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-a",
+          sessionFile: "/tmp/session-a.jsonl",
+          sessionName: "Session A",
+          workspacePath: "/tmp/workspace-shared",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    ws.send.mockClear();
+
+    const firstFetch = client.fetchWorkspaceEntries();
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"workspacePath":"/tmp/workspace-shared"'),
+    );
+    const firstCommand = getLastSentCommand(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: firstCommand.payload.id,
+        type: "response",
+        command: "list_workspace_entries",
+        success: true,
+        data: {
+          entries: [{ path: "shared-file.ts", kind: "file" }],
+        },
+      },
+    });
+
+    await firstFetch;
+    expect(client.workspaceEntries.value).toEqual([
+      { path: "shared-file.ts", kind: "file" },
+    ]);
+
+    ws.send.mockClear();
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "switch_session",
+        success: true,
+        data: {
+          transcript: {
+            messages: [],
+            hasOlder: false,
+            hasNewer: false,
+          },
+          sessionId: "session-b",
+          sessionName: "Session B",
+          sessionPath: "/tmp/session-b.jsonl",
+          workspacePath: "/tmp/workspace-shared",
+        },
+      },
+    });
+
+    const getStateCommand = getLastSentCommand(ws);
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"get_state"'),
+    );
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: getStateCommand.payload.id,
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-b",
+          sessionFile: "/tmp/session-b.jsonl",
+          sessionName: "Session B",
+          workspacePath: "/tmp/workspace-shared",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    ws.send.mockClear();
+
+    const secondFetch = await client.fetchWorkspaceEntries();
+    expect(ws.send).not.toHaveBeenCalledWith(
+      expect.stringContaining('"type":"list_workspace_entries"'),
+    );
+    expect(secondFetch).toEqual([{ path: "shared-file.ts", kind: "file" }]);
+    expect(client.workspaceEntries.value).toEqual([
+      { path: "shared-file.ts", kind: "file" },
+    ]);
+  });
+
+  it("ignores stale workspace entry responses after switching sessions", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-a",
+          sessionFile: "/tmp/session-a.jsonl",
+          sessionName: "Session A",
+          workspacePath: "/tmp/workspace-a",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    ws.send.mockClear();
+
+    const firstFetch = client.fetchWorkspaceEntries();
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"workspacePath":"/tmp/workspace-a"'),
+    );
+    const firstCommand = getLastSentCommand(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "switch_session",
+        success: true,
+        data: {
+          transcript: {
+            messages: [],
+            hasOlder: false,
+            hasNewer: false,
+          },
+          sessionId: "session-b",
+          sessionName: "Session B",
+          sessionPath: "/tmp/session-b.jsonl",
+          workspacePath: "/tmp/workspace-b",
+        },
+      },
+    });
+
+    expect(client.workspaceEntries.value).toEqual([]);
+
+    ws.send.mockClear();
+
+    const secondFetch = client.fetchWorkspaceEntries();
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"workspacePath":"/tmp/workspace-b"'),
+    );
+    const secondCommand = getLastSentCommand(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: firstCommand.payload.id,
+        type: "response",
+        command: "list_workspace_entries",
+        success: true,
+        data: {
+          entries: [{ path: "workspace-a.txt", kind: "file" }],
+        },
+      },
+    });
+
+    await firstFetch;
+    expect(client.workspaceEntries.value).toEqual([]);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: secondCommand.payload.id,
+        type: "response",
+        command: "list_workspace_entries",
+        success: true,
+        data: {
+          entries: [{ path: "workspace-b.txt", kind: "file" }],
+        },
+      },
+    });
+
+    await secondFetch;
+    expect(client.workspaceEntries.value).toEqual([
+      { path: "workspace-b.txt", kind: "file" },
+    ]);
+  });
+
+  it("reads workspace files with the explicit workspace path", async () => {
+    const client = await importComposable();
+    const ws = getLastMockWs();
+    simulateOpen(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        type: "response",
+        command: "get_state",
+        success: true,
+        data: {
+          sessionId: "session-a",
+          sessionFile: "/tmp/session-a.jsonl",
+          sessionName: "Session A",
+          workspacePath: "/tmp/workspace-a",
+          gitBranch: "main",
+          thinkingLevel: "medium",
+          isStreaming: false,
+          isCompacting: false,
+          steeringMode: "all",
+          followUpMode: "all",
+          autoCompactionEnabled: false,
+          messageCount: 0,
+          pendingMessageCount: 0,
+        },
+      },
+    });
+
+    ws.send.mockClear();
+
+    const pendingRead = client.readWorkspaceFile("src/App.vue");
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"type":"read_workspace_file"'),
+    );
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.stringContaining('"workspacePath":"/tmp/workspace-a"'),
+    );
+    const command = getLastSentCommand(ws);
+
+    simulateMessage(ws, {
+      type: "response",
+      payload: {
+        id: command.payload.id,
+        type: "response",
+        command: "read_workspace_file",
+        success: true,
+        data: {
+          path: "src/App.vue",
+          absolutePath: "/tmp/workspace-a/src/App.vue",
+          content: "<template />\n",
+          truncated: false,
+          totalBytes: 13,
+          lineCount: 1,
+        },
+      },
+    });
+
+    await expect(pendingRead).resolves.toMatchObject({
+      path: "src/App.vue",
+      absolutePath: "/tmp/workspace-a/src/App.vue",
+    });
+  });
+
   it("updates transcript and tree entries from select_tree_entry responses", async () => {
     const client = await importComposable();
     const ws = getLastMockWs();

@@ -29,6 +29,7 @@ import {
   DEFAULT_BRIDGE_CONFIG,
   type RpcCommand,
   type RpcExtensionUIResponse,
+  type RpcWorkspaceEntry,
   type WsClient,
 } from "../types.js";
 import { WsRpcAdapter, type WsRpcAdapterContext } from "../ws-rpc-adapter.js";
@@ -1982,6 +1983,152 @@ describe("WsRpcAdapter", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    it("filters active sessions out of workspace-scoped session lists", async () => {
+      const workspaceA = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-workspace-a-"),
+      );
+      const workspaceB = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-workspace-b-"),
+      );
+      const liveSessionFile = path.join(workspaceA, "live-session.jsonl");
+      fs.writeFileSync(
+        liveSessionFile,
+        [
+          JSON.stringify({
+            type: "session",
+            id: "live-id",
+            timestamp: "2025-01-02T00:00:00Z",
+            cwd: workspaceA,
+          }),
+          JSON.stringify({
+            type: "message",
+            id: "live-msg-1",
+            parentId: null,
+            timestamp: new Date().toISOString(),
+            message: {
+              role: "user",
+              content: "Live session",
+              timestamp: Date.now(),
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+
+      const workspaceBSessionDir = path.join(
+        process.env.PI_WEB_SESSIONS_ROOT!,
+        `--${workspaceB.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`,
+      );
+      fs.mkdirSync(workspaceBSessionDir, { recursive: true });
+      const workspaceBSessionFile = path.join(
+        workspaceBSessionDir,
+        "workspace-b-session.jsonl",
+      );
+      fs.writeFileSync(
+        workspaceBSessionFile,
+        [
+          JSON.stringify({
+            type: "session",
+            id: "workspace-b-id",
+            timestamp: "2025-01-03T00:00:00Z",
+            cwd: workspaceB,
+          }),
+          JSON.stringify({
+            type: "message",
+            id: "workspace-b-msg-1",
+            parentId: null,
+            timestamp: new Date().toISOString(),
+            message: {
+              role: "user",
+              content: "Workspace B session",
+              timestamp: Date.now(),
+            },
+          }),
+        ].join("\n") + "\n",
+      );
+
+      context.ctx.cwd = workspaceA;
+      (
+        context.ctx.sessionManager.getSessionFile as ReturnType<typeof vi.fn>
+      ).mockReturnValue(liveSessionFile);
+      (
+        context.ctx.sessionManager.getHeader as ReturnType<typeof vi.fn>
+      ).mockReturnValue({
+        id: "live-id",
+        timestamp: "2025-01-02T00:00:00Z",
+        cwd: workspaceA,
+      });
+      (
+        context.ctx.sessionManager.getCwd as ReturnType<typeof vi.fn>
+      ).mockReturnValue(workspaceA);
+
+      const command: RpcCommand = {
+        id: "cmd-workspace-sessions",
+        type: "list_sessions",
+        scope: "workspace",
+        workspacePath: workspaceB,
+        includeActive: true,
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+
+      expect(response.payload.success).toBe(true);
+      expect(response.payload.data.workspacePath).toBe(workspaceB);
+      expect(response.payload.data.sessions).toEqual([
+        expect.objectContaining({
+          id: "workspace-b-id",
+          path: workspaceBSessionFile,
+          workspacePath: workspaceB,
+        }),
+      ]);
+      expect(response.payload.data.sessions).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "live-id",
+            workspacePath: workspaceA,
+          }),
+        ]),
+      );
+
+      fs.rmSync(workspaceA, { recursive: true, force: true });
+      fs.rmSync(workspaceB, { recursive: true, force: true });
+    });
+
+    it("requires workspacePath for workspace-scoped session lists", async () => {
+      const command: RpcCommand = {
+        id: "cmd-workspace-missing-path",
+        type: "list_sessions",
+        scope: "workspace",
+      };
+      (
+        ws as unknown as { trigger: (event: string, data: Buffer) => void }
+      ).trigger(
+        "message",
+        Buffer.from(JSON.stringify({ type: "command", payload: command })),
+      );
+
+      await new Promise(r => setTimeout(r, 10));
+
+      const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = sendCalls[sendCalls.length - 1][0] as string;
+      const response = JSON.parse(lastCall);
+
+      expect(response.payload.command).toBe("list_sessions");
+      expect(response.payload.success).toBe(false);
+      expect(response.payload.error).toBe(
+        "workspacePath is required when scope is workspace",
+      );
+    });
+
     it("omits a pending new session from list_sessions until it is stored", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-pending-"));
       const liveSessionFile = path.join(tmpDir, "live-session.jsonl");
@@ -2389,11 +2536,12 @@ describe("WsRpcAdapter", () => {
         path.join(tmpDir, "src", "components", "ComposerBar.vue"),
         "<template />\n",
       );
-      context.ctx.cwd = tmpDir;
+      context.ctx.cwd = os.tmpdir();
 
       const command: RpcCommand = {
         id: "cmd-workspace",
         type: "list_workspace_entries",
+        workspacePath: tmpDir,
       };
       (
         ws as unknown as { trigger: (event: string, data: Buffer) => void }
@@ -2429,6 +2577,74 @@ describe("WsRpcAdapter", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
+    it("refreshes workspace entry cache when forced or the workspace changes", async () => {
+      const workspaceA = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-workspace-a-"),
+      );
+      const workspaceB = fs.mkdtempSync(
+        path.join(os.tmpdir(), "pi-web-workspace-b-"),
+      );
+      fs.writeFileSync(path.join(workspaceA, "alpha.txt"), "alpha\n");
+      fs.writeFileSync(path.join(workspaceB, "beta.txt"), "beta\n");
+
+      const listEntries = async (
+        id: string,
+        workspacePath: string,
+        options?: { force?: boolean },
+      ): Promise<{ payload: { data: { entries: RpcWorkspaceEntry[] } } }> => {
+        const callCountBefore = (ws.send as ReturnType<typeof vi.fn>).mock.calls
+          .length;
+        const command: RpcCommand = {
+          id,
+          type: "list_workspace_entries",
+          workspacePath,
+          ...(options?.force ? { force: true } : {}),
+        };
+        (
+          ws as unknown as { trigger: (event: string, data: Buffer) => void }
+        ).trigger(
+          "message",
+          Buffer.from(JSON.stringify({ type: "command", payload: command })),
+        );
+
+        await new Promise(r => setTimeout(r, 10));
+
+        const sendCalls = (ws.send as ReturnType<typeof vi.fn>).mock.calls;
+        return JSON.parse(sendCalls[callCountBefore][0] as string) as {
+          payload: { data: { entries: RpcWorkspaceEntry[] } };
+        };
+      };
+
+      context.ctx.cwd = os.tmpdir();
+      const firstResponse = await listEntries("cmd-workspace-a", workspaceA);
+      expect(firstResponse.payload.data.entries).toEqual(
+        expect.arrayContaining([{ path: "alpha.txt", kind: "file" }]),
+      );
+
+      fs.writeFileSync(path.join(workspaceA, "fresh.txt"), "fresh\n");
+      const forcedResponse = await listEntries(
+        "cmd-workspace-force",
+        workspaceA,
+        {
+          force: true,
+        },
+      );
+      expect(forcedResponse.payload.data.entries).toEqual(
+        expect.arrayContaining([{ path: "fresh.txt", kind: "file" }]),
+      );
+
+      const secondResponse = await listEntries("cmd-workspace-b", workspaceB);
+      expect(secondResponse.payload.data.entries).toEqual(
+        expect.arrayContaining([{ path: "beta.txt", kind: "file" }]),
+      );
+      expect(secondResponse.payload.data.entries).not.toEqual(
+        expect.arrayContaining([{ path: "alpha.txt", kind: "file" }]),
+      );
+
+      fs.rmSync(workspaceA, { recursive: true, force: true });
+      fs.rmSync(workspaceB, { recursive: true, force: true });
+    });
+
     it("should handle read_workspace_file command", async () => {
       const tmpDir = fs.mkdtempSync(
         path.join(os.tmpdir(), "pi-web-read-file-test-"),
@@ -2436,12 +2652,13 @@ describe("WsRpcAdapter", () => {
       const filePath = path.join(tmpDir, "src", "App.vue");
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       fs.writeFileSync(filePath, "<template>\n  <main />\n</template>\n");
-      context.ctx.cwd = tmpDir;
+      context.ctx.cwd = os.tmpdir();
 
       const command: RpcCommand = {
         id: "cmd-read-file",
         type: "read_workspace_file",
         path: "src/App.vue",
+        workspacePath: tmpDir,
       };
       (
         ws as unknown as { trigger: (event: string, data: Buffer) => void }
@@ -2479,12 +2696,13 @@ describe("WsRpcAdapter", () => {
       );
       const outsideFile = path.join(outsideDir, "outside.txt");
       fs.writeFileSync(outsideFile, "outside\n");
-      context.ctx.cwd = tmpDir;
+      context.ctx.cwd = os.tmpdir();
 
       const command: RpcCommand = {
         id: "cmd-read-file-outside",
         type: "read_workspace_file",
         path: outsideFile,
+        workspacePath: tmpDir,
       };
       (
         ws as unknown as { trigger: (event: string, data: Buffer) => void }

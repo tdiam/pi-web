@@ -58,7 +58,8 @@ export function parseWebCommandOptions(
     .filter(Boolean);
 
   return {
-    headless: tokens.includes("--headless") || isTruthyEnv(env[HEADLESS_ENV]) || !hasUI,
+    headless:
+      tokens.includes("--headless") || isTruthyEnv(env[HEADLESS_ENV]) || !hasUI,
     readyFile: env[READY_FILE_ENV],
     shutdownFile: env[SHUTDOWN_FILE_ENV],
   };
@@ -69,7 +70,11 @@ async function writeReadyFile(
   payload: Record<string, string>,
 ): Promise<void> {
   await mkdir(dirname(readyFile), { recursive: true });
-  await writeFile(`${readyFile}`, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await writeFile(
+    `${readyFile}`,
+    `${JSON.stringify(payload, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 async function runHeadlessWebBridge(

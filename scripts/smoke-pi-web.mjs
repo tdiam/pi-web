@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -62,7 +68,9 @@ async function waitForExit(exitPromise) {
   const result = await Promise.race([
     exitPromise,
     delay(EXIT_TIMEOUT_MS).then(() => {
-      throw new Error("Timed out waiting for pi to exit after shutdown request");
+      throw new Error(
+        "Timed out waiting for pi to exit after shutdown request",
+      );
     }),
   ]);
 
@@ -106,16 +114,20 @@ async function main() {
   try {
     const piCommand = resolvePiCommand();
 
-    child = spawn(piCommand.command, [...piCommand.args, "--no-session", "-p", "/web --headless"], {
-      env: {
-        ...process.env,
-        PI_WEB_HEADLESS: "1",
-        PI_WEB_READY_FILE: readyFile,
-        PI_WEB_SHUTDOWN_FILE: shutdownFile,
-        PI_BRIDGE_PORT: "0",
+    child = spawn(
+      piCommand.command,
+      [...piCommand.args, "--no-session", "-p", "/web --headless"],
+      {
+        env: {
+          ...process.env,
+          PI_WEB_HEADLESS: "1",
+          PI_WEB_READY_FILE: readyFile,
+          PI_WEB_SHUTDOWN_FILE: shutdownFile,
+          PI_BRIDGE_PORT: "0",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
 
     child.stdout.on("data", chunk => {
       stdout += chunk.toString();
@@ -136,7 +148,9 @@ async function main() {
     const wsUrl = ready.wsUrl;
 
     if (typeof bridgeUrl !== "string" || typeof wsUrl !== "string") {
-      throw new Error(`Ready file is missing bridge URLs: ${JSON.stringify(ready)}`);
+      throw new Error(
+        `Ready file is missing bridge URLs: ${JSON.stringify(ready)}`,
+      );
     }
 
     const response = await fetch(bridgeUrl);
@@ -146,7 +160,9 @@ async function main() {
 
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/html")) {
-      throw new Error(`Expected HTML from ${bridgeUrl}, got ${contentType || "unknown"}`);
+      throw new Error(
+        `Expected HTML from ${bridgeUrl}, got ${contentType || "unknown"}`,
+      );
     }
 
     await verifyWebSocket(wsUrl);
